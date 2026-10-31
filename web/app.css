@@ -267,3 +267,55 @@ main > .btn.accent { width: 100%; }
 .perm-c { display: grid; place-items: center; min-height: 40px; cursor: pointer; }
 .perm-c input { width: 24px; height: 24px; accent-color: var(--oro); padding: 0; }
 .riga2.fisso .btn:not(.big) { flex: 0 0 100%; }
+
+/* editor delle cartine (computer) */
+.pieno.con-editor { background: var(--bg); }
+.ed { position: absolute; inset: 0; display: grid; grid-template-columns: minmax(0, 1fr) 380px; }
+.ed-map { position: relative; overflow: hidden; background: #0b0d09; cursor: crosshair; touch-action: none; }
+.ed-inner { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.ed-img { display: block; user-select: none; pointer-events: none; }
+.ed-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.ed-sim { font-family: 'DejaVu Sans', system-ui, sans-serif; paint-order: stroke; stroke: rgba(0,0,0,.6); stroke-width: .12em; }
+.ed-lab { font-family: var(--txt); font-weight: 700; fill: var(--ink); paint-order: stroke; stroke: rgba(0,0,0,.85); stroke-width: .3em; }
+.ed-vuoto { position: absolute; inset: 24px; display: grid; place-content: center; justify-items: center; gap: 10px; border: 2px dashed var(--linea); border-radius: 18px; color: var(--muto); text-align: center; cursor: default; }
+.ed-vuoto b { font-size: 26px; color: var(--ink); }
+.ed-vuoto-ic { font-size: 54px; color: var(--oro); }
+.ed-aiuto { position: absolute; left: 12px; bottom: 12px; right: 140px; background: rgba(10,12,8,.88); border-radius: 10px; padding: 6px 12px; font-weight: 600; font-size: 15px; pointer-events: none; font-family: var(--txt); }
+.ed-aiuto:empty { display: none; }
+.ed-zoom { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 6px; }
+.ed-zoom .btn { background: rgba(10,12,8,.9); }
+.ed-side { display: flex; flex-direction: column; min-height: 0; background: var(--pan); border-left: 1px solid var(--linea); }
+.ed-head { display: flex; gap: 8px; padding: 12px; border-bottom: 1px solid var(--linea); }
+.ed-head input { font-family: var(--tit); font-size: 20px; }
+.ed-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 8px 12px; }
+.ed-tabs .btn { min-height: 38px; padding: 0 4px; font-size: 15px; }
+.ed-tabs .btn:disabled { opacity: .35; }
+.ed-body { flex: 1; overflow: auto; padding: 4px 14px 14px; display: grid; gap: 10px; align-content: start; }
+.ed-txt { margin: 0; font-size: 16px; }
+.ed-txt.muto, small.muto { color: var(--muto); }
+.ed-txt.ko, small.ko, .ed-stato .ko { color: var(--ko); }
+.ed-txt.ok, .ed-stato .ok { color: var(--ok); }
+.ed-cp { display: grid; grid-template-columns: 26px minmax(0, 1fr) 56px 40px; gap: 6px; align-items: center; padding: 4px; border-radius: 10px; }
+.ed-cp.on { background: var(--pan2); outline: 2px solid #2f9bff; }
+.ed-cp b { color: var(--giallo); text-align: center; }
+.ed-cp input, .ed-riga input { font-family: var(--mono); font-size: 15px; padding: 8px; }
+input.errato { border-color: var(--ko); }
+.ed-riga { display: flex; gap: 8px; align-items: center; }
+.ed-riga > span { flex: 1; }
+.ed-riga > .btn:not(.icon) { flex: 1; }
+.ed-form { display: grid; gap: 8px; background: var(--pan2); border-radius: 12px; padding: 12px; outline: 2px solid #2f9bff; }
+.ed-lista { display: grid; gap: 4px; }
+.ed-lista h4 { color: var(--oro); margin: 8px 0 2px; }
+.btn.ed-voce { justify-content: flex-start; min-height: 36px; font-size: 16px; background: none; border-color: transparent; }
+.btn.ed-voce.on { border-color: #2f9bff; }
+.ed-stato { padding: 10px 14px; border-top: 1px solid var(--linea); font-size: 15px; display: grid; gap: 2px; }
+.ed-foot { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--linea); }
+.ed-foot .btn.accent { flex: 1; }
+@media (max-width: 800px) { .ed { grid-template-columns: 1fr; grid-template-rows: 55% 45%; } .ed-side { border-left: 0; border-top: 1px solid var(--linea); } }
+.hint.centro { text-align: center; padding: 40px 16px; }
+.hint.avviso { color: var(--giallo); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chips-tit { width: 100%; color: var(--muto); font-weight: 600; font-size: 15px; }
+.btn.chip { min-height: 34px; padding: 0 10px; font-size: 15px; font-weight: 600; }
+.btn.chip.on.s-blu { background: var(--blu); border-color: var(--blu); color: #fff; }
+.btn.chip.on.s-rossa { background: var(--rossa); border-color: var(--rossa); color: #fff; }

@@ -3,8 +3,8 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.5';
-  var S = window.S40, F = window.S40F, CAMPI = window.S40_CAMPI;
+  var VERSIONE = '0.6';
+  var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
   var $ = function (id) { return document.getElementById(id); };
@@ -29,7 +29,16 @@
   function waLink(t) { var n = String(t || '').replace(/[^\d]/g, ''); if (n.length === 10) n = '39' + n; return 'https://wa.me/' + n; }
   function mapsLink(c) { return c.mapsUrl || ('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(c.luogo || '')); }
   function link(testo, href, cls) { var a = el('a', cls || 'btn', testo); a.href = href; if (/^http/.test(href)) { a.target = '_blank'; a.rel = 'noopener'; } return a; }
-  function campo(c) { return CAMPI[(c && c.campo) || 'tauri'] || CAMPI.tauri; }
+  function campoMeta(id) { return D.campi.filter(function (x) { return x.id === id; })[0] || null; }
+  // carica la cartina completa (con l'immagine) e poi chiama fn; se nel frattempo si cambia schermata non fa nulla
+  function conCampo(id, box, fn) {
+    var cc = id && S.campoInCache(id);
+    if (cc) { fn(cc); return; }
+    var w = el('p', 'hint centro', id ? 'Caricamento della cartina…' : 'Per questo conflict non è stata scelta una cartina.');
+    box.appendChild(w); if (!id) return;
+    var vivo = true, prima = chiusura; chiusura = function () { vivo = false; if (prima) prima(); };
+    S.caricaCampo(id).then(function (cm) { if (!vivo) return; w.remove(); fn(cm); }, function (e) { if (vivo) w.textContent = 'Cartina non disponibile: ' + (e.message || e); });
+  }
   function nomeFaz(c, id) { var f = (c.fazioni || []).filter(function (x) { return x.id === id; })[0]; return f ? f.nome : id; }
   function mieFaz(c) { var me = S.stato().me; return me && me.team && c.fazioneDi ? c.fazioneDi[me.team] || null : null; }
   function motore(c) {
@@ -50,7 +59,7 @@
   function visibile(da, perm) { return P(perm) || da == null || Date.now() >= da; }
 
   // ---------- dati condivisi
-  var D = { team: [], conflitti: [], adesioni: {}, contatti: {} };
+  var D = { team: [], conflitti: [], adesioni: {}, contatti: {}, campi: [] };
   var stopAdesioni = {};
   function teamDi(tid) { return D.team.filter(function (t) { return t.id === tid; })[0]; }
   function miaAdesione(cid) { var u = S.stato().user; return (D.adesioni[cid] || []).filter(function (a) { return a.id === u.uid; })[0]; }
@@ -77,7 +86,7 @@
     app.innerHTML = ''; window.scrollTo(0, 0);
     $('pieno').hidden = true; $('pieno').innerHTML = '';
     document.body.classList.remove('a-pieno');
-    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, giocatori: pagGiocatori, permessi: pagPermessi, conflittoModifica: pagConflittoModifica, prova: pagProva }[c.v];
+    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva }[c.v];
     (r || home)(c.p);
   }
   function aPieno() { document.body.classList.add('a-pieno'); var p = $('pieno'); p.hidden = false; p.innerHTML = ''; return p; }
@@ -316,7 +325,9 @@
     box.appendChild(el('h3', 'sez', 'Cartina del campo'));
     if (tutto || visibile(c.mappaDa, 'cartinaPrima')) {
       var mp = el('button', 'mini-mappa'); mp.type = 'button';
-      var im = new Image(); im.src = campo(c).img; im.alt = ''; mp.appendChild(im);
+      var im = new Image(); im.alt = ''; mp.appendChild(im);
+      if (S.campoInCache(c.campo)) im.src = S.campoInCache(c.campo).img;
+      else if (c.campo) S.caricaCampo(c.campo).then(function (cm) { im.src = cm.img; }, function () {});
       mp.appendChild(el('span', null, 'Apri la cartina'));
       if (c.mappaDa && Date.now() < c.mappaDa) mp.appendChild(el('small', 'prog', 'I giocatori la vedono dal ' + dataBreve(c.mappaDa)));
       mp.onclick = function () { cartinaPiena(c); };
@@ -362,11 +373,13 @@
   function cartinaPiena(c) {
     var p = aPieno();
     var bar = el('div', 'pieno-bar'); bar.appendChild(bottone('‹', 'icon indietro', function () { mostra(); }));
-    bar.appendChild(el('b', null, campo(c).nome || 'Cartina'));
+    var tt = el('b', null, (campoMeta(c.campo) || {}).nome || 'Cartina'); bar.appendChild(tt);
     p.appendChild(bar);
     var box = el('div', 'pieno-mappa'); p.appendChild(box);
-    var v = F.vista(box, { g: motore(c), campo: campo(c), team: mieFaz(c), colori: COLORI, nomi: nomiFaz(c), ora: Date.now, anteprima: true });
-    var prima = chiusura; chiusura = function () { v.chiudi(); if (prima) prima(); };
+    conCampo(c.campo, box, function (cm) {
+      var v = F.vista(box, { g: motore(c), campo: cm, team: mieFaz(c), colori: COLORI, nomi: nomiFaz(c), ora: Date.now, anteprima: true });
+      var prima = chiusura; chiusura = function () { v.chiudi(); if (prima) prima(); };
+    });
   }
   function nomiFaz(c) { var n = {}; (c.fazioni || []).forEach(function (f) { n[f.id] = f.nome; }); return n; }
 
@@ -389,13 +402,14 @@
     var aperta = false;
     tir.onclick = function () {
       aperta = !aperta; tendina.hidden = !aperta; box.hidden = aperta; tir.textContent = aperta ? '▴ Torna alla cartina' : '▾ Info, fazioni, bacheca, parcheggio';
-      if (!aperta) setTimeout(function () { v.centra(); }, 30);
+      if (!aperta) setTimeout(function () { if (v) v.centra(); }, 30);
       if (aperta && !tendina.firstChild) { var cont = el('div', 'conf'); tendina.appendChild(cont); var a = app; app = cont; try { sezioniConflitto(cont, c, true); } finally { app = a; } }
     };
-    var v = F.vista(box, { g: motore(c), campo: campo(c), team: f, colori: COLORI, nomi: nomiFaz(c), ora: Date.now, anteprima: true });
+    var v = null;
     function tic() { var r = c.inizio - Date.now(); num.textContent = F.hms(r); if (r <= 0) mostra(); }
     tic(); var t = setInterval(tic, 1000);
-    var prima = chiusura; chiusura = function () { clearInterval(t); v.chiudi(); if (prima) prima(); };
+    var prima = chiusura; chiusura = function () { clearInterval(t); if (v) v.chiudi(); if (prima) prima(); };
+    conCampo(c.campo, box, function (cm) { v = F.vista(box, { g: motore(c), campo: cm, team: f, colori: COLORI, nomi: nomiFaz(c), ora: Date.now, anteprima: true }); });
   }
 
   // partita in corso: mappa a tutto schermo, tempi in alto, punti chiave in basso
@@ -404,8 +418,9 @@
     var box = el('div', 'pieno-mappa tutta'); p.appendChild(box);
     var tendina = el('div', 'tendina sopra'); tendina.hidden = true; p.appendChild(tendina);
     var comandante = !!f && ((c.comandanti && c.comandanti[f] === st.user.uid) || P('ordini'));
+    conCampo(c.campo, box, function (cm) {
     var v = F.vista(box, {
-      g: motore(c), campo: campo(c), team: f, colori: COLORI, nomi: nomiFaz(c), ora: Date.now,
+      g: motore(c), campo: cm, team: f, colori: COLORI, nomi: nomiFaz(c), ora: Date.now,
       gps: !!f, comandante: comandante, presenze: P('presenze'),
       onZona: function (pt) { S.scriviEvento(c.id, { tipo: 'zona', uid: st.user.uid, team: f, pt: pt || null, t: Date.now() }); },
       onOrdine: function (pt, azione, testo) { S.scriviEvento(c.id, { tipo: 'ordine', uid: st.user.uid, team: f, pt: pt, azione: azione, testo: testo, t: Date.now() }); },
@@ -423,6 +438,7 @@
     });
     var stopE = S.ascoltaEventi(c.id, function (ev) { v.aggiorna(ev); });
     var prima = chiusura; chiusura = function () { stopE(); v.chiudi(); if (prima) prima(); };
+    });
   }
 
   // ================= POST DELLA BACHECA (organizzatore)
@@ -715,6 +731,18 @@
         app.appendChild(r);
       });
     }
+    if (P('mappe')) {
+      app.appendChild(el('h3', 'sez', 'Cartine'));
+      app.appendChild(bottone('+ Nuova cartina', 'accent', function () { vai('mappa', null); }));
+      if (window.innerWidth < 900) app.appendChild(el('p', 'hint', 'L\'editor delle cartine è pensato per il computer.'));
+      D.campi.slice().sort(function (a, b) { return a.nome.localeCompare(b.nome); }).forEach(function (cm) {
+        var r = el('button', 'riga-lista'); r.type = 'button';
+        var n = (cm.punti || []).length;
+        r.appendChild(el('b', null, cm.nome)); r.appendChild(el('small', null, n + ' aree · ' + (cm.link || []).length + ' collegamenti · ' + (cm.geo ? 'georeferenziata' : 'senza coordinate')));
+        r.onclick = function () { vai('mappa', cm.id); };
+        app.appendChild(r);
+      });
+    }
     if (P('giocatori')) {
       app.appendChild(el('h3', 'sez', 'Giocatori'));
       app.appendChild(bottone(S.stato().dev ? 'Tutti i giocatori e i loro ruoli' : 'Tutti i giocatori iscritti', '', function () { vai('giocatori'); }));
@@ -774,9 +802,8 @@
   function pagConflittoModifica(cid) {
     var vecchio = D.conflitti.filter(function (x) { return x.id === cid; })[0];
     testata(vecchio ? 'Modifica conflict' : 'Nuovo conflict');
-    var cm = CAMPI.tauri, sc = cm.scenario || {};
     var c = vecchio ? JSON.parse(JSON.stringify(vecchio)) : {
-      id: S.nuovoId(), titolo: '', luogo: '', mapsUrl: '', campo: 'tauri',
+      id: S.nuovoId(), titolo: '', luogo: '', mapsUrl: '', campo: D.campi.length === 1 ? D.campi[0].id : '',
       inizio: mezzanotte(Date.now() + 7 * GIORNO) + 9.5 * 3600000, fine: mezzanotte(Date.now() + 7 * GIORNO) + 13 * 3600000, ritrovo: mezzanotte(Date.now() + 7 * GIORNO) + 8.5 * 3600000,
       fazioni: [{ id: 'blu', nome: 'Blu', team: [] }, { id: 'rossa', nome: 'Rossa', team: [] }], comandanti: { blu: 'ia', rossa: 'ia' },
       mappaDa: null, parcheggio: { testo: '', mapsUrl: '', da: null }
@@ -791,6 +818,43 @@
     var hR = oraInput(c.ritrovo), hI = oraInput(c.inizio), hF = oraInput(c.fine);
     tre.appendChild(campoForm('Ritrovo', hR)); tre.appendChild(campoForm('Inizio', hI)); tre.appendChild(campoForm('Fine', hF));
     form.appendChild(tre);
+    // campo: cartina, basi di partenza, punti già tenuti all'inizio
+    form.appendChild(el('h3', 'sez', 'Campo'));
+    var cSel = select([['', '— scegli la cartina —']].concat(D.campi.map(function (x) { return [x.id, x.nome]; })), campoMeta(c.campo) ? c.campo : '');
+    form.appendChild(campoForm('Cartina', cSel));
+    var mobBox = el('div', 'modulo'); form.appendChild(mobBox);
+    var base = { blu: c.fazioni[0].mob, rossa: c.fazioni[1].mob }, partenza = { blu: (c.fazioni[0].partenza || []).slice(), rossa: (c.fazioni[1].partenza || []).slice() };
+    function disegnaBasi() {
+      mobBox.innerHTML = '';
+      var cm = campoMeta(cSel.value);
+      if (!cm) { mobBox.appendChild(el('p', 'hint', D.campi.length ? 'Scegli la cartina del campo.' : 'Nessuna cartina: creala da Organizza → Cartine (da computer).')); return; }
+      if (!cm.geo) mobBox.appendChild(el('p', 'hint avviso', 'Questa cartina non è georeferenziata: il GPS non potrà riconoscere le aree.'));
+      var mobs = (cm.punti || []).filter(function (p) { return p.tipo === 'mob'; }), altri = (cm.punti || []).filter(function (p) { return p.tipo !== 'mob'; });
+      if (mobs.length < 2) { mobBox.appendChild(el('p', 'hint avviso', 'La cartina ha ' + mobs.length + ' basi di partenza: ne servono 2.')); return; }
+      if (!mobs.some(function (p) { return p.id === base.blu; })) base.blu = mobs[0].id;
+      if (!mobs.some(function (p) { return p.id === base.rossa; }) || base.rossa === base.blu) base.rossa = (mobs.filter(function (p) { return p.id !== base.blu; })[0] || mobs[1]).id;
+      var due = el('div', 'due');
+      [['blu', 'Base blu'], ['rossa', 'Base rossa']].forEach(function (x) {
+        var s2 = select(mobs.map(function (p) { return [p.id, p.nome]; }), base[x[0]]);
+        s2.onchange = function () { base[x[0]] = s2.value; };
+        due.appendChild(campoForm(x[1], s2));
+      });
+      mobBox.appendChild(due);
+      [['blu', 'La fazione blu parte già con'], ['rossa', 'La fazione rossa parte già con']].forEach(function (x) {
+        var w = el('div', 'chips'); w.appendChild(el('span', 'chips-tit', x[1]));
+        altri.forEach(function (p) {
+          var on = partenza[x[0]].indexOf(p.id) >= 0, b = bottone((p.tipo === 'chiave' ? '★ ' : '') + p.nome, 'chip' + (on ? ' on s-' + x[0] : ''));
+          b.onclick = function () {
+            var i = partenza[x[0]].indexOf(p.id); if (i >= 0) partenza[x[0]].splice(i, 1); else { partenza[x[0]].push(p.id); var alt = x[0] === 'blu' ? 'rossa' : 'blu', j = partenza[alt].indexOf(p.id); if (j >= 0) partenza[alt].splice(j, 1); }
+            disegnaBasi();
+          };
+          w.appendChild(b);
+        });
+        mobBox.appendChild(w);
+      });
+    }
+    cSel.onchange = function () { partenza = { blu: [], rossa: [] }; disegnaBasi(); };
+    disegnaBasi();
     // fazioni e team
     form.appendChild(el('h3', 'sez', 'Fazioni'));
     var nomi = el('div', 'due');
@@ -852,13 +916,15 @@
       var ini = ms(hI.value), fin = ms(hF.value); if (fin <= ini) fin += GIORNO;
       var team = [], fazioneDi = {};
       Object.keys(scelta).forEach(function (t) { if (scelta[t]) { team.push(t); fazioneDi[t] = scelta[t]; } });
-      var mob = sc.mob || [], part = sc.partenza || {};
+      var cmS = campoMeta(cSel.value);
+      if (!cmS) { toast('Scegli la cartina del campo'); return; }
+      if ((cmS.punti || []).filter(function (p) { return p.tipo === 'mob'; }).length < 2 || base.blu === base.rossa) { toast('Servono due basi di partenza diverse'); return; }
       var out = {
-        id: c.id, titolo: tit.value.trim(), luogo: lg.value.trim(), mapsUrl: mu.value.trim(), campo: 'tauri',
+        id: c.id, titolo: tit.value.trim(), luogo: lg.value.trim(), mapsUrl: mu.value.trim(), campo: cSel.value,
         ritrovo: ms(hR.value), inizio: ini, fine: fin,
         fazioni: [
-          { id: 'blu', nome: nB.value.trim() || 'Blu', team: team.filter(function (t) { return fazioneDi[t] === 'blu'; }), mob: mob[0], partenza: part[mob[0]] || [] },
-          { id: 'rossa', nome: nR.value.trim() || 'Rossa', team: team.filter(function (t) { return fazioneDi[t] === 'rossa'; }), mob: mob[1], partenza: part[mob[1]] || [] }
+          { id: 'blu', nome: nB.value.trim() || 'Blu', team: team.filter(function (t) { return fazioneDi[t] === 'blu'; }), mob: base.blu, partenza: partenza.blu },
+          { id: 'rossa', nome: nR.value.trim() || 'Rossa', team: team.filter(function (t) { return fazioneDi[t] === 'rossa'; }), mob: base.rossa, partenza: partenza.rossa }
         ],
         team: team, fazioneDi: fazioneDi, comandanti: { blu: cmB.value || 'ia', rossa: cmR.value || 'ia' },
         mappaDa: mSel.value === '' ? null : mezzanotte(ini) - Number(mSel.value) * GIORNO,
@@ -874,21 +940,52 @@
   }
 
   // ================= PROVA (partita simulata)
-  function pagProva() {
+  function pagProva(id) {
+    var buone = D.campi.filter(function (cm) { return cm.geo && (cm.punti || []).filter(function (p) { return p.tipo === 'mob'; }).length >= 2; });
+    if (!id && buone.length !== 1) {
+      testata('Prova la mappa di gioco');
+      if (!buone.length) { app.appendChild(el('p', 'hint', 'Serve una cartina georeferenziata con due basi di partenza. Si crea da Organizza → Cartine.')); return; }
+      app.appendChild(el('p', 'hint', 'Su quale campo vuoi provare?'));
+      buone.forEach(function (cm) { var r = el('button', 'riga-lista'); r.type = 'button'; r.appendChild(el('b', null, cm.nome)); r.onclick = function () { sostituisci('prova', cm.id); }; app.appendChild(r); });
+      return;
+    }
+    id = id || buone[0].id;
     var p = aPieno();
     var box = el('div', 'pieno-mappa tutta'); p.appendChild(box);
-    var vel = el('div', 'prova-vel'); vel.appendChild(el('b', null, 'PROVA'));
-    var pr = F.prova(box, function () { indietro(); }, { presenze: P('presenze'), comandante: P('ordini') });
-    [1, 10, 30].forEach(function (x) {
-      var b = bottone('×' + x, 'piccolo' + (x === 10 ? ' on' : '')); b.onclick = function () { pr.velocita(x); Array.prototype.forEach.call(vel.querySelectorAll('.btn'), function (y) { y.classList.remove('on'); }); b.classList.add('on'); };
-      vel.appendChild(b);
+    conCampo(id, box, function (cm) {
+      var vel = el('div', 'prova-vel'); vel.appendChild(el('b', null, 'PROVA'));
+      var pr = F.prova(box, function () { indietro(); }, { presenze: P('presenze'), comandante: P('ordini') }, cm);
+      [1, 10, 30].forEach(function (x) {
+        var b = bottone('×' + x, 'piccolo' + (x === 10 ? ' on' : '')); b.onclick = function () { pr.velocita(x); Array.prototype.forEach.call(vel.querySelectorAll('.btn'), function (y) { y.classList.remove('on'); }); b.classList.add('on'); };
+        vel.appendChild(b);
+      });
+      p.appendChild(vel);
+      var prima = chiusura; chiusura = function () { pr.chiudi(); if (prima) prima(); };
     });
-    p.appendChild(vel);
-    chiusura = function () { pr.chiudi(); };
   }
 
+  // ================= EDITOR DELLE CARTINE (da computer)
+  function pagMappa(id) {
+    var p = aPieno(); p.classList.add('con-editor');
+    var ed = null;
+    function apri(cm) {
+      ed = window.AC_MAPPE.apri(p, {
+        campo: cm,
+        onSalva: function (out, img) {
+          if (!out.id) out.id = S.nuovoCampoId();
+          return S.salvaCampo(out, img).then(function (sv) { toast('Cartina salvata'); return sv; });
+        },
+        onElimina: function (c2) { return S.eliminaCampo(c2.id, c2.parti).then(function () { toast('Cartina eliminata'); }); },
+        onChiudi: function () { indietro(); }
+      });
+    }
+    var prima = chiusura; chiusura = function () { p.classList.remove('con-editor'); if (ed) ed.chiudi(); if (prima) prima(); };
+    if (id) conCampo(id, p, apri); else apri(null);
+  }
+
+
   // ================= AVVIO
-  var avviato = false, aperturaFatta = false, stopContatti = null, stopTeam = null, stopConf = null, uidPrima = null;
+  var avviato = false, aperturaFatta = false, stopCampi = null, stopContatti = null, stopTeam = null, stopConf = null, uidPrima = null;
   function ascoltaAdesioniDi(lista) {
     var ids = lista.map(function (c) { return c.id; });
     Object.keys(stopAdesioni).forEach(function (id) { if (ids.indexOf(id) < 0) { stopAdesioni[id](); delete stopAdesioni[id]; delete D.adesioni[id]; } });
@@ -937,6 +1034,8 @@
       Object.keys(stopAdesioni).forEach(function (id) { stopAdesioni[id](); }); stopAdesioni = {}; D.adesioni = {};
       if (stopContatti) stopContatti();
       stopContatti = S.ascoltaContatti(function (m) { D.contatti = m; ridisegna(); });
+      if (stopCampi) stopCampi();
+      stopCampi = S.ascoltaCampi(function (cm) { D.campi = cm; if (corrente().v === 'organizza') ridisegna(); });
       stopTeam = S.ascoltaTeam(function (t) { D.team = t; ridisegna(); });
       stopConf = S.ascoltaConflitti(function (c) { D.conflitti = c; ascoltaAdesioniDi(attivi()); ridisegna(); });
     }

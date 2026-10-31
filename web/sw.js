@@ -1,7 +1,7 @@
 /* Service worker: l'app funziona anche senza connessione. */
-var CACHE = 'airsoft-conflict-v5';
+var CACHE = 'airsoft-conflict-v6';
 var FILES = [
-  './', 'index.html', 'app.css', 'app.js', 'db.js', 'campi.js', 'fazioni.js', 'campi/tauri.jpg', 'config.js', 'manifest.webmanifest',
+  './', 'index.html', 'app.css', 'app.js', 'db.js', 'utm.js', 'mappe.js', 'fazioni.js', 'config.js', 'manifest.webmanifest',
   'img/logo.png', 'img/icon-192.png', 'img/icon-512.png', 'img/icon-maskable-512.png', 'img/apple-touch-icon.png'
 ];
 

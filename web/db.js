@@ -23,6 +23,7 @@
   var PERMESSI = [
     ['Organizzazione', [
       ['conflitti', 'Creare e modificare conflict e bacheca (vede tutti i conflict)'],
+      ['mappe', 'Caricare e disegnare le cartine dei campi'],
       ['team', 'Creare, modificare ed eliminare team e codici'],
       ['giocatori', 'Modificare, spostare ed eliminare giocatori'],
       ['risposte', 'Vedere chi ha risposto agli inviti']]],
@@ -38,7 +39,7 @@
       ['prova', 'Usare la mappa di prova']]]
   ];
   var DEFAULT = {
-    organizzatore: { conflitti: true, team: true, giocatori: true, risposte: true, bachecaPrima: true, cartinaPrima: true, parcheggioPrima: true, telefoni: true, rosa: true, ordini: true, presenze: true, prova: true },
+    organizzatore: { conflitti: true, mappe: true, team: true, giocatori: true, risposte: true, bachecaPrima: true, cartinaPrima: true, parcheggioPrima: true, telefoni: true, rosa: true, ordini: true, presenze: true, prova: true },
     comandante: { risposte: true, cartinaPrima: true, parcheggioPrima: true, telefoni: true, rosa: true, ordini: true, presenze: true, prova: true },
     caposquadra: { parcheggioPrima: true, telefoni: true, rosa: true, presenze: true, prova: true },
     truppa: { telefoni: true, rosa: true, prova: true }
@@ -224,6 +225,46 @@
     return db.collection('conflitti/' + cid + '/adesioni').doc(stato.user.uid)
       .set({ team: me.team, nome: me.callsign || me.nome || '', si: !!si, t: Date.now() });
   };
+  // ---------- cartine dei campi: campi/{id} con punti e collegamenti, immagine a pezzi in campi/{id}/img/{n}
+  var PEZZO = 900000;
+  var cacheCampi = {};
+  api.ascoltaCampi = function (cb) { return db.collection('campi').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); }); };
+  api.campoInCache = function (id) { return cacheCampi[id] || null; };
+  // campo completo, con l'immagine ricomposta
+  api.caricaCampo = function (id) {
+    return db.collection('campi').doc(id).get().then(function (s) {
+      if (!s.exists) throw new Error('Cartina non trovata');
+      var c = Object.assign({ id: id }, s.data()), vecchio = cacheCampi[id];
+      if (vecchio && vecchio.imgVer === c.imgVer && vecchio.img) { c.img = vecchio.img; cacheCampi[id] = c; return c; }
+      var n = c.parti || 0, prom = [];
+      for (var i = 0; i < n; i++) prom.push(db.collection('campi/' + id + '/img').doc(String(i)).get());
+      return Promise.all(prom).then(function (pz) {
+        c.img = pz.map(function (p) { return p.exists ? p.data().d : ''; }).join('');
+        cacheCampi[id] = c; return c;
+      });
+    });
+  };
+  api.nuovoCampoId = function () { return db.collection('campi').doc().id; };
+  // img: dataURL nuovo (o null se l'immagine non è cambiata)
+  api.salvaCampo = function (campo, img) {
+    var id = campo.id, dati = JSON.parse(JSON.stringify(campo)); delete dati.id; delete dati.img;
+    var scritture = [];
+    if (img) {
+      var pezzi = []; for (var i = 0; i < img.length; i += PEZZO) pezzi.push(img.slice(i, i + PEZZO));
+      var vecchi = dati.parti || 0;
+      dati.parti = pezzi.length; dati.imgVer = Date.now();
+      pezzi.forEach(function (p, k) { scritture.push(db.collection('campi/' + id + '/img').doc(String(k)).set({ d: p })); });
+      for (var j = pezzi.length; j < vecchi; j++) scritture.push(db.collection('campi/' + id + '/img').doc(String(j)).delete());
+    }
+    return Promise.all(scritture).then(function () { return db.collection('campi').doc(id).set(dati); }).then(function () {
+      var c = Object.assign({ id: id }, dati); c.img = img || (cacheCampi[id] && cacheCampi[id].img) || ''; cacheCampi[id] = c; return c;
+    });
+  };
+  api.eliminaCampo = function (id, parti) {
+    var p = []; for (var i = 0; i < (parti || 0); i++) p.push(db.collection('campi/' + id + '/img').doc(String(i)).delete());
+    return Promise.all(p).then(function () { delete cacheCampi[id]; return db.collection('campi').doc(id).delete(); });
+  };
+
   // eventi di gioco (posizione nei punti, ordini del comandante)
   api.ascoltaEventi = function (cid, cb) {
     return db.collection('conflitti/' + cid + '/eventi').onSnapshot(function (qs) { cb(qs.docs.map(function (d) { return d.data(); })); }, function () { cb([]); });

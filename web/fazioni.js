@@ -15,6 +15,9 @@
   function vicini(campo, id) {
     var v = []; campo.link.forEach(function (l) { if (l[0] === id) v.push(l[1]); else if (l[1] === id) v.push(l[0]); }); return v;
   }
+  // posizione di un punto sull'immagine: pixel salvati dall'editor, oppure calcolati dalle coordinate
+  function pxP(campo, p) { return p.x != null ? { x: p.x, y: p.y } : px(campo, p.lat, p.lon); }
+  function mpp(campo) { return campo.mPerPx || 1; }
   function px(campo, lat, lon) { var c = campo.geo; return { x: c.cx[0] * lon + c.cx[1] * lat + c.cx[2], y: c.cy[0] * lon + c.cy[1] * lat + c.cy[2] }; }
   function latlon(campo, x, y) {
     var c = campo.geo, a = c.cx[0], b = c.cx[1], d = c.cy[0], e = c.cy[1], X = x - c.cx[2], Y = y - c.cy[2], det = a * e - b * d;
@@ -27,8 +30,11 @@
   }
   // in quale cerchio si trova una posizione (il più vicino)
   function zonaDi(g, campo, pos) {
-    var r = regole(g).raggio, best = null, bd = 1e9;
-    campo.punti.forEach(function (p) { if (p.tipo === 'mob') return; var d = metri(pos, p); if (d <= r && d < bd) { bd = d; best = p.id; } });
+    var r0 = regole(g).raggio, best = null, bd = 1e9;
+    campo.punti.forEach(function (p) {
+      if (p.tipo === 'mob' || p.lat == null) return;
+      var r = p.raggio || r0, d = metri(pos, p); if (d <= r && d < bd) { bd = d; best = p.id; }
+    });
     return best;
   }
 
@@ -79,7 +85,7 @@
       });
       squadre.forEach(function (s) {
         var n = chiavi.filter(function (c) { return owner[c] === s; }).length;
-        if (n >= R.chiavi) {
+        if (chiavi.length && n >= Math.min(R.chiavi, chiavi.length)) {
           if (vitDa[s] == null) { vitDa[s] = t; trans.push({ t: t, tipo: 'contovittoria', team: s }); }
           if (t - vitDa[s] >= R.tVittoria * 1000) { vincitore = s; trans.push({ t: t, tipo: 'vittoria', team: s }); }
         } else if (vitDa[s] != null) { vitDa[s] = null; trans.push({ t: t, tipo: 'stopvittoria', team: s }); }
@@ -166,7 +172,7 @@
     if (!ante) { box.appendChild(top); box.appendChild(ordine); box.appendChild(pop); box.appendChild(stato_); box.appendChild(score); }
     else box.appendChild(pop);
     var btnCentra = el('button', 'fz-centra', '◎'); btnCentra.type = 'button'; btnCentra.setAttribute('aria-label', 'Centra la mappa');
-    btnCentra.onclick = function () { if (mia) centraSu(mia); else adatta(); };
+    btnCentra.onclick = function () { if (mia && campo.geo) centraSu(mia); else adatta(); };
     box.appendChild(btnCentra);
 
     // --- pan e zoom
@@ -177,7 +183,7 @@
       minSc = Math.min(vw / campo.w, vh / campo.h);
       // i punti riempiono lo schermo (lasciando spazio alle barre)
       var xs = [], ys = [];
-      campo.punti.forEach(function (p) { var q = px(campo, p.lat, p.lon); xs.push(q.x); ys.push(q.y); });
+      campo.punti.forEach(function (p) { var q = pxP(campo, p); xs.push(q.x); ys.push(q.y); });
       var x0 = Math.min.apply(null, xs) - 70, x1 = Math.max.apply(null, xs) + 70, y0 = Math.min.apply(null, ys) - 80, y1 = Math.max.apply(null, ys) + 80;
       var padT = ante ? 20 : 110, padB = ante ? 20 : 150;
       sc = Math.max(minSc, Math.min(vw / (x1 - x0), (vh - padT - padB) / (y1 - y0)));
@@ -214,8 +220,8 @@
     mapBox.addEventListener('wheel', function (e) { e.preventDefault(); var r = mapBox.getBoundingClientRect(); zoomA(e.deltaY < 0 ? 1.2 : 1 / 1.2, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
     function tocco(e) {
       var r = mapBox.getBoundingClientRect(), x = (e.clientX - r.left - tx) / sc, y = (e.clientY - r.top - ty) / sc;
-      if (opts.onTocco) { var ll = latlon(campo, x, y); opts.onTocco(ll.lat, ll.lon); return; }
-      var hit = campo.punti.filter(function (p) { var q = px(campo, p.lat, p.lon); return Math.hypot(q.x - x, q.y - y) < Math.max(50, 30 / sc); })[0];
+      if (opts.onTocco && campo.geo) { var ll = latlon(campo, x, y); opts.onTocco(ll.lat, ll.lon); return; }
+      var hit = campo.punti.filter(function (p) { var q = pxP(campo, p); return Math.hypot(q.x - x, q.y - y) < Math.max(50, 30 / sc); })[0];
       if (hit) schedaPunto(hit);
     }
 
@@ -250,10 +256,10 @@
     function disegna() {
       if (!st) return;
       var R = st.regole, k = Math.max(.72, Math.min(1, sc / .6)) / sc, s = '';
-      var rBase = Math.max(R.raggio / campo.mPerPx, 24 * k);
+      var rMin = 24 * k;
       // collegamenti: grigi tratteggiati; pieni se entrambi i capi sono della stessa fazione; tratteggio colorato in movimento se ne tiene uno solo
       campo.link.forEach(function (l) {
-        var a = punto(campo, l[0]), b = punto(campo, l[1]), pa = px(campo, a.lat, a.lon), pb = px(campo, b.lat, b.lon);
+        var a = punto(campo, l[0]), b = punto(campo, l[1]), pa = pxP(campo, a), pb = pxP(campo, b);
         var oa = st.owner[a.id], ob = st.owner[b.id], c2 = 'rgba(230,226,210,.5)', dash = (9 * k) + ' ' + (8 * k), w = 2.6 * k, cls = '';
         if (oa && oa === ob) { c2 = col(oa); dash = ''; w = 3.6 * k; }
         else if (oa || ob) { c2 = col(oa || ob); dash = (11 * k) + ' ' + (7 * k); w = 3.6 * k; cls = ' class="lk-run" style="--d:' + (18 * k) + 'px"'; }
@@ -262,8 +268,8 @@
         s += '<line ' + xy + cls + ' stroke="' + c2 + '" stroke-linecap="round" stroke-width="' + w + '"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>';
       });
       campo.punti.forEach(function (p) {
-        var q = px(campo, p.lat, p.lon), o = st.owner[p.id], c = col(o), pr = st.prog[p.id], cont = st.conteso[p.id];
-        var mob = p.tipo === 'mob', r = mob ? rBase * 1.25 : rBase;
+        var q = pxP(campo, p), o = st.owner[p.id], c = col(o), pr = st.prog[p.id], cont = st.conteso[p.id];
+        var rBase = Math.max((p.raggio || R.raggio) / mpp(campo), rMin), mob = p.tipo === 'mob', r = mob ? rBase * 1.25 : rBase;
         s += '<circle cx="' + q.x + '" cy="' + q.y + '" r="' + r + '" fill="' + c + '" fill-opacity="' + (mob ? .75 : .55) + '" stroke="' + c + '" stroke-width="' + ((mob ? 4 : 2.6) * k) + '"/>';
         if (pr) {
           var rr = r + 6 * k, giro = 2 * Math.PI * rr, frac = Math.min(1, pr.v / st.serveDi(p.id));
@@ -302,12 +308,12 @@
           s += '<text x="' + bx + '" y="' + by + '" font-size="' + (19 * k) + '" text-anchor="middle" dominant-baseline="central" class="fz-vs"><tspan fill="' + col(opts.team) + '">' + noi + '</tspan><tspan font-size="' + (13 * k) + '" fill="#f1ece0"> vs </tspan><tspan fill="' + col(nem && nem.team) + '">' + loro + '</tspan></text>';
         }
       });
-      if (mia) {
+      if (mia && campo.geo) {
         var m = px(campo, mia.lat, mia.lon);
-        if (mia.acc) s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + (mia.acc / campo.mPerPx) + '" fill="#4ea4ff" fill-opacity=".15" stroke="none"/>';
+        if (mia.acc) s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + (mia.acc / mpp(campo)) + '" fill="#4ea4ff" fill-opacity=".15" stroke="none"/>';
         s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + (8 * k) + '" fill="' + (opts.team ? col(opts.team) : '#2f8cff') + '" stroke="#fff" stroke-width="' + (3 * k) + '"/>';
       }
-      (opts.extra ? opts.extra() : []).forEach(function (b) {
+      if (campo.geo) (opts.extra ? opts.extra() : []).forEach(function (b) {
         var m = px(campo, b.lat, b.lon);
         s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + (5.5 * k) + '" fill="' + col(b.team) + '" stroke="#fff" stroke-width="' + (1.6 * k) + '"/>';
       });
@@ -449,14 +455,15 @@
   }
 
   // ---------- modalità prova: partita simulata con giocatori finti, tempo accelerato
-  function prova(box, onMenu, extraOpts) {
-    var campo = window.S40_CAMPI.tauri, vel = 10, t0 = Date.now(), base = Date.now();
+  function prova(box, onMenu, extraOpts, campo) {
+    var vel = 10, t0 = Date.now(), base = Date.now();
     var ora = function () { return base + (Date.now() - t0) * vel; };
-    var g = { id: 'prova', titolo: 'Prova fazioni', inizio: base + 5000, durata: 90, campo: 'tauri',
-      fazioni: [{ team: 'blu', mob: 'HQ', partenza: ['Pista'], comandante: 'ia' }, { team: 'rossa', mob: 'Tral2', partenza: [], comandante: 'ia' }] };
+    var mobs = campo.punti.filter(function (p) { return p.tipo === 'mob'; });
+    var g = { id: 'prova', titolo: 'Prova fazioni', inizio: base + 5000, durata: 90, campo: campo.id,
+      fazioni: [{ team: 'blu', mob: mobs[0].id, partenza: [], comandante: 'ia' }, { team: 'rossa', mob: mobs[1].id, partenza: [], comandante: 'ia' }] };
     var eventi = [], bots = [];
     ['blu', 'rossa'].forEach(function (team) {
-      var mob = punto(campo, team === 'blu' ? 'HQ' : 'Tral2');
+      var mob = team === 'blu' ? mobs[0] : mobs[1];
       for (var i = 0; i < 4; i++) bots.push({ uid: team + i, team: team, lat: mob.lat + (Math.random() - .5) * 2e-4, lon: mob.lon + (Math.random() - .5) * 2e-4, meta: null, sosta: 0, zona: null, ultimo: 0 });
     });
     var io = { uid: 'io', team: 'blu', zona: null };
@@ -467,7 +474,7 @@
       extra: function () { return bots; }, onMenu: onMenu, presenze: !!(extraOpts && extraOpts.presenze), comandante: !!(extraOpts && extraOpts.comandante),
       onOrdine: function (pt, azione, testo) { eventi.push({ tipo: 'ordine', uid: 'io', team: 'blu', pt: pt, azione: azione, testo: testo, t: ora() }); }
     });
-    var hq = punto(campo, 'HQ'); v.posizione(hq.lat - 1e-4, hq.lon - 1e-4, 6);
+    v.posizione(mobs[0].lat - 1e-4, mobs[0].lon - 1e-4, 6);
     // i giocatori finti seguono gli ordini del comandante automatico della loro fazione
     var ultimoPasso = ora();
     var sim = setInterval(function () {

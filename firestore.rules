@@ -19,7 +19,7 @@ service cloud.firestore {
     // permessi predefiniti se il developer non ha ancora salvato la tabella
     function predefiniti() {
       return {
-        'organizzatore': { 'conflitti': true, 'team': true, 'giocatori': true, 'risposte': true, 'telefoni': true, 'rosa': true, 'ordini': true },
+        'organizzatore': { 'conflitti': true, 'mappe': true, 'team': true, 'giocatori': true, 'risposte': true, 'telefoni': true, 'rosa': true, 'ordini': true },
         'comandante': { 'risposte': true, 'telefoni': true, 'rosa': true, 'ordini': true },
         'caposquadra': { 'telefoni': true, 'rosa': true },
         'truppa': { 'telefoni': true, 'rosa': true }
@@ -65,6 +65,17 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['squadra', 'team', 'codice'])
           && (request.resource.data.get('team', null) == resource.data.get('team', null) || request.resource.data.get('team', null) == null));
       allow delete: if perm('giocatori');
+    }
+
+    // Cartine dei campi (aree e collegamenti) e immagine divisa a pezzi
+    match /campi/{id} {
+      allow read: if signed();
+      allow write: if perm('mappe');
+      match /img/{n} {
+        allow read: if signed();
+        allow write: if perm('mappe') && request.resource.data.d.size() < 1000000;
+        allow delete: if perm('mappe');
+      }
     }
 
     // Anagrafica dei team (nome, logo, referente, squadre)
