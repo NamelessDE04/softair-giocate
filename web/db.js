@@ -84,15 +84,43 @@
     return b.commit().then(function () { return tid; });
   };
   api.salvaTeam = function (tid, dati) { return db.collection('team').doc(tid).set(dati, { merge: true }); };
+  // elimina il team: i giocatori restano senza team e il team esce dai conflict
   api.eliminaTeam = function (tid) {
-    return db.collection('codiciTeam').doc(tid).get().then(function (s) {
+    return Promise.all([
+      db.collection('codiciTeam').doc(tid).get(),
+      db.collection('utenti').where('team', '==', tid).get(),
+      db.collection('conflitti').where('team', 'array-contains', tid).get()
+    ]).then(function (r) {
       var b = db.batch();
-      if (s.exists && s.data().codice) b.delete(db.collection('inviti').doc(s.data().codice));
+      if (r[0].exists && r[0].data().codice) b.delete(db.collection('inviti').doc(r[0].data().codice));
+      r[1].docs.forEach(function (d) { b.set(d.ref, { team: null, squadra: null, codice: null }, { merge: true }); });
+      r[2].docs.forEach(function (d) {
+        var c = d.data(), fd = Object.assign({}, c.fazioneDi || {}); delete fd[tid];
+        b.set(d.ref, {
+          team: (c.team || []).filter(function (x) { return x !== tid; }), fazioneDi: fd,
+          fazioni: (c.fazioni || []).map(function (f) { return Object.assign({}, f, { team: (f.team || []).filter(function (x) { return x !== tid; }) }); })
+        }, { merge: true });
+      });
       b.delete(db.collection('codiciTeam').doc(tid));
       b.delete(db.collection('team').doc(tid));
       return b.commit();
     });
   };
+  // nuovo codice d'invito (il vecchio smette di funzionare)
+  api.nuovoCodice = function (tid) {
+    return db.collection('codiciTeam').doc(tid).get().then(function (s) {
+      var cod = codice(6), b = db.batch();
+      if (s.exists && s.data().codice) b.delete(db.collection('inviti').doc(s.data().codice));
+      b.set(db.collection('inviti').doc(cod), { team: tid });
+      b.set(db.collection('codiciTeam').doc(tid), { codice: cod });
+      return b.commit().then(function () { return cod; });
+    });
+  };
+  // solo organizzatore: tutti i giocatori
+  api.ascoltaUtenti = function (cb) { return db.collection('utenti').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); }); };
+  api.salvaUtente = function (uid, dati) { return db.collection('utenti').doc(uid).set(dati, { merge: true }); };
+  api.eliminaUtente = function (uid) { return db.collection('utenti').doc(uid).delete(); };
+  api.eliminaAdesione = function (cid, uid) { return db.collection('conflitti/' + cid + '/adesioni').doc(uid).delete(); };
   api.codiceTeam = function (tid) {
     return db.collection('codiciTeam').doc(tid).get().then(function (s) { return s.exists ? s.data().codice : ''; }, function () { return ''; });
   };

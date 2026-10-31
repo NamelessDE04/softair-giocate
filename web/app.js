@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.3';
+  var VERSIONE = '0.4';
   var S = window.S40, F = window.S40F, CAMPI = window.S40_CAMPI;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -75,7 +75,7 @@
     app.innerHTML = ''; window.scrollTo(0, 0);
     $('pieno').hidden = true; $('pieno').innerHTML = '';
     document.body.classList.remove('a-pieno');
-    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, conflittoModifica: pagConflittoModifica, prova: pagProva }[c.v];
+    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, giocatori: pagGiocatori, conflittoModifica: pagConflittoModifica, prova: pagProva }[c.v];
     (r || home)(c.p);
   }
   function aPieno() { document.body.classList.add('a-pieno'); var p = $('pieno'); p.hidden = false; p.innerHTML = ''; return p; }
@@ -277,6 +277,24 @@
       fz.appendChild(k);
     });
     box.appendChild(fz);
+
+    // risposte agli inviti (solo organizzatore: si possono togliere)
+    if (st.admin) {
+      box.appendChild(el('h3', 'sez', 'Risposte'));
+      var rBox = el('div', 'carta');
+      var si = ades.filter(function (x) { return x.si; }), no = ades.filter(function (x) { return !x.si; });
+      if (!ades.length) rBox.appendChild(el('p', 'hint', 'Nessuna risposta ancora.'));
+      [['Vengono', si], ['Non vengono', no]].forEach(function (g) {
+        if (!g[1].length) return;
+        rBox.appendChild(el('h4', 'ris-tit', g[0] + ' · ' + g[1].length));
+        g[1].forEach(function (a) {
+          var r = el('div', 'gioc'); r.appendChild(el('span', null, (a.nome || 'Giocatore') + ' · ' + ((teamDi(a.team) || {}).nome || '')));
+          r.appendChild(bottone('✕', 'icon', function () { if (confirm('Togliere la risposta di ' + (a.nome || 'questo giocatore') + '?')) S.eliminaAdesione(c.id, a.id).catch(errore); }));
+          rBox.appendChild(r);
+        });
+      });
+      box.appendChild(rBox);
+    }
 
     // bacheca
     var tb = el('h3', 'sez', 'Bacheca'); box.appendChild(tb);
@@ -490,6 +508,9 @@
           var msg = 'Entra nel team ' + t.nome + ' su Airsoft Conflict: ' + location.origin + location.pathname + ' — codice ' + k;
           if (navigator.share) navigator.share({ text: msg }).catch(function () {}); else { navigator.clipboard && navigator.clipboard.writeText(msg); toast('Copiato'); }
         }));
+        if (S.stato().admin) cod.appendChild(bottone('Nuovo codice', 'piccolo', function () {
+          if (confirm('Creare un nuovo codice? Quello vecchio smette di funzionare (chi è già nel team resta dentro).')) S.nuovoCodice(tid).then(function () { mostra(); }, errore);
+        }));
       });
     }
     var el_ = el('div', 'giocatori'); app.appendChild(el_);
@@ -510,6 +531,7 @@
         var r = el('div', 'gioc');
         r.appendChild(el('span', null, nomeG(u)));
         if (u.id === t.referenteUid) r.appendChild(el('small', 'tag', 'REFERENTE'));
+        if (S.stato().admin) { r.classList.add('apribile'); r.onclick = function () { editorGiocatore(u); }; }
         g.appendChild(r);
       });
       if (!dentro.length) g.appendChild(el('p', 'hint', 'Nessuno'));
@@ -531,6 +553,7 @@
     file.onchange = function () { if (file.files[0]) comprimi(file.files[0], 240, 0, true).then(function (d) { if (d.length > 250000) return comprimi(file.files[0], 240, 200000); return d; }).then(function (d) { dati.logo = d; mostraLogo(); }, errore); };
     lr.appendChild(file);
     lr.appendChild(bottone('Cambia logo', '', function () { file.click(); }));
+    lr.appendChild(bottone('Togli', 'link pericolo', function () { dati.logo = ''; mostraLogo(); }));
     form.appendChild(lr);
     var nome = el('input'); nome.value = dati.nome; form.appendChild(campoForm('Nome del team', nome));
     // referente
@@ -568,7 +591,8 @@
           s.onchange = function () { S.impostaSquadra(u.id, s.value).catch(errore); };
           r.appendChild(s);
         }
-        r.appendChild(bottone('Togli', 'link pericolo', function () { if (confirm('Togliere ' + nomeG(u) + ' dal team?')) S.togliMembro(u.id).catch(errore); }));
+        if (S.stato().admin) r.appendChild(bottone('✎', 'icon', function () { editorGiocatore(u); }));
+        else r.appendChild(bottone('Togli', 'link pericolo', function () { if (confirm('Togliere ' + nomeG(u) + ' dal team?')) S.togliMembro(u.id).catch(errore); }));
         mBox.appendChild(r);
       });
       refSel.innerHTML = '';
@@ -589,6 +613,10 @@
       S.salvaTeam(tid, out).then(function () { toast('Team salvato'); indietro(); }, errore);
     }));
     if (!S.stato().admin) refSel.disabled = true;
+    else salva.appendChild(bottone('Elimina team', 'pericolo', function () {
+      if (!confirm('Eliminare il team "' + t.nome + '"? I giocatori restano iscritti ma senza team, e il team esce dai conflict.')) return;
+      S.eliminaTeam(tid).then(function () { toast('Team eliminato'); tornaIndietro(2); }, errore);
+    }));
     app.appendChild(salva);
   }
 
@@ -604,6 +632,57 @@
     if (me.team) f.appendChild(bottone('Lascia il team', 'link pericolo', function () { if (confirm('Vuoi uscire dal team?')) S.togliMembro(st.user.uid).then(function () { sostituisci('home'); }, errore); }));
   }
 
+  // ================= GIOCATORI (solo organizzatore)
+  function editorGiocatore(u) {
+    apriFoglio(function (f) {
+      f.appendChild(el('h3', null, nomeG(u)));
+      if (u.email) f.appendChild(el('p', 'hint', u.email));
+      var n = el('input'); n.value = u.nome || ''; f.appendChild(campoForm('Nome', n));
+      var cs = el('input'); cs.value = u.callsign || ''; f.appendChild(campoForm('Callsign', cs));
+      var tSel = select([['', 'Nessun team']].concat(D.team.map(function (t) { return [t.id, t.nome]; })), u.team || '');
+      f.appendChild(campoForm('Team', tSel));
+      var sSel = el('select'), sLab = campoForm('Squadra', sSel); f.appendChild(sLab);
+      function squadre() {
+        var t = teamDi(tSel.value), sq = (t && t.squadre) || [];
+        sSel.innerHTML = ''; [['', '—']].concat(sq.map(function (q) { return [q.id, q.nome]; })).forEach(function (o) { var x = el('option', null, o[1]); x.value = o[0]; sSel.appendChild(x); });
+        sSel.value = tSel.value === (u.team || '') ? (u.squadra || '') : '';
+        sLab.hidden = !sq.length;
+      }
+      tSel.onchange = squadre; squadre();
+      var r = el('div', 'riga2');
+      r.appendChild(bottone('Salva', 'accent', function () {
+        S.salvaUtente(u.id, { nome: n.value.trim(), callsign: cs.value.trim(), team: tSel.value || null, squadra: sSel.value || null })
+          .then(function () { toast('Giocatore salvato'); chiudiFoglio(); }, errore);
+      }));
+      r.appendChild(bottone('Elimina giocatore', 'pericolo', function () {
+        if (!confirm('Eliminare ' + nomeG(u) + '? Sparisce dagli elenchi; se rientra con Google riparte da zero, senza team.')) return;
+        S.eliminaUtente(u.id).then(function () { toast('Giocatore eliminato'); chiudiFoglio(); }, errore);
+      }));
+      f.appendChild(r);
+    });
+  }
+  function pagGiocatori() {
+    testata('Giocatori');
+    var box = el('div'); app.appendChild(box);
+    chiusura = S.ascoltaUtenti(function (us) {
+      box.innerHTML = '';
+      box.appendChild(el('p', 'hint', us.length + ' iscritti. Tocca un giocatore per modificarlo, spostarlo o eliminarlo.'));
+      var gruppi = D.team.slice().sort(function (a, b) { return a.nome.localeCompare(b.nome); }).map(function (t) { return { id: t.id, nome: t.nome }; });
+      gruppi.push({ id: null, nome: 'Senza team' });
+      gruppi.forEach(function (g) {
+        var dentro = us.filter(function (u) { return g.id ? u.team === g.id : !u.team || !teamDi(u.team); });
+        if (!dentro.length) return;
+        var k = el('div', 'squadra'); k.appendChild(el('h4', null, g.nome + ' · ' + dentro.length));
+        dentro.sort(function (a, b) { return nomeG(a).localeCompare(nomeG(b)); }).forEach(function (u) {
+          var r = el('div', 'gioc apribile'); r.appendChild(el('span', null, nomeG(u))); r.appendChild(el('small', 'hint', u.email || ''));
+          r.onclick = function () { editorGiocatore(u); };
+          k.appendChild(r);
+        });
+        box.appendChild(k);
+      });
+    });
+  }
+
   // ================= ORGANIZZA (solo organizzatore)
   function pagOrganizza() {
     testata('Organizza');
@@ -615,6 +694,8 @@
       r.onclick = function () { vai('conflitto', c.id); };
       app.appendChild(r);
     });
+    app.appendChild(el('h3', 'sez', 'Giocatori'));
+    app.appendChild(bottone('Tutti i giocatori iscritti', '', function () { vai('giocatori'); }));
     app.appendChild(el('h3', 'sez', 'Team'));
     app.appendChild(bottone('+ Nuovo team', 'accent', function () {
       var n = prompt('Nome del nuovo team'); if (!n || !n.trim()) return;

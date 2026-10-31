@@ -250,3 +250,10 @@ main > .btn.accent { width: 100%; }
 
 .toast { position: fixed; left: 50%; bottom: calc(24px + var(--sa-b)); transform: translate(-50%, 30px); opacity: 0; z-index: 60; background: var(--ink); color: var(--bg); padding: 10px 18px; border-radius: 10px; font-weight: 700; transition: .25s; pointer-events: none; max-width: 90vw; }
 .toast.on { opacity: 1; transform: translate(-50%, 0); }
+
+.gioc.apribile { cursor: pointer; }
+.gioc.apribile::after { content: '›'; color: var(--muto); margin-left: 8px; }
+.gioc .hint { font-size: 14px; margin-left: auto; padding-left: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gioc > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ris-tit { color: var(--oro); margin: 8px 0 2px; font-size: 17px; }
+.logo-riga .btn.link { margin-left: auto; }
