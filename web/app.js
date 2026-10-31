@@ -2,7 +2,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.1'; // aggiornare insieme a CACHE in sw.js
+  var VERSIONE = '0.2'; // aggiornare insieme a CACHE in sw.js
   var S = window.S40;
   var $ = function (id) { return document.getElementById(id); };
   var root = $('app');
@@ -161,6 +161,11 @@
         el('button', { type: 'button', class: 'link', text: 'Profilo', onclick: function () { vai({ nome: 'profilo' }); } })
       ]));
     }
+    root.appendChild(el('section', { class: 'card prova-card' }, [
+      el('h3', { text: 'Novità · giocate a fazioni' }),
+      el('p', { class: 'hint', text: 'Prova la mappa del Campo Tauri con una partita simulata: due fazioni, conquista dei punti con il GPS, comandante automatico. Tocca la mappa per muoverti.' }),
+      btn('▶  Prova la mappa fazioni', apriProva, 'accent')
+    ]));
     var head = el('div', { class: 'head' }, [el('h2', { text: 'Giocate' })]);
     if (admin()) head.appendChild(btn('+ Nuova giocata', function () { vai({ nome: 'editor' }); }, 'accent'));
     root.appendChild(head);
@@ -175,7 +180,7 @@
         : f === 'prima' ? el('span', { class: 'stato' }, [giorno(g.inizio) + ' · ' + ora(g.inizio)])
         : el('span', { class: 'stato finita', text: 'Finita · ' + giorno(g.inizio) });
       root.appendChild(el('button', { type: 'button', class: 'riga', onclick: function () { vai({ nome: 'giocata', gid: g.id, tab: 'obiettivi' }); } }, [
-        el('span', { class: 'riga-t' }, [el('b', { text: g.titolo || 'Giocata' }), el('small', { text: (g.luogo ? g.luogo + ' · ' : '') + (g.obiettivi || []).length + ' obiettivi · ' + (g.team || []).length + ' team' }), stato]),
+        el('span', { class: 'riga-t' }, [el('b', { text: g.titolo || 'Giocata' }), el('small', { text: (g.luogo ? g.luogo + ' · ' : '') + (g.tipo === 'fazioni' ? 'Fazioni · ' : (g.obiettivi || []).length + ' obiettivi · ') + (g.team || []).length + ' team' }), stato]),
         el('span', { class: 'freccia', 'aria-hidden': 'true', text: '›' })
       ]));
     });
@@ -266,6 +271,7 @@
     var g = giocata(s.gid);
     root.appendChild(indietro('Giocate', function () { vai({ nome: 'home' }); }));
     if (!g) { root.appendChild(el('p', { class: 'vuoto', text: 'Giocata non trovata.' })); return; }
+    if (g.tipo === 'fazioni') return vGiocataFazioni(g);
     ascoltaCatture(g.id);
     var f = fase(g), ris = calcola(g, dati.catture), m = me();
     var fine = g.inizio + g.durata * 60000;
@@ -289,6 +295,56 @@
     if (f === 'corso' && inGioco) root.appendChild(el('div', { class: 'fab-spazio' }));
     if (f === 'corso' && inGioco) document.body.appendChild(fab(g));
   }
+  function vGiocataFazioni(g) {
+    var C = window.S40_CAMPI[g.campo || 'tauri'], fz = fase(g), m = me(), fine = g.inizio + g.durata * 60000;
+    root.appendChild(el('div', { class: 'g-head' }, [el('h2', { text: g.titolo || 'Giocata a fazioni' }),
+      el('small', { text: giorno(g.inizio) + ' · ' + ora(g.inizio) + '–' + ora(fine) + ' · ' + C.nome })]));
+    root.appendChild(el('div', { class: 'orologio ' + fz }, fz === 'prima' ? [el('small', { text: 'INIZIA TRA' }), el('b', { 'data-conto': g.inizio })]
+      : fz === 'corso' ? [el('small', { text: 'FINE TRA' }), el('b', { 'data-conto': fine })] : [el('b', { text: 'GIOCATA FINITA' })]));
+    var c = el('section', { class: 'card' }, [el('h3', { text: 'Fazioni' })]);
+    (g.fazioni || []).forEach(function (f) {
+      var t = team(f.team), mob = C.punti.filter(function (p) { return p.id === f.mob; })[0];
+      c.appendChild(el('div', { class: 'membro' }, [el('span', null, [el('b', { text: t.nome + (f.team === m.team ? ' (tu)' : '') }),
+        el('small', { text: 'MOB: ' + (mob ? mob.nome : f.mob) + ' · comandante: ' + (f.comandante && f.comandante !== 'ia' ? 'persona' : 'automatico') })]),
+        el('i', { class: 'pallino grande', style: 'background:' + t.colore })]));
+    });
+    var R = Object.assign({}, S40F.REGOLE, g.regole || {});
+    c.appendChild(el('p', { class: 'hint', text: 'Vince chi tiene ' + R.chiavi + ' punti chiave per ' + Math.round(R.tVittoria / 60) + ' minuti. Conquista: ' + Math.round(R.tConquista / 60) + ' min (' + Math.round(R.tNeutro / 60) + ' se neutrale), cerchio di ' + R.raggio + ' m.' }));
+    root.appendChild(c);
+    var inGioco = m.team && (g.team || []).indexOf(m.team) >= 0;
+    root.appendChild(btn(inGioco ? '🗺  Apri la mappa di gioco' : '🗺  Guarda la mappa', function () { apriFazioni(g); }, 'accent big'));
+    if (inGioco) root.appendChild(el('p', { class: 'hint', text: 'Durante la partita tieni l\'app aperta: il GPS segna in quale punto sei e lo schermo resta acceso. Porta un power bank.' }));
+    if (admin()) root.appendChild(btn('Modifica', function () { vai({ nome: 'editor', gid: g.id }); }));
+  }
+  // mappa a tutto schermo: partita vera (eventi su Firestore) o prova con giocatori simulati
+  var fzAttiva = null;
+  function apriFazioni(g) {
+    var m = me(), C = window.S40_CAMPI[g.campo || 'tauri'], colori = {}, nomi = {};
+    (g.fazioni || []).forEach(function (f) { var t = team(f.team); colori[f.team] = t.colore; nomi[f.team] = t.nome; });
+    var mia = (g.fazioni || []).filter(function (f) { return f.team === m.team; })[0];
+    $('fzTitolo').textContent = g.titolo || 'Fazioni'; $('fzVel').innerHTML = ''; $('fzWrap').hidden = false;
+    var v = S40F.vista($('fzBox'), {
+      g: g, campo: C, team: mia ? mia.team : null, uid: m.uid, colori: colori, nomi: nomi, ora: function () { return Date.now(); },
+      gps: !!mia, comandante: !!(mia && mia.comandante === m.uid),
+      onZona: function (pt) { S.scriviEvento(g.id, { tipo: 'zona', uid: m.uid, team: m.team, pt: pt || null, t: Date.now() }); },
+      onOrdine: function (pt, azione, testo) { S.scriviEvento(g.id, { tipo: 'ordine', uid: m.uid, team: m.team, pt: pt, azione: azione, testo: testo, t: Date.now() }); }
+    });
+    var stopEv = S.ascoltaEventi(g.id, function (l) { v.aggiorna(l); });
+    fzAttiva = { chiudi: function () { stopEv(); v.chiudi(); } };
+  }
+  function apriProva() {
+    $('fzTitolo').textContent = 'Prova · Campo Tauri'; $('fzWrap').hidden = false;
+    var p = S40F.prova($('fzBox'));
+    var vel = $('fzVel'); vel.innerHTML = '';
+    [1, 10, 30].forEach(function (x) {
+      var b = el('button', { type: 'button', text: '×' + x, 'aria-pressed': String(x === 10), onclick: function () {
+        p.velocita(x); Array.prototype.forEach.call(vel.children, function (c) { c.setAttribute('aria-pressed', String(c === b)); });
+      } });
+      vel.appendChild(b);
+    });
+    fzAttiva = p;
+  }
+  $('fzEsci').onclick = function () { if (fzAttiva) fzAttiva.chiudi(); fzAttiva = null; $('fzWrap').hidden = true; };
   function fab(g) {
     var vecchio = $('fab'); if (vecchio) vecchio.remove();
     return el('button', { type: 'button', id: 'fab', class: 'fab', onclick: function () { apriScanner(g); } }, [
@@ -450,6 +506,11 @@
       campo('Giorno', dIn),
       el('div', { class: 'riga2' }, [campo('Inizio', oIn), campo('Durata (min)', numero(g.durata, function (v) { g.durata = v; }, 10))])
     ]));
+    var tipoSel = el('select', { 'aria-label': 'Tipo di giocata' }, [el('option', { value: 'obiettivi', text: 'Obiettivi a finestra con QR' }), el('option', { value: 'fazioni', text: 'Fazioni (stile Arma Reforger)' })]);
+    tipoSel.value = g.tipo || 'obiettivi';
+    tipoSel.addEventListener('change', function () { g.tipo = tipoSel.value; if (g.tipo === 'fazioni') preparaFazioni(g); render(); });
+    root.appendChild(el('section', { class: 'card' }, [campo('Tipo di giocata', tipoSel)]));
+    if (g.tipo === 'fazioni') { editorFazioni(g, campo, numero); vEditorFine(s, esist, g); return; }
     var tc = el('section', { class: 'card' }, [el('h3', { text: 'Team in gioco' })]);
     if (!dati.team.length) tc.appendChild(el('p', { class: 'hint', text: 'Crea prima i team nella scheda "Team".' }));
     dati.team.forEach(function (t) {
@@ -495,6 +556,9 @@
             render(); toast('Finestre distribuite');
           })])]));
     }
+    vEditorFine(s, esist, g);
+  }
+  function vEditorFine(s, esist, g) {
     root.appendChild(el('div', { class: 'riga2 salva' }, [
       esist ? btn('Elimina giocata', function () {
         if (confirm('Eliminare la giocata "' + (g.titolo || '') + '"?')) S.eliminaGiocata(g.id).then(function () { toast('Giocata eliminata'); vai({ nome: 'home' }); }, function (e) { toast(errMsg(e)); });
@@ -502,8 +566,69 @@
       btn('Salva giocata', function () { salvaGiocata(s); }, 'accent')
     ]));
   }
+  // ---------- giocata a fazioni: impostazioni
+  function preparaFazioni(g) {
+    var C = window.S40_CAMPI.tauri;
+    g.campo = g.campo || 'tauri';
+    if (!g.fazioni || !g.fazioni.length) {
+      var t = g.team.slice(0, 2);
+      g.fazioni = t.map(function (tid, i) { var mob = C.scenario.mob[i]; return { team: tid, mob: mob, partenza: (C.scenario.partenza[mob] || []).slice(), comandante: 'ia' }; });
+    }
+    g.regole = Object.assign({}, S40F.REGOLE, g.regole || {});
+  }
+  function editorFazioni(g, campo, numero) {
+    preparaFazioni(g);
+    var C = window.S40_CAMPI[g.campo], mobs = C.punti.filter(function (p) { return p.tipo === 'mob'; });
+    var c = el('section', { class: 'card' }, [el('h3', { text: 'Fazioni (' + C.nome + ')' }),
+      el('p', { class: 'hint', text: 'Due team, uno per fazione. Ogni fazione ha la sua base principale (MOB) e un comandante: una persona o quello automatico.' })]);
+    [0, 1].forEach(function (i) {
+      var f = g.fazioni[i] || (g.fazioni[i] = { team: '', mob: mobs[i] ? mobs[i].id : '', partenza: [], comandante: 'ia' });
+      var tSel = el('select', null, [el('option', { value: '', text: '— scegli il team —' })].concat(dati.team.map(function (t) { return el('option', { value: t.id, text: t.nome }); })));
+      tSel.value = f.team || '';
+      var mSel = el('select', null, mobs.map(function (p) { return el('option', { value: p.id, text: p.nome }); }));
+      mSel.value = f.mob;
+      var cSel = el('select', null, [el('option', { value: 'ia', text: 'Comandante automatico (IA)' })]);
+      function riempiComandanti() {
+        cSel.innerHTML = ''; cSel.appendChild(el('option', { value: 'ia', text: 'Comandante automatico (IA)' }));
+        if (!f.team) return;
+        S.leggiMembri(f.team).then(function (l) {
+          l.forEach(function (u) { cSel.appendChild(el('option', { value: u.id, text: (u.callsign ? u.callsign + ' · ' : '') + (u.nome || u.email) })); });
+          cSel.value = f.comandante || 'ia';
+        });
+      }
+      tSel.addEventListener('change', function () { f.team = tSel.value; f.comandante = 'ia'; riempiComandanti(); });
+      mSel.addEventListener('change', function () { f.mob = mSel.value; f.partenza = (C.scenario.partenza[f.mob] || []).slice(); });
+      cSel.addEventListener('change', function () { f.comandante = cSel.value; });
+      riempiComandanti();
+      c.appendChild(el('div', { class: 'ed-ob' }, [el('div', { class: 'ed-ob-h' }, [el('b', { text: 'Fazione ' + (i + 1) })]),
+        campo('Team', tSel), campo('Base principale (MOB)', mSel), campo('Comandante', cSel)]));
+    });
+    root.appendChild(c);
+    var R = g.regole;
+    root.appendChild(el('section', { class: 'card' }, [el('h3', { text: 'Regole' }),
+      el('div', { class: 'grid3' }, [
+        campo('Raggio punti (m)', numero(R.raggio, function (v) { R.raggio = v; }, 10)),
+        campo('Conquista (s)', numero(R.tConquista, function (v) { R.tConquista = v; }, 30)),
+        campo('Neutro (s)', numero(R.tNeutro, function (v) { R.tNeutro = v; }, 30)),
+        campo('Chiavi per vincere', numero(R.chiavi, function (v) { R.chiavi = v; }, 1)),
+        campo('Tenerle per (s)', numero(R.tVittoria, function (v) { R.tVittoria = v; }, 60)),
+        campo('Giocatori minimi', numero(R.minGiocatori, function (v) { R.minGiocatori = v; }, 1))
+      ]),
+      el('p', { class: 'hint', text: 'Si conquista stando nel cerchio del punto senza nemici; con nemici dentro il punto è conteso e la conquista si ferma. Si attacca solo un punto collegato a uno già tenuto.' })]));
+  }
+  function salvaFazioni(s) {
+    var g = s.bozza;
+    if (!g.titolo.trim()) { toast('Dai un titolo alla giocata'); return; }
+    if (g.fazioni.length !== 2 || !g.fazioni[0].team || !g.fazioni[1].team || g.fazioni[0].team === g.fazioni[1].team) { toast('Scegli due team diversi per le fazioni'); return; }
+    if (g.fazioni[0].mob === g.fazioni[1].mob) { toast('Le due fazioni devono avere basi diverse'); return; }
+    g.team = g.fazioni.map(function (f) { return f.team; });
+    g.obiettivi = [];
+    g.comandanti = {}; g.fazioni.forEach(function (f) { g.comandanti[f.team] = f.comandante || 'ia'; });
+    S.salvaGiocata(g, {}).then(function () { toast('Giocata salvata'); vai({ nome: 'giocata', gid: g.id, tab: 'obiettivi' }); }, function (e) { toast('Errore: ' + errMsg(e)); });
+  }
   function salvaGiocata(s) {
     var g = s.bozza;
+    if (g.tipo === 'fazioni') return salvaFazioni(s);
     if (!g.titolo.trim()) { toast('Dai un titolo alla giocata'); return; }
     if (!g.team.length) { toast('Scegli almeno un team'); return; }
     if (s.segreti === null) { toast('Un attimo, sto leggendo i codici…'); return; }

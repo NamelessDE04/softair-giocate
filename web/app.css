@@ -188,3 +188,44 @@ body.in-stampa { overflow: hidden; }
 .toast.show { opacity: 1; }
 
 @media (min-width: 900px) { main { max-width: 860px; } }
+
+/* ---------- giocata a fazioni: mappa di gioco a tutto schermo */
+.fz-wrap { position: fixed; inset: 0; z-index: 28; background: #0b0c09; display: flex; flex-direction: column; }
+.fz-wrap[hidden] { display: none; }
+.fz-top { display: flex; align-items: center; gap: 8px; padding: max(8px, env(safe-area-inset-top)) 10px 6px; background: #14160f; }
+.fz-top .btn { min-height: 40px; padding: 4px 12px; font-size: 14px; }
+.fz-top b { flex: 1; font-size: 16px; letter-spacing: .06em; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fz-vel { display: flex; gap: 4px; }
+.fz-vel button { min-height: 36px; min-width: 44px; background: transparent; color: var(--muted); border: 1px solid var(--line); border-radius: 8px; font: 700 13px var(--cond); }
+.fz-vel button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.fz { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.fz-bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #14160f; border-bottom: 1px solid var(--line); }
+.fz-chip { color: #fff; font-weight: 700; font-size: 14px; letter-spacing: .06em; padding: 4px 10px; border-radius: 14px; text-transform: uppercase; }
+.fz-sp { flex: 1; }
+.fz-score { font: 700 17px 'JetBrains Mono', monospace; color: var(--accent); }
+.fz-clock { font: 700 18px 'JetBrains Mono', monospace; color: var(--ink); min-width: 64px; text-align: right; }
+.fz-map { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; background: #222; cursor: grab; }
+.fz-inner { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.fz-img { display: block; width: 100%; height: 100%; user-select: none; -webkit-user-drag: none; pointer-events: none; }
+.fz-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.fz-lab { font-family: 'Barlow Condensed', sans-serif; font-weight: 700; fill: #111; stroke: #fff; stroke-width: .25em; paint-order: stroke; }
+.fz-n { font-family: 'JetBrains Mono', monospace; font-weight: 700; fill: #fff; stroke: #000; stroke-width: .2em; paint-order: stroke; }
+.fz-cont { animation: fzpulse 1s ease-in-out infinite; }
+@keyframes fzpulse { 50% { opacity: .25; } }
+.fz-pop { position: absolute; left: 10px; right: 10px; top: 52px; display: flex; flex-direction: column; gap: 6px; z-index: 3; pointer-events: none; }
+.fz-msg { background: rgba(20,22,15,.94); color: var(--ink); border-left: 5px solid var(--accent); border-radius: 8px; padding: 10px 12px; font-size: 17px; font-weight: 700;
+  box-shadow: 0 4px 14px rgba(0,0,0,.5); transition: opacity .4s, transform .4s; }
+.fz-msg.ok { border-color: var(--ok); } .fz-msg.ko { border-color: var(--danger); } .fz-msg.ordine { border-color: #4ea4ff; }
+.fz-msg.via { opacity: 0; transform: translateY(-8px); }
+.fz-ordini { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; background: #14160f; border-top: 1px solid var(--line); }
+.fz-ordini small { color: var(--muted); font-size: 11px; letter-spacing: .16em; }
+.fz-o1 { font-size: 18px; font-weight: 700; color: #8ec5ff; }
+.fz-o2 { font-size: 15px; color: var(--muted); }
+.fz-stato { padding: 10px 12px max(10px, env(safe-area-inset-bottom)); background: #1d2019; font-size: 17px; font-weight: 700; text-align: center; }
+.fz-stato.ok { color: var(--ok); } .fz-stato.warn { color: #ffd23f; }
+.fz-scheda { position: absolute; left: 10px; right: 10px; bottom: 130px; z-index: 4; background: #1d2019; border: 1px solid var(--line); border-radius: 12px; padding: 12px;
+  display: flex; flex-direction: column; gap: 6px; box-shadow: 0 6px 24px rgba(0,0,0,.6); }
+.fz-scheda b { font-size: 22px; } .fz-scheda small { color: var(--muted); font-size: 14px; letter-spacing: .06em; }
+.fz-az { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.fz-az .btn { font-size: 14px; padding: 6px; }
+.prova-card { border-color: #4ea4ff; }

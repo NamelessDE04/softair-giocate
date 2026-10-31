@@ -70,6 +70,12 @@
 <!-- fogli da stampare con i QR -->
 <section class="stampa" id="stampa" hidden></section>
 
+<!-- giocata a fazioni: mappa a tutto schermo -->
+<section class="fz-wrap" id="fzWrap" hidden>
+  <div class="fz-top"><button type="button" class="btn" id="fzEsci">‹ Esci</button><b id="fzTitolo"></b><div class="fz-vel" id="fzVel"></div></div>
+  <div id="fzBox" style="flex:1;display:flex;flex-direction:column;min-height:0"></div>
+</section>
+
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
@@ -79,6 +85,8 @@
 <script src="vendor/jsQR.js"></script>
 <script src="qr.js"></script>
 <script src="db.js"></script>
+<script src="campi.js"></script>
+<script src="fazioni.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

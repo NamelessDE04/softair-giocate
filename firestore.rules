@@ -63,6 +63,20 @@ service cloud.firestore {
           && request.time.toMillis() <= g().inizio + g().durata * 60000 + 12 * 3600000;
         allow delete: if isAdmin();
       }
+
+      // Giocate a fazioni: posizione nei punti e ordini del comandante umano
+      match /eventi/{eid} {
+        function g2() { return get(/databases/$(database)/documents/giocate/$(gid)).data; }
+        allow read: if isAdmin() || (signed() && myTeam() != null && myTeam() in g2().team);
+        allow create: if signed()
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.team == myTeam()
+          && myTeam() in g2().team
+          && request.resource.data.t is number
+          && (request.resource.data.tipo == 'zona'
+              || (request.resource.data.tipo == 'ordine' && g2().get('comandanti', {}).get(myTeam(), 'ia') == request.auth.uid));
+        allow delete: if isAdmin();
+      }
     }
 
     // Codici segreti dei QR: solo l'organizzatore (servono per stamparli)

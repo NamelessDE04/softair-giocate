@@ -1,7 +1,7 @@
 /* Service worker: l'app funziona anche senza connessione. */
-var CACHE = 'softair-giocate-v1';
+var CACHE = 'softair-giocate-v2';
 var FILES = [
-  './', 'index.html', 'app.css', 'app.js', 'db.js', 'qr.js', 'vendor/jsQR.js', 'config.js', 'manifest.webmanifest',
+  './', 'index.html', 'app.css', 'app.js', 'db.js', 'qr.js', 'vendor/jsQR.js', 'campi.js', 'fazioni.js', 'campi/tauri.jpg', 'config.js', 'manifest.webmanifest',
   'img/logo.png', 'img/icon-192.png', 'img/icon-512.png', 'img/icon-maskable-512.png', 'img/apple-touch-icon.png'
 ];
 

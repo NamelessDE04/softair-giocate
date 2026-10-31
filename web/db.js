@@ -132,6 +132,14 @@
     ref.set(c).catch(function (e) { console.warn('cattura non salvata', e); });
     return ref.id;
   };
+  // giocate a fazioni: eventi (posizione nei punti, ordini del comandante)
+  api.ascoltaEventi = function (gid, cb) {
+    return db.collection('giocate/' + gid + '/eventi').onSnapshot(function (qs) { cb(qs.docs.map(function (d) { return d.data(); })); }, function () { cb([]); });
+  };
+  api.scriviEvento = function (gid, e) { db.collection('giocate/' + gid + '/eventi').doc().set(e).catch(function (x) { console.warn('evento non salvato', x); }); };
+  api.leggiMembri = function (tid) {
+    return db.collection('utenti').where('team', '==', tid).get().then(function (qs) { return lista(qs); }, function () { return []; });
+  };
   api.annullaCattura = function (gid, cid) { return db.collection('giocate/' + gid + '/catture').doc(cid).delete(); };
 
   // impronta del codice di un obiettivo: nel piano della giocata c'è solo l'impronta, non il codice
