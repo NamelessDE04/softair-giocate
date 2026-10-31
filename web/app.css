@@ -437,3 +437,40 @@ input.errato { border-color: var(--ko); }
 .posa-info b { font-size: 19px; } .posa-info small { color: var(--muto); } .posa-info small.ok { color: var(--ok); }
 .posa-dist { display: grid; justify-items: center; font-family: var(--mono); font-weight: 700; font-size: 14px; }
 .posa-dist i { font-style: normal; font-size: 22px; color: var(--oro); display: inline-block; }
+
+.qr-sx .qr-nome { font-size: 56px; letter-spacing: 2px; }
+.qr-riep .qr-tab { width: 100%; border-collapse: collapse; font-size: 14px; }
+.qr-tab th, .qr-tab td { border: 1px solid #999; padding: 4px 6px; text-align: left; vertical-align: top; }
+.qr-tab th { background: #eee; }
+@media print { body.stampa-qr .qr-riep { height: auto !important; break-before: page; } body.stampa-qr .qr-riep[hidden] { display: none !important; } }
+
+/* maglia radio */
+.radio-faz { border-radius: 12px; padding: 10px 12px; display: grid; gap: 8px; border: 1px solid var(--linea); background: var(--pan); }
+.radio-faz.s-blu { border-color: var(--blu); } .radio-faz.s-rossa { border-color: var(--rossa); } .radio-faz.comune { border-color: var(--giallo); }
+.radio-faz h4 { margin: 0; color: var(--oro); }
+.radio-ed { display: grid; gap: 12px; }
+.radio-rete { display: grid; gap: 6px; padding-top: 8px; border-top: 1px solid var(--linea); }
+.radio-riga { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); gap: 6px 8px; align-items: center; }
+.radio-riga span { color: var(--muto); font-size: 14px; }
+.radio-riga input, .radio-riga select { font-family: var(--mono); font-size: 15px; padding: 8px; }
+.radio-stampa { background: var(--pan); border: 1px solid var(--linea); border-radius: 14px; padding: 12px; display: grid; gap: 10px; margin-bottom: 8px; }
+.radio-tit { font-family: var(--tit); color: var(--oro); }
+.radio-comune { border: 2px solid var(--giallo); border-radius: 10px; padding: 8px 10px; display: grid; }
+.radio-comune small { color: var(--muto); }
+.radio-tu { background: color-mix(in srgb, var(--oro) 22%, var(--pan)); border-radius: 8px; padding: 6px 10px; font-weight: 700; }
+.radio-tab { width: 100%; border-collapse: collapse; font-size: 15px; }
+.radio-tab caption { text-align: left; font-weight: 700; padding: 4px 0; }
+.radio-tab.s-blu caption { color: #8fc0ff; } .radio-tab.s-rossa caption { color: #ff9a8f; }
+.radio-tab th, .radio-tab td { border-bottom: 1px solid var(--linea); padding: 5px 4px; text-align: left; }
+.radio-tab td:nth-child(3), .radio-tab td:nth-child(4) { font-family: var(--mono); font-weight: 700; white-space: nowrap; }
+.radio-tab tr.mia td { background: color-mix(in srgb, var(--oro) 18%, transparent); }
+.radio-nota { color: var(--muto); }
+@media print {
+  body.stampa-radio { background: #fff; color: #000; padding: 0; }
+  body.stampa-radio > *:not(main), body.stampa-radio main > *, body.stampa-radio .conf > *:not(.radio-box), body.stampa-radio .radio-box > *:not(.radio-stampa) { display: none !important; }
+  body.stampa-radio main, body.stampa-radio main > .conf, body.stampa-radio .radio-box { display: block !important; }
+  body.stampa-radio .radio-stampa { background: #fff; color: #000; border: 1px solid #000; }
+  body.stampa-radio .radio-tab th, body.stampa-radio .radio-tab td { border-color: #999; color: #000; }
+  body.stampa-radio .radio-tit, body.stampa-radio .radio-tab caption { color: #000; }
+}
+@media print { html { background: #fff !important; } }

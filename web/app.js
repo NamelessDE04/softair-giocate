@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.13.1';
+  var VERSIONE = '0.14';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -92,7 +92,7 @@
     app.innerHTML = ''; window.scrollTo(0, 0);
     $('pieno').hidden = true; $('pieno').innerHTML = '';
     document.body.classList.remove('a-pieno');
-    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva }[c.v];
+    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, radio: pagRadio, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva }[c.v];
     (r || home)(c.p);
   }
   function aPieno() { document.body.classList.add('a-pieno'); var p = $('pieno'); p.hidden = false; p.innerHTML = ''; return p; }
@@ -263,6 +263,7 @@
       var adm = el('div', 'riga2');
       adm.appendChild(bottone('Modifica conflict', '', function () { vai('conflittoModifica', c.id); }));
       adm.appendChild(bottone('+ Nuovo post', 'accent', function () { editorPost(c, null); }));
+      adm.appendChild(bottone('📻 Maglia radio', '', function () { vai('radio', c.id); }));
       box.appendChild(adm);
     }
 
@@ -336,6 +337,12 @@
       posts.forEach(function (p) { bach.appendChild(cartaPost(c, p)); });
     });
     var prima = chiusura; chiusura = function () { stopB(); if (prima) prima(); };
+
+    // maglia radio: il canale comune e quella della propria fazione (l'organizzatore le vede tutte)
+    var rBox = el('div', 'radio-box'); box.appendChild(rBox);
+    var piano = {}, docs = P('conflitti') ? ['comune', 'blu', 'rossa'] : ['comune'].concat(mieFaz(c) ? [mieFaz(c)] : []);
+    var stopR = docs.map(function (d) { return S.ascoltaRadio(c.id, d, function (x) { piano[d] = x; disegnaRadio(rBox, c, piano); }); });
+    var primaR = chiusura; chiusura = function () { stopR.forEach(function (f) { f(); }); if (primaR) primaR(); };
 
     // cartina del campo
     box.appendChild(el('h3', 'sez', 'Cartina del campo'));
@@ -1197,30 +1204,42 @@
       im.src = cm.img;
     });
   }
+  // numero neutro del QR: non dice il nome dell'area né di che tipo è
+  function numeroQr(cm, p) { var i = cm.punti.indexOf(p); if (i < 0) i = cm.punti.map(function (q) { return q.id; }).indexOf(p.id); return 'QR ' + ('0' + (i + 1)).slice(-2); }
+  // foglio da consegnare a chi posa: solo QR, numero e dove metterlo
   function foglioQr(cm, p, tok) {
     var f = el('section', 'qr-foglio');
-    f.appendChild(el('div', 'qr-testa', 'AIRSOFT CONFLICT · ' + cm.nome.toUpperCase()));
+    f.appendChild(el('div', 'qr-testa', 'AIRSOFT CONFLICT · PUNTO DI CONTROLLO'));
     var corpo = el('div', 'qr-corpo'); f.appendChild(corpo);
     var sx = el('div', 'qr-sx'); corpo.appendChild(sx);
-    sx.appendChild(el('div', 'qr-tipo', DESCR[p.tipo] + (p.fazione ? ' · fazione ' + p.fazione : '')));
-    sx.appendChild(el('div', 'qr-nome', (SIMB[p.tipo] || '') + ' ' + p.nome.toUpperCase()));
-    if (p.nomi && (p.nomi.blu || p.nomi.rossa)) sx.appendChild(el('div', 'qr-nomi', 'Per i blu: ' + (p.nomi.blu || p.nome) + '  ·  Per i rossi: ' + (p.nomi.rossa || p.nome)));
+    sx.appendChild(el('div', 'qr-nome', numeroQr(cm, p)));
     var q = el('div', 'qr-codice'); q.innerHTML = svgQr(urlQr(cm, p, tok)); sx.appendChild(q);
     sx.appendChild(el('div', 'qr-tok', 'Codice: ' + tok));
     var dx = el('div', 'qr-dx'); corpo.appendChild(dx);
     dx.appendChild(el('h4', null, 'Cos\'è'));
-    dx.appendChild(el('p', null, p.tipo === 'mob'
-      ? 'La base principale: qui si rientra. Con l\'app, «Scansiona QR» segna che sei in base.'
-      : 'Un\'area da conquistare o da tenere. Durante la partita, quando sei dentro l\'area, apri l\'app e premi «Scansiona QR» (oppure inquadralo con la fotocamera del telefono): conti come presente qui per 6 minuti, anche se il GPS non ti trova.'));
+    dx.appendChild(el('p', null, 'Un punto di controllo del gioco. Durante la partita si scansiona con l\'app Airsoft Conflict (tasto «QR»), oppure inquadrandolo con la fotocamera del telefono.'));
     dx.appendChild(el('h4', null, 'Dove va messo'));
     if (p.notaQr) dx.appendChild(el('p', 'qr-nota', p.notaQr));
-    if (p.lat != null) {
-      var u = window.AC_MAPPE.utmTesto(p.lat, p.lon);
-      dx.appendChild(el('p', 'qr-coo', 'UTM ' + u + '\nLat/Lon ' + p.lat.toFixed(5) + ', ' + p.lon.toFixed(5)));
-    }
+    if (p.lat != null) dx.appendChild(el('p', 'qr-coo', 'UTM ' + window.AC_MAPPE.utmTesto(p.lat, p.lon) + '\nLat/Lon ' + p.lat.toFixed(5) + ', ' + p.lon.toFixed(5)));
     var im = new Image(); im.className = 'qr-mappa'; im.alt = ''; dx.appendChild(im);
     ritaglio(cm, p).then(function (d) { if (d) im.src = d; else im.remove(); });
-    f.appendChild(el('div', 'qr-piede', 'Non spostare e non coprire questo foglio · cerchio rosso = area di ' + (p.raggio || 30) + ' m'));
+    f.appendChild(el('div', 'qr-piede', 'Ben visibile, all\'altezza degli occhi · non spostare e non coprire · cerchio rosso = zona del punto'));
+    return f;
+  }
+  // ultimo foglio, solo per l'organizzatore: cosa c'è dietro ogni numero
+  function riepilogoQr(cm, punti, cod) {
+    var f = el('section', 'qr-foglio qr-riep');
+    f.appendChild(el('div', 'qr-testa', 'RIEPILOGO PER L\'ORGANIZZATORE · ' + cm.nome.toUpperCase() + ' · DA NON CONSEGNARE'));
+    var t = el('table', 'qr-tab'), h = el('tr');
+    ['QR', 'Area', 'Tipo', 'Nome blu', 'Nome rossi', 'Codice', 'Dove'].forEach(function (x) { h.appendChild(el('th', null, x)); });
+    t.appendChild(h);
+    punti.forEach(function (p) {
+      var r = el('tr');
+      [numeroQr(cm, p).replace('QR ', ''), p.nome, DESCR[p.tipo] + (p.fazione ? ' (' + p.fazione + ')' : ''), (p.nomi && p.nomi.blu) || '—', (p.nomi && p.nomi.rossa) || '—', cod[p.id], p.notaQr || (p.lat != null ? window.AC_MAPPE.utmTesto(p.lat, p.lon) : '')]
+        .forEach(function (x) { r.appendChild(el('td', null, x)); });
+      t.appendChild(r);
+    });
+    f.appendChild(t);
     return f;
   }
   function pagStampaQr(id) {
@@ -1229,17 +1248,20 @@
     conCampo(id, app, function (cm) {
       var box = el('div', 'qr-pagina'); app.appendChild(box);
       box.appendChild(el('p', 'hint', 'Preparo i codici…'));
-      var formato = 'a4';
+      var formato = 'a4', conRiep = true;
       function disegna(cod) {
         box.innerHTML = '';
         var ctr = el('div', 'qr-ctr');
-        ctr.appendChild(el('p', 'hint', cm.nome + ': ' + cm.punti.length + ' fogli, uno per area. Stampali, mettili in una bustina trasparente o plastificali, poi falli posare: chi li posa usa ☰ → «Posa i QR».'));
+        ctr.appendChild(el('p', 'hint', cm.nome + ': ' + cm.punti.length + ' fogli, uno per area, con un numero neutro (QR 01, QR 02…): chi li posa non vede nomi, tipi né fazioni. Stampali, mettili in una bustina trasparente o plastificali e affidali a chi li posa (☰ → «Posa i QR»).'));
         var seg = el('div', 'seg seg-largo');
         [['a4', 'Un foglio A4 per area'], ['a5', 'Due per foglio (A5)']].forEach(function (o) {
           var b = bottone(o[1], 'seg-b' + (formato === o[0] ? ' on' : ''), function () { formato = o[0]; fogli.className = 'qr-fogli ' + formato; Array.prototype.forEach.call(seg.children, function (x) { x.classList.remove('on'); }); b.classList.add('on'); });
           seg.appendChild(b);
         });
         ctr.appendChild(seg);
+        var lr = el('label', 'ed-chk'), cr = el('input'); cr.type = 'checkbox'; cr.checked = conRiep;
+        cr.onchange = function () { conRiep = cr.checked; riep.hidden = !conRiep; };
+        lr.appendChild(cr); lr.appendChild(el('span', null, 'Aggiungi in fondo il riepilogo per me (cosa c\'è dietro ogni numero)')); ctr.appendChild(lr);
         var r = el('div', 'riga2');
         r.appendChild(bottone('Stampa', 'accent', function () { document.body.classList.add('stampa-qr'); window.print(); setTimeout(function () { document.body.classList.remove('stampa-qr'); }, 500); }));
         r.appendChild(bottone('Nuovi codici', '', function () {
@@ -1249,8 +1271,8 @@
         ctr.appendChild(r);
         box.appendChild(ctr);
         var fogli = el('div', 'qr-fogli ' + formato); box.appendChild(fogli);
-        cm.punti.slice().sort(function (a, b) { return 'mobfobchiavebasetorre'.indexOf(a.tipo) - 'mobfobchiavebasetorre'.indexOf(b.tipo) || a.nome.localeCompare(b.nome); })
-          .forEach(function (p) { fogli.appendChild(foglioQr(cm, p, cod[p.id])); });
+        cm.punti.forEach(function (p) { fogli.appendChild(foglioQr(cm, p, cod[p.id])); });
+        var riep = riepilogoQr(cm, cm.punti, cod); riep.hidden = !conRiep; fogli.appendChild(riep);
       }
       S.preparaQr(cm, false).then(disegna, function (e) {
         box.innerHTML = '';
@@ -1288,7 +1310,11 @@
     conCampo(id, box, function (cm) {
       tit.textContent = 'Posa i QR · ' + cm.nome;
       var g0 = { inizio: Date.now() + 864e5, durata: 60, fazioni: [{ team: 'blu', mob: null, partenza: [] }, { team: 'rossa', mob: null, partenza: [] }] };
-      var v = F.vista(box, { g: g0, campo: cm, team: null, colori: COLORI, nomi: {}, ora: Date.now, anteprima: true });
+      var riservato = !P('mappe');
+      function etichetta(p) { return riservato ? numeroQr(cm, p) : (SIMB[p.tipo] || '') + ' ' + p.nome; }
+      // chi posa e basta vede solo i numeri: niente nomi, tipi, fazioni né collegamenti
+      var cmVista = !riservato ? cm : Object.assign({}, cm, { link: [], punti: cm.punti.map(function (p) { return Object.assign({}, p, { nome: numeroQr(cm, p), tipo: 'base', fazione: null, nomi: null }); }) });
+      var v = F.vista(box, { g: g0, campo: cmVista, team: null, colori: COLORI, nomi: {}, ora: Date.now, anteprima: true });
       var mia = null, posati = {}, soloDaPosare = false;
       var watch = navigator.geolocation ? navigator.geolocation.watchPosition(function (p) {
         mia = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy }; v.posizione(mia.lat, mia.lon, mia.acc); lista();
@@ -1302,7 +1328,7 @@
             var dati = { nome: me.callsign || me.nome || '', uid: S.stato().user.uid, t: Date.now(), lat: mia ? mia.lat : null, lon: mia ? mia.lon : null, dist: b ? b.m : null };
             return S.segnaPosa(cm.id, p.id, dati).then(function () {
               var lontano = b && b.m > Math.max(40, (p.raggio || 30) * 1.5);
-              return { ok: true, avviso: lontano, titolo: (SIMB[p.tipo] || '') + ' ' + p.nome + ' posato',
+              return { ok: true, avviso: lontano, titolo: etichetta(p) + ' posato',
                 testo: lontano ? 'Attenzione: secondo il GPS sei a ' + b.m + ' m dal punto previsto (verso ' + b.dir + '). Se il foglio è nel posto giusto va bene così.' : 'Segnato come posato. ' + (b ? 'Sei a ' + b.m + ' m dal centro dell\'area.' : '') };
             });
           });
@@ -1323,24 +1349,201 @@
           .sort(function (a, b) { return (posati[a.p.id] ? 1 : 0) - (posati[b.p.id] ? 1 : 0) || (a.b ? a.b.m : 1e9) - (b.b ? b.b.m : 1e9); });
         aree.forEach(function (x) {
           var p = x.p, ps = posati[p.id], r = el('div', 'posa-riga' + (ps ? ' fatto' : ''));
-          r.appendChild(el('span', 'posa-stato', ps ? '✓' : (SIMB[p.tipo] || '●')));
+          r.appendChild(el('span', 'posa-stato', ps ? '✓' : riservato ? '●' : (SIMB[p.tipo] || '●')));
           var info = el('div', 'posa-info');
-          info.appendChild(el('b', null, p.nome));
-          info.appendChild(el('small', null, p.notaQr || DESCR[p.tipo]));
+          info.appendChild(el('b', null, riservato ? numeroQr(cm, p) : p.nome));
+          info.appendChild(el('small', null, p.notaQr || (riservato ? 'Guarda la mappa e le coordinate sul foglio' : DESCR[p.tipo])));
           if (ps) info.appendChild(el('small', 'ok', 'Posato da ' + (ps.nome || '—') + ' alle ' + ora(ps.t)));
           r.appendChild(info);
           if (x.b) { var d = el('span', 'posa-dist'); var fr = el('i', null, '↑'); fr.style.transform = 'rotate(' + x.b.ang + 'deg)'; d.appendChild(fr); d.appendChild(el('span', null, x.b.m + ' m ' + x.b.dir)); r.appendChild(d); }
-          if (ps && P('mappe')) r.appendChild(bottone('✕', 'icon', function () { if (confirm('Segnare ' + p.nome + ' come da posare?')) S.togliPosa(cm.id, p.id).catch(errore); }));
+          if (ps && P('mappe')) r.appendChild(bottone('✕', 'icon', function () { if (confirm('Segnare ' + etichetta(p) + ' come da posare?')) S.togliPosa(cm.id, p.id).catch(errore); }));
           pann.appendChild(r);
         });
       }
       lista();
       var prima = chiusura; chiusura = function () { stopP(); if (watch != null) navigator.geolocation.clearWatch(watch); v.chiudi(); pg.classList.remove('posa'); if (prima) prima(); };
       if (qrInSospeso) { var t0 = qrInSospeso; qrInSospeso = null; setTimeout(function () { scansionaTesto(t0); }, 300); }
-      function scansionaTesto(t) { apriScanner('QR', function () { return S.leggiQr(cm, t).then(function (r) { if (!r.punto) return { ok: false, titolo: 'QR non valido', testo: r.errore }; return S.segnaPosa(cm.id, r.punto.id, { nome: (S.stato().me.callsign || S.stato().me.nome || ''), uid: S.stato().user.uid, t: Date.now(), lat: mia ? mia.lat : null, lon: mia ? mia.lon : null, dist: null }).then(function () { return { ok: true, titolo: r.punto.nome + ' posato' }; }); }); }); }
+      function scansionaTesto(t) { apriScanner('QR', function () { return S.leggiQr(cm, t).then(function (r) { if (!r.punto) return { ok: false, titolo: 'QR non valido', testo: r.errore }; return S.segnaPosa(cm.id, r.punto.id, { nome: (S.stato().me.callsign || S.stato().me.nome || ''), uid: S.stato().user.uid, t: Date.now(), lat: mia ? mia.lat : null, lon: mia ? mia.lon : null, dist: null }).then(function () { return { ok: true, titolo: etichetta(r.punto) + ' posato' }; }); }); }); }
     });
   }
   var qrInSospeso = null;
+
+  // ================= MAGLIA RADIO
+  var VIETATE = [[433.05, 434.79, 'LPD'], [446.0, 446.2, 'PMR446']];
+  var TONI = { blu: 88.5, rossa: 110.9 };
+  function fmtF(f) { return f == null || isNaN(f) ? '—' : f.toFixed(4); }
+  function vietata(f) { var v = VIETATE.filter(function (r) { return f >= r[0] - 1e-6 && f <= r[1] + 1e-6; })[0]; return v ? v[2] : null; }
+  // reti di una fazione: comando + una rete per squadra (o per team se non ha squadre)
+  function retiFazione(c, faz, membriDi) {
+    var reti = [{ id: 'cmd', nome: 'Comando', tipo: 'comando', team: null, squadra: null }];
+    var teams = addestramento(c) ? c.team || [] : ((c.fazioni || []).filter(function (f) { return f.id === faz; })[0] || {}).team || [];
+    teams.forEach(function (tid) {
+      var t = teamDi(tid) || { nome: 'Team', squadre: [] }, sq = t.squadre || [];
+      var membri = (membriDi[tid] || []).filter(function (u) { return !addestramento(c) || (((c.fazioneUtente || {})[u.id]) || 'blu') === faz; });
+      if (!sq.length) reti.push({ id: tid, nome: t.nome, tipo: 'squadra', team: tid, squadra: null, candidati: membri });
+      else sq.forEach(function (q) {
+        var m = membri.filter(function (u) { return u.squadra === q.id; });
+        if (addestramento(c) && !m.length) return;
+        reti.push({ id: tid + '_' + q.id, nome: t.nome + ' · ' + q.nome, tipo: 'squadra', team: tid, squadra: q.id, candidati: m.length ? m : membri });
+      });
+    });
+    return reti;
+  }
+  function pagRadio(cid) {
+    var c = D.conflitti.filter(function (x) { return x.id === cid; })[0];
+    testata('Maglia radio');
+    if (!c || !P('conflitti')) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
+    var f0 = el('div', 'modulo'); app.appendChild(f0);
+    f0.appendChild(el('p', 'hint', c.titolo + ' · ogni fazione vede solo la sua maglia; il canale di sicurezza lo vedono tutti.'));
+    var base = el('input'); base.value = '432.5375'; base.inputMode = 'decimal';
+    var passo = select([['12.5', '12,5 kHz'], ['25', '25 kHz']], '12.5');
+    var dist = select([['1', 'Un passo'], ['2', 'Due passi (consigliato)'], ['4', 'Quattro passi']], '2');
+    var toni = select([['si', 'Sì: un tono CTCSS per fazione'], ['no', 'No']], 'si');
+    var comune = select([['si', 'Sì'], ['no', 'No']], 'si');
+    var due = el('div', 'due'); due.appendChild(campoForm('Frequenza di partenza (MHz)', base)); due.appendChild(campoForm('Passo di canalizzazione', passo)); f0.appendChild(due);
+    var due2 = el('div', 'due'); due2.appendChild(campoForm('Distanza tra una rete e l\'altra', dist)); due2.appendChild(campoForm('Toni', toni)); f0.appendChild(due2);
+    f0.appendChild(campoForm('Canale comune di sicurezza (emergenze, feriti, stop gioco)', comune));
+    var nomB = el('input'), nomR = el('input'); nomB.value = addestramento(c) ? 'Lupo' : 'Aquila'; nomR.value = addestramento(c) ? 'Orso' : 'Volpe';
+    var due3 = el('div', 'due'); due3.appendChild(campoForm('Nominativo ' + nomeFaz(c, 'blu'), nomB)); due3.appendChild(campoForm('Nominativo ' + nomeFaz(c, 'rossa'), nomR)); f0.appendChild(due3);
+    f0.appendChild(el('p', 'hint', 'Le frequenze restano fuori da LPD (433,050–434,790) e PMR446. Nota: 430–440 MHz è banda radioamatoriale, in Italia serve la patente con nominativo.'));
+    var avvisi = el('div', 'radio-avvisi'), tab = el('div', 'radio-ed'); 
+    f0.appendChild(bottone('Genera la maglia', 'accent', function () { genera(); }));
+    f0.appendChild(avvisi); f0.appendChild(tab);
+    var membriDi = {}, piano = null;
+    function genera() {
+      var f = parseFloat(String(base.value).replace(',', '.')), st = parseFloat(passo.value) / 1000, sep = +dist.value, k = 0;
+      if (!(f > 30 && f < 3000)) { toast('Frequenza di partenza non valida'); return; }
+      function fr(i) { return Math.round((f + i * st) * 10000) / 10000; }
+      function prossima() { while (vietata(fr(k))) k++; var x = fr(k); k += sep; return x; }
+      var vecchio = piano;
+      piano = { comune: comune.value === 'si' ? { nome: 'Sicurezza / organizzazione', f: prossima(), nota: 'Solo emergenze, feriti e stop gioco. Lo ascoltano tutti.' } : null };
+      k += 8 * sep;
+      ['blu', 'rossa'].forEach(function (faz, iF) {
+        var nom = (iF ? nomR : nomB).value.trim() || nomeFaz(c, faz), reti = retiFazione(c, faz, membriDi);
+        reti.forEach(function (r, i) { r.nominativo = r.tipo === 'comando' ? nom + ' 6' : nom + ' ' + i; r.p = prossima(); });
+        reti.forEach(function (r) { r.a = prossima(); });
+        reti.forEach(function (r) {
+          r.tono = toni.value === 'si' ? TONI[faz] : null;
+          var cand = r.candidati || [], vr = vecchio && vecchio[faz] && vecchio[faz].reti.filter(function (x) { return x.id === r.id; })[0], vecchi = (vr && vr.marconisti) || [];
+          r.marconisti = [vecchi[0] || (cand[0] && cand[0].id) || null, vecchi[1] || (cand[1] && cand[1].id) || null];
+        });
+        piano[faz] = { fazione: faz, nome: nomeFaz(c, faz), nominativo: nom, reti: reti };
+        k += 12 * sep;
+      });
+      disegna();
+    }
+    function nomeU(uid) { var u = null; Object.keys(membriDi).forEach(function (t) { (membriDi[t] || []).forEach(function (x) { if (x.id === uid) u = x; }); }); return u ? nomeG(u) : ''; }
+    function controlla() {
+      var tutte = [], out = [];
+      if (piano.comune) tutte.push([piano.comune.f, 'Sicurezza']);
+      ['blu', 'rossa'].forEach(function (faz) { (piano[faz] ? piano[faz].reti : []).forEach(function (r) { tutte.push([r.p, piano[faz].nome + ' ' + r.nome + ' (P)']); tutte.push([r.a, piano[faz].nome + ' ' + r.nome + ' (A)']); }); });
+      tutte.forEach(function (x, i) {
+        var v = vietata(x[0]); if (v) out.push(x[1] + ': ' + fmtF(x[0]) + ' è nella banda ' + v);
+        tutte.slice(i + 1).forEach(function (y) { if (Math.abs(x[0] - y[0]) < 1e-6) out.push('Stessa frequenza per ' + x[1] + ' e ' + y[1]); });
+      });
+      ['blu', 'rossa'].forEach(function (faz) { (piano[faz] ? piano[faz].reti : []).forEach(function (r) { if (r.tipo === 'squadra' && (!r.marconisti[0] || !r.marconisti[1])) out.push(piano[faz].nome + ' · ' + r.nome + ': mancano i due marconisti'); }); });
+      return out;
+    }
+    function disegna() {
+      tab.innerHTML = '';
+      if (!piano) return;
+      if (piano.comune) {
+        var k0 = el('div', 'radio-faz comune'); k0.appendChild(el('h4', null, '⚠ ' + piano.comune.nome));
+        var r0 = el('div', 'radio-riga'); var i0 = el('input'); i0.value = fmtF(piano.comune.f); i0.onchange = function () { piano.comune.f = parseFloat(i0.value.replace(',', '.')); aggiornaAvvisi(); };
+        r0.appendChild(el('span', null, 'Frequenza')); r0.appendChild(i0); k0.appendChild(r0); tab.appendChild(k0);
+      }
+      ['blu', 'rossa'].forEach(function (faz) {
+        var P0 = piano[faz]; if (!P0) return;
+        var k = el('div', 'radio-faz s-' + faz); k.appendChild(el('h4', null, P0.nome + ' · nominativo «' + P0.nominativo + '»' + (P0.reti[0].tono ? ' · tono ' + P0.reti[0].tono : '')));
+        P0.reti.forEach(function (r) {
+          var b = el('div', 'radio-rete');
+          b.appendChild(el('b', null, r.nome + ' — «' + r.nominativo + '»'));
+          var fr = el('div', 'radio-riga');
+          ['p', 'a'].forEach(function (x) {
+            var i = el('input'); i.value = fmtF(r[x]); i.onchange = function () { r[x] = parseFloat(i.value.replace(',', '.')); aggiornaAvvisi(); };
+            fr.appendChild(el('span', null, x === 'p' ? 'Primaria' : 'Alternativa')); fr.appendChild(i);
+          });
+          b.appendChild(fr);
+          if (r.tipo === 'squadra') {
+            var mr = el('div', 'radio-riga');
+            [0, 1].forEach(function (j) {
+              var sel = select([['', '—']].concat((r.candidati || []).map(function (u) { return [u.id, nomeG(u)]; })), r.marconisti[j] || '');
+              sel.onchange = function () { r.marconisti[j] = sel.value || null; aggiornaAvvisi(); };
+              mr.appendChild(el('span', null, 'Marconista ' + (j + 1))); mr.appendChild(sel);
+            });
+            b.appendChild(mr);
+          } else b.appendChild(el('small', 'hint', 'Il comandante di fazione e i marconisti n.1 di ogni squadra.'));
+          k.appendChild(b);
+        });
+        tab.appendChild(k);
+      });
+      aggiornaAvvisi();
+      var sv = el('div', 'riga2 fisso');
+      sv.appendChild(bottone('Salva la maglia radio', 'accent big', function () {
+        var out = { comune: piano.comune };
+        ['blu', 'rossa'].forEach(function (faz) {
+          var P0 = piano[faz]; if (!P0) return;
+          out[faz] = { fazione: faz, nome: P0.nome, nominativo: P0.nominativo, reti: P0.reti.map(function (r) {
+            return { id: r.id, nome: r.nome, tipo: r.tipo, team: r.team, squadra: r.squadra, nominativo: r.nominativo, p: r.p, a: r.a, tono: r.tono, marconisti: r.marconisti, nomiMarconisti: r.marconisti.map(nomeU) };
+          }) };
+        });
+        S.salvaRadio(c.id, out).then(function () { toast('Maglia radio salvata'); indietro(); }, errore);
+      }));
+      tab.appendChild(sv);
+    }
+    function aggiornaAvvisi() {
+      avvisi.innerHTML = '';
+      controlla().forEach(function (t) { avvisi.appendChild(el('p', 'hint avviso', '! ' + t)); });
+    }
+    // dati: membri dei team e maglia già salvata
+    Promise.all((c.team || []).map(function (t) { return S.leggiMembri(t).then(function (m) { membriDi[t] = m; }); })).then(function () { return S.leggiRadio(c.id); }).then(function (r) {
+      if (r.blu || r.rossa || r.comune) {
+        piano = { comune: r.comune };
+        ['blu', 'rossa'].forEach(function (faz) {
+          if (!r[faz]) return;
+          var nuove = retiFazione(c, faz, membriDi);
+          piano[faz] = Object.assign({}, r[faz], { reti: r[faz].reti.map(function (x) { var n = nuove.filter(function (y) { return y.id === x.id; })[0]; return Object.assign({}, x, { candidati: n ? n.candidati : [] }); }) });
+        });
+        if (r.blu) nomB.value = r.blu.nominativo; if (r.rossa) nomR.value = r.rossa.nominativo;
+        if (r.comune) comune.value = 'si';
+        disegna();
+      } else genera();
+    });
+  }
+  // maglia radio vista dai giocatori, nella pagina del conflict
+  function disegnaRadio(box, c, piano) {
+    box.innerHTML = '';
+    var me = S.stato().me || {}, uid = S.stato().user.uid;
+    var fazioni = ['blu', 'rossa'].filter(function (f) { return piano[f]; });
+    if (!piano.comune && !fazioni.length) return;
+    box.appendChild(el('h3', 'sez', 'Radio'));
+    var card = el('div', 'radio-stampa');
+    card.appendChild(el('div', 'radio-tit', 'MAGLIA RADIO · ' + c.titolo.toUpperCase()));
+    if (piano.comune) {
+      var k = el('div', 'radio-comune');
+      k.appendChild(el('b', null, '⚠ ' + piano.comune.nome + ': ' + fmtF(piano.comune.f) + ' MHz'));
+      k.appendChild(el('small', null, piano.comune.nota));
+      card.appendChild(k);
+    }
+    fazioni.forEach(function (faz) {
+      var P0 = piano[faz], t = el('table', 'radio-tab s-' + faz);
+      var cap = el('caption', null, P0.nome + ' · «' + P0.nominativo + '»' + (P0.reti[0] && P0.reti[0].tono ? ' · tono CTCSS ' + P0.reti[0].tono : '')); t.appendChild(cap);
+      var h = el('tr'); ['Rete', 'Nominativo', 'Primaria', 'Alternativa', 'Marconisti'].forEach(function (x) { h.appendChild(el('th', null, x)); }); t.appendChild(h);
+      P0.reti.forEach(function (r) {
+        var mia = r.tipo === 'squadra' && r.team === me.team && (!r.squadra || r.squadra === me.squadra);
+        var marc = (r.marconisti || []).indexOf(uid);
+        var tr = el('tr', mia || marc >= 0 ? 'mia' : '');
+        [r.nome + (mia ? ' ← la tua' : ''), r.nominativo, fmtF(r.p), fmtF(r.a), r.tipo === 'comando' ? 'comandante + marconisti n.1' : (r.nomiMarconisti || []).filter(Boolean).join(', ') || '—']
+          .forEach(function (x) { tr.appendChild(el('td', null, x)); });
+        t.appendChild(tr);
+        if (marc >= 0) card.appendChild(el('div', 'radio-tu', 'Sei il marconista n.' + (marc + 1) + ' di ' + r.nome + (marc === 0 ? ': ascolti anche la rete Comando' : ': sei il ricambio, tieni la radio sulla rete della squadra')));
+      });
+      card.appendChild(t);
+    });
+    card.appendChild(el('small', 'radio-nota', 'Se la primaria è disturbata, tutta la rete passa all\'alternativa. Si torna alla primaria solo su ordine del marconista n.1.'));
+    box.appendChild(card);
+    box.appendChild(bottone('Stampa la scheda radio', 'piccolo', function () { document.body.classList.add('stampa-radio'); window.print(); setTimeout(function () { document.body.classList.remove('stampa-radio'); }, 500); }));
+  }
 
   // ================= EDITOR DELLE CARTINE (da computer)
   function pagMappa(id) {

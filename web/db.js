@@ -317,6 +317,23 @@
   api.segnaPosa = function (cid, pid, dati) { var o = {}; o[pid] = dati; return db.collection('campiPosa').doc(cid).set({ aree: o }, { merge: true }); };
   api.togliPosa = function (cid, pid) { var o = {}; o['aree.' + pid] = fb.firestore.FieldValue.delete(); return db.collection('campiPosa').doc(cid).update(o); };
 
+  // ---------- maglia radio: radio/comune (tutti gli invitati), radio/blu e radio/rossa (solo quella fazione)
+  api.ascoltaRadio = function (cid, doc, cb) {
+    return db.collection('conflitti/' + cid + '/radio').doc(doc).onSnapshot(function (s) { cb(s.exists ? s.data() : null); }, function () { cb(null); });
+  };
+  api.leggiRadio = function (cid) {
+    return Promise.all(['comune', 'blu', 'rossa'].map(function (d) { return db.collection('conflitti/' + cid + '/radio').doc(d).get().then(function (s) { return s.exists ? s.data() : null; }, function () { return null; }); }))
+      .then(function (r) { return { comune: r[0], blu: r[1], rossa: r[2] }; });
+  };
+  api.salvaRadio = function (cid, piano) {
+    var b = db.batch();
+    ['comune', 'blu', 'rossa'].forEach(function (d) {
+      var ref = db.collection('conflitti/' + cid + '/radio').doc(d);
+      if (piano[d]) b.set(ref, JSON.parse(JSON.stringify(piano[d]))); else b.delete(ref);
+    });
+    return b.commit();
+  };
+
   // eventi di gioco (posizione nei punti, ordini del comandante)
   api.ascoltaEventi = function (cid, cb) {
     return db.collection('conflitti/' + cid + '/eventi').onSnapshot(function (qs) { cb(qs.docs.map(function (d) { return d.data(); })); }, function () { cb([]); });

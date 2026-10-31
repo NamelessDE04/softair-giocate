@@ -132,6 +132,13 @@ service cloud.firestore {
         allow delete: if perm('conflitti');
       }
 
+      // Maglia radio: il canale comune lo vedono tutti gli invitati, quella di una fazione solo i suoi giocatori
+      match /radio/{doc} {
+        allow read: if perm('conflitti') || (invitato() && (doc == 'comune'
+          || doc == c().get('fazioneUtente', {}).get(request.auth.uid, c().fazioneDi[myTeam()])));
+        allow write: if perm('conflitti');
+      }
+
       // Risposte agli inviti: ognuno vede la sua; tutte solo con il permesso "risposte"
       match /adesioni/{uid} {
         allow read: if perm('conflitti') || (invitato() && (request.auth.uid == uid || perm('risposte')));
