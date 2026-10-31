@@ -347,3 +347,12 @@ input.errato { border-color: var(--ko); }
 .basi-r.s-blu { background: color-mix(in srgb, var(--blu) 30%, var(--pan)); border: 1px solid var(--blu); }
 .basi-r.s-rossa { background: color-mix(in srgb, var(--rossa) 30%, var(--pan)); border: 1px solid var(--rossa); }
 .basi-r small { color: var(--ink); opacity: .85; }
+
+/* stile scuro della mappa in gioco */
+.fz-img.con-tema { filter: none; }
+.fz.tema-scuro .fz-map { background: #1d1915; }
+.fz.tema-scuro .fz-map::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(ellipse at 50% 45%, transparent 55%, rgba(10,8,6,.6)); }
+.ed-temi { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ed-tema { display: grid; gap: 4px; padding: 6px; border-radius: 10px; border: 2px solid var(--linea); background: var(--pan2); color: var(--ink); cursor: pointer; font: 600 14px var(--txt); text-align: left; }
+.ed-tema img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: #000; }
+.ed-tema.on { border-color: var(--oro); }

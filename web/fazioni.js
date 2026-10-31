@@ -157,6 +157,48 @@
     ms = Math.max(0, ms); var s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
     return (h ? h + ':' + ('0' + m).slice(-2) : m) + ':' + ('0' + s % 60).slice(-2);
   }
+  // ---------- stile della mappa in gioco: la cartina viene "ridisegnata" scura, come un'incisione (solo a schermo)
+  var TEMI = {
+    seppia: { nome: 'Incisione seppia', bg: [38, 32, 27], ink: [222, 204, 172] },
+    militare: { nome: 'Verde militare', bg: [30, 33, 26], ink: [196, 206, 170] },
+    notte: { nome: 'Notte', bg: [22, 24, 28], ink: [190, 200, 215] },
+    originale: { nome: 'Originale (colori della cartina)' }
+  };
+  var cacheTemi = {};
+  function applicaTema(src, tema) {
+    var T = TEMI[tema];
+    if (!T || !T.bg || !src) return Promise.resolve(null);
+    var chiave = tema + ':' + src.length + ':' + src.slice(-40);
+    if (cacheTemi[chiave]) return cacheTemi[chiave];
+    cacheTemi[chiave] = new Promise(function (ok) {
+      var im = new Image();
+      im.onload = function () {
+        try {
+          var cv = document.createElement('canvas'); cv.width = im.naturalWidth; cv.height = im.naturalHeight;
+          var x = cv.getContext('2d'); x.drawImage(im, 0, 0);
+          var d = x.getImageData(0, 0, cv.width, cv.height), p = d.data, i;
+          // il colore di fondo della cartina (il più frequente, chiaro) diventa lo sfondo scuro; le linee diventano chiare
+          var h = new Uint32Array(256), tot = 0;
+          for (i = 0; i < p.length; i += 16) { h[Math.round(0.3 * p[i] + 0.59 * p[i + 1] + 0.11 * p[i + 2])]++; tot++; }
+          var acc = 0, med = 200; for (var k = 255; k >= 0; k--) { acc += h[k]; if (acc > tot * 0.5) { med = k; break; } }
+          var off = 1 - med / 255 + 0.04, gain = 1 / Math.max(0.25, (med / 255) * 0.75), bg = T.bg, ink = T.ink;
+          for (i = 0; i < p.length; i += 4) {
+            var L = (0.3 * p[i] + 0.59 * p[i + 1] + 0.11 * p[i + 2]) / 255;
+            var t = Math.min(1, Math.max(0, (1 - L - off) * gain)); t = Math.pow(t, 0.7);
+            var n = (Math.random() - 0.5) * 6;
+            p[i] = bg[0] + (ink[0] - bg[0]) * t + n; p[i + 1] = bg[1] + (ink[1] - bg[1]) * t + n; p[i + 2] = bg[2] + (ink[2] - bg[2]) * t + n;
+          }
+          x.putImageData(d, 0, 0);
+          cv.toBlob(function (b) { ok(b ? URL.createObjectURL(b) : null); }, 'image/jpeg', 0.9);
+        } catch (e) { ok(null); }
+      };
+      im.onerror = function () { ok(null); };
+      im.src = src;
+    });
+    return cacheTemi[chiave];
+  }
+  function temaDi(campo) { return campo.tema || 'seppia'; }
+
   // nomi delle aree come li vede una fazione (es. "Cervino" per una, "Atlanta" per l'altra)
   function localizza(campo, team) {
     if (!team) return campo;
@@ -169,7 +211,15 @@
     box.innerHTML = '';
     box.classList.add('fz');
     var mapBox = el('div', 'fz-map'), inner = el('div', 'fz-inner'), img = new Image();
-    img.src = campo.img; img.className = 'fz-img'; img.draggable = false;
+    var tema = temaDi(campo);
+    img.className = 'fz-img'; img.draggable = false;
+    if (TEMI[tema] && TEMI[tema].bg) {
+      box.classList.add('tema-scuro'); img.classList.add('con-tema'); img.style.visibility = 'hidden';
+      applicaTema(campo.img, tema).then(function (u) {
+        if (u) img.src = u; else { img.classList.remove('con-tema'); img.src = campo.img; }
+        img.style.visibility = '';
+      });
+    } else img.src = campo.img;
     var svgNS = 'http://www.w3.org/2000/svg', svg = document.createElementNS(svgNS, 'svg');
     svg.setAttribute('viewBox', '0 0 ' + campo.w + ' ' + campo.h); svg.setAttribute('class', 'fz-svg');
     inner.style.width = campo.w + 'px'; inner.style.height = campo.h + 'px';
@@ -520,5 +570,5 @@
     };
   }
 
-  window.S40F = { stato: stato, ordiniIA: ordiniIA, vista: vista, prova: prova, zonaDi: zonaDi, REGOLE: REGOLE, mmss: mmss, hms: hms };
+  window.S40F = { TEMI: TEMI, applicaTema: applicaTema, stato: stato, ordiniIA: ordiniIA, vista: vista, prova: prova, zonaDi: zonaDi, REGOLE: REGOLE, mmss: mmss, hms: hms };
 })();

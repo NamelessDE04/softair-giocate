@@ -425,6 +425,19 @@
       return b;
     }
     function pCartina(body) {
+      if (c.img && window.S40F) {
+        body.appendChild(el('h4', 'ed-tit', 'Stile della mappa in gioco'));
+        var temi = el('div', 'ed-temi'), TEMI = window.S40F.TEMI;
+        Object.keys(TEMI).forEach(function (k) {
+          var b = el('button', 'ed-tema' + ((c.tema || 'seppia') === k ? ' on' : '')); b.type = 'button';
+          var th = new Image(); th.alt = ''; b.appendChild(th); b.appendChild(el('span', null, TEMI[k].nome));
+          miniatura().then(function (src) { return k === 'originale' ? src : window.S40F.applicaTema(src, k); }).then(function (u) { if (u) th.src = u; });
+          b.onclick = function () { c.tema = k; modificato = true; pannello(); };
+          temi.appendChild(b);
+        });
+        body.appendChild(temi);
+        body.appendChild(el('p', 'ed-txt muto', 'Lo stile cambia solo la mappa che vedono i giocatori nell\'app; qui nell\'editor resta la cartina originale.'));
+      }
       body.appendChild(el('h4', 'ed-tit', 'Dal web, già georeferenziata'));
       var centro = el('input'); centro.placeholder = '32T 375000 4983000 oppure 44.99, 7.41';
       if (geoScelta.centro) centro.value = geoScelta.centro;
@@ -511,6 +524,22 @@
       body.appendChild(btn(c.img ? 'Sostituisci con un file…' : 'Carica immagine o PDF…', '', function () { file.click(); }));
       if (c.img) body.appendChild(el('p', 'ed-txt muto', 'Sostituendo la cartina, le aree con coordinate restano al loro posto.'));
     }
+    // ritaglio piccolo della cartina per le miniature degli stili
+    var miniProm = null;
+    function miniatura() {
+      if (miniProm) return miniProm;
+      miniProm = new Promise(function (ok) {
+        var im = new Image();
+        im.onload = function () {
+          var cv = document.createElement('canvas'), s0 = Math.min(im.naturalWidth, im.naturalHeight) * 0.45;
+          cv.width = cv.height = 220;
+          cv.getContext('2d').drawImage(im, (im.naturalWidth - s0) / 2, (im.naturalHeight - s0) / 2, s0, s0, 0, 0, 220, 220);
+          ok(cv.toDataURL('image/jpeg', 0.85));
+        };
+        im.src = c.img;
+      });
+      return miniProm;
+    }
     var geoScelta = { sfondo: 'otm', livelli: [], toccato: {}, wmsAltro: {}, lar: 1200, alt: 1500 };
     var ante = null;
     function mostraAnteprima(p) {
@@ -524,7 +553,7 @@
     function applicaGeoportale(r) {
       // le aree esistenti restano dove sono nel mondo reale: si ricalcolano dalle loro coordinate
       c.punti.forEach(function (p) { if (p.lat != null) p.fonte = 'coord'; });
-      c.w = r.w; c.h = r.h; c.img = r.d; imgNuova = r.d;
+      c.w = r.w; c.h = r.h; c.img = r.d; imgNuova = r.d; miniProm = null;
       c.controllo = r.angoli.map(function (a) { return { x: a.x, y: a.y, lat: a.lat, lon: a.lon, testo: utmTesto(a.lat, a.lon) }; });
       img.onload = function () { adatta(); };
       img.src = r.d;
@@ -649,7 +678,7 @@
           var sx = r.w / c.w, sy = r.h / c.h;
           c.punti.forEach(function (p) { p.x *= sx; p.y *= sy; }); c.controllo.forEach(function (p) { p.x *= sx; p.y *= sy; });
         }
-        c.w = r.w; c.h = r.h; c.img = r.d; imgNuova = r.d; img.src = r.d;
+        c.w = r.w; c.h = r.h; c.img = r.d; imgNuova = r.d; img.src = r.d; miniProm = null;
         if (!c.nome && f.name) c.nome = f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
         tab = c.controllo.length ? tab : 'geo';
         img.onload = function () { adatta(); };
@@ -672,6 +701,7 @@
           fazione: conFazione(p.tipo) ? (p.fazione || null) : null,
           nomi: { blu: (p.nomi && p.nomi.blu || '').trim() || null, rossa: (p.nomi && p.nomi.rossa || '').trim() || null } }; }),
         link: c.link.map(function (l) { return [l[0], l[1]]; }),
+        tema: c.tema || 'seppia',
         parti: c.parti || 0, imgVer: c.imgVer || null, aggiornato: Date.now()
       };
       opts.onSalva(out, imgNuova).then(function (salvato) {
