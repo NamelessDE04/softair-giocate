@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.14';
+  var VERSIONE = '0.14.1';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -1370,7 +1370,8 @@
 
   // ================= MAGLIA RADIO
   var VIETATE = [[433.05, 434.79, 'LPD'], [446.0, 446.2, 'PMR446']];
-  var TONI = { blu: 88.5, rossa: 110.9 };
+  var TONI = { ctcss: { blu: '88.5', rossa: '110.9' }, dcs: { blu: 'D125N', rossa: 'D243N' } };
+  function testoTono(r) { return !r || !r.tono ? '' : (r.tipoTono === 'dcs' ? 'DCS ' + r.tono : 'CTCSS ' + r.tono + ' Hz'); }
   function fmtF(f) { return f == null || isNaN(f) ? '—' : f.toFixed(4); }
   function vietata(f) { var v = VIETATE.filter(function (r) { return f >= r[0] - 1e-6 && f <= r[1] + 1e-6; })[0]; return v ? v[2] : null; }
   // reti di una fazione: comando + una rete per squadra (o per team se non ha squadre)
@@ -1398,10 +1399,14 @@
     var base = el('input'); base.value = '432.5375'; base.inputMode = 'decimal';
     var passo = select([['12.5', '12,5 kHz'], ['25', '25 kHz']], '12.5');
     var dist = select([['1', 'Un passo'], ['2', 'Due passi (consigliato)'], ['4', 'Quattro passi']], '2');
-    var toni = select([['si', 'Sì: un tono CTCSS per fazione'], ['no', 'No']], 'si');
+    var toni = select([['no', 'Nessuno'], ['ctcss', 'CTCSS, uno per fazione'], ['dcs', 'DCS, uno per fazione']], 'no');
     var comune = select([['si', 'Sì'], ['no', 'No']], 'si');
     var due = el('div', 'due'); due.appendChild(campoForm('Frequenza di partenza (MHz)', base)); due.appendChild(campoForm('Passo di canalizzazione', passo)); f0.appendChild(due);
-    var due2 = el('div', 'due'); due2.appendChild(campoForm('Distanza tra una rete e l\'altra', dist)); due2.appendChild(campoForm('Toni', toni)); f0.appendChild(due2);
+    var due2 = el('div', 'due'); due2.appendChild(campoForm('Distanza tra una rete e l\'altra', dist)); due2.appendChild(campoForm('Toni (facoltativi)', toni)); f0.appendChild(due2);
+    var tB = el('input'), tR = el('input'), dueT = el('div', 'due'), tLab = campoForm('Codice ' + nomeFaz(c, 'blu'), tB), tLab2 = campoForm('Codice ' + nomeFaz(c, 'rossa'), tR);
+    dueT.appendChild(tLab); dueT.appendChild(tLab2); f0.appendChild(dueT);
+    function mostraToni() { dueT.hidden = toni.value === 'no'; if (toni.value !== 'no') { tB.value = TONI[toni.value].blu; tR.value = TONI[toni.value].rossa; } }
+    toni.onchange = mostraToni; mostraToni();
     f0.appendChild(campoForm('Canale comune di sicurezza (emergenze, feriti, stop gioco)', comune));
     var nomB = el('input'), nomR = el('input'); nomB.value = addestramento(c) ? 'Lupo' : 'Aquila'; nomR.value = addestramento(c) ? 'Orso' : 'Volpe';
     var due3 = el('div', 'due'); due3.appendChild(campoForm('Nominativo ' + nomeFaz(c, 'blu'), nomB)); due3.appendChild(campoForm('Nominativo ' + nomeFaz(c, 'rossa'), nomR)); f0.appendChild(due3);
@@ -1423,7 +1428,8 @@
         reti.forEach(function (r, i) { r.nominativo = r.tipo === 'comando' ? nom + ' 6' : nom + ' ' + i; r.p = prossima(); });
         reti.forEach(function (r) { r.a = prossima(); });
         reti.forEach(function (r) {
-          r.tono = toni.value === 'si' ? TONI[faz] : null;
+          r.tipoTono = toni.value === 'no' ? null : toni.value;
+          r.tono = toni.value === 'no' ? null : ((faz === 'blu' ? tB : tR).value.trim() || TONI[toni.value][faz]);
           var cand = r.candidati || [], vr = vecchio && vecchio[faz] && vecchio[faz].reti.filter(function (x) { return x.id === r.id; })[0], vecchi = (vr && vr.marconisti) || [];
           r.marconisti = [vecchi[0] || (cand[0] && cand[0].id) || null, vecchi[1] || (cand[1] && cand[1].id) || null];
         });
@@ -1454,7 +1460,7 @@
       }
       ['blu', 'rossa'].forEach(function (faz) {
         var P0 = piano[faz]; if (!P0) return;
-        var k = el('div', 'radio-faz s-' + faz); k.appendChild(el('h4', null, P0.nome + ' · nominativo «' + P0.nominativo + '»' + (P0.reti[0].tono ? ' · tono ' + P0.reti[0].tono : '')));
+        var k = el('div', 'radio-faz s-' + faz); k.appendChild(el('h4', null, P0.nome + ' · nominativo «' + P0.nominativo + '»' + (P0.reti[0].tono ? ' · ' + testoTono(P0.reti[0]) : '')));
         P0.reti.forEach(function (r) {
           var b = el('div', 'radio-rete');
           b.appendChild(el('b', null, r.nome + ' — «' + r.nominativo + '»'));
@@ -1484,7 +1490,7 @@
         ['blu', 'rossa'].forEach(function (faz) {
           var P0 = piano[faz]; if (!P0) return;
           out[faz] = { fazione: faz, nome: P0.nome, nominativo: P0.nominativo, reti: P0.reti.map(function (r) {
-            return { id: r.id, nome: r.nome, tipo: r.tipo, team: r.team, squadra: r.squadra, nominativo: r.nominativo, p: r.p, a: r.a, tono: r.tono, marconisti: r.marconisti, nomiMarconisti: r.marconisti.map(nomeU) };
+            return { id: r.id, nome: r.nome, tipo: r.tipo, team: r.team, squadra: r.squadra, nominativo: r.nominativo, p: r.p, a: r.a, tono: r.tono || null, tipoTono: r.tipoTono || null, marconisti: r.marconisti, nomiMarconisti: r.marconisti.map(nomeU) };
           }) };
         });
         S.salvaRadio(c.id, out).then(function () { toast('Maglia radio salvata'); indietro(); }, errore);
@@ -1505,6 +1511,8 @@
           piano[faz] = Object.assign({}, r[faz], { reti: r[faz].reti.map(function (x) { var n = nuove.filter(function (y) { return y.id === x.id; })[0]; return Object.assign({}, x, { candidati: n ? n.candidati : [] }); }) });
         });
         if (r.blu) nomB.value = r.blu.nominativo; if (r.rossa) nomR.value = r.rossa.nominativo;
+        var r0 = (r.blu || r.rossa || { reti: [] }).reti[0];
+        if (r0 && r0.tono) { toni.value = r0.tipoTono || 'ctcss'; mostraToni(); if (r.blu && r.blu.reti[0]) tB.value = r.blu.reti[0].tono; if (r.rossa && r.rossa.reti[0]) tR.value = r.rossa.reti[0].tono; }
         if (r.comune) comune.value = 'si';
         disegna();
       } else genera();
@@ -1527,7 +1535,7 @@
     }
     fazioni.forEach(function (faz) {
       var P0 = piano[faz], t = el('table', 'radio-tab s-' + faz);
-      var cap = el('caption', null, P0.nome + ' · «' + P0.nominativo + '»' + (P0.reti[0] && P0.reti[0].tono ? ' · tono CTCSS ' + P0.reti[0].tono : '')); t.appendChild(cap);
+      var cap = el('caption', null, P0.nome + ' · «' + P0.nominativo + '»' + (P0.reti[0] && P0.reti[0].tono ? ' · ' + testoTono(P0.reti[0]) : '')); t.appendChild(cap);
       var h = el('tr'); ['Rete', 'Nominativo', 'Primaria', 'Alternativa', 'Marconisti'].forEach(function (x) { h.appendChild(el('th', null, x)); }); t.appendChild(h);
       P0.reti.forEach(function (r) {
         var mia = r.tipo === 'squadra' && r.team === me.team && (!r.squadra || r.squadra === me.squadra);
