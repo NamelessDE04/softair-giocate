@@ -319,3 +319,5 @@ input.errato { border-color: var(--ko); }
 .btn.chip { min-height: 34px; padding: 0 10px; font-size: 15px; font-weight: 600; }
 .btn.chip.on.s-blu { background: var(--blu); border-color: var(--blu); color: #fff; }
 .btn.chip.on.s-rossa { background: var(--rossa); border-color: var(--rossa); color: #fff; }
+
+.ed-tit { color: var(--oro); margin: 6px 0 0; font-size: 17px; }

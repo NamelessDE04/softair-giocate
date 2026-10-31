@@ -81,6 +81,96 @@
     });
   }
 
+  // ---------- cartografia dal Geoportale Piemonte (WMS): la porzione scelta arriva già georeferenziata
+  var SORGENTI = [
+    { id: 'colori', nome: 'BDTRE · sfondo a colori', caps: 'https://geomap.reteunitaria.piemonte.it/WEBCAT/CAPABILITIES/wms_regp_sfondo_bdtre.xml', layer: 'regp_sfondo_bdtre', crediti: '© Regione Piemonte – BDTRE' },
+    { id: 'bn', nome: 'BDTRE · sfondo in bianco e nero', caps: 'https://geomap.reteunitaria.piemonte.it/WEBCAT/CAPABILITIES/wms_regp_sfondo_bdtre.xml', layer: 'regp_sfondo_bdtre_bn', crediti: '© Regione Piemonte – BDTRE' },
+    { id: 'topo', nome: 'BDTRE · topografica di dettaglio', caps: 'https://geomap.reteunitaria.piemonte.it/ws/taims/rp-01/taimswms/bdtre_topo?service=WMS&request=GetCapabilities', layer: null, crediti: '© Regione Piemonte – BDTRE' },
+    { id: 'altro', nome: 'Altro servizio WMS (indirizzo)…', caps: '', layer: null, crediti: '' }
+  ];
+  var CRS_BUONI = ['EPSG:32632', 'EPSG:25832', 'EPSG:3857', 'EPSG:900913', 'EPSG:4326'];
+  function leggiCaps(url) {
+    return fetch(url, { mode: 'cors' }).then(function (r) { if (!r.ok) throw new Error('il servizio risponde ' + r.status); return r.text(); }, function () {
+      throw new Error('CORS');
+    }).then(function (t) {
+      var x = new DOMParser().parseFromString(t, 'text/xml'), root = x.documentElement;
+      if (!root || /exception/i.test(root.nodeName)) throw new Error('risposta del servizio non valida');
+      var ver = root.getAttribute('version') || '1.3.0';
+      var gm = x.getElementsByTagName('GetMap')[0], href = '';
+      if (gm) { var or = gm.getElementsByTagName('OnlineResource'); for (var i = 0; i < or.length; i++) { href = or[i].getAttribute('xlink:href') || or[i].getAttributeNS('http://www.w3.org/1999/xlink', 'href') || ''; if (href) break; } }
+      var formati = gm ? Array.prototype.map.call(gm.getElementsByTagName('Format'), function (f) { return f.textContent.trim(); }) : [];
+      var layers = [];
+      Array.prototype.forEach.call(x.getElementsByTagName('Layer'), function (L) {
+        var n = null, tt = null;
+        for (var k = 0; k < L.children.length; k++) { if (L.children[k].nodeName === 'Name') n = L.children[k].textContent.trim(); if (L.children[k].nodeName === 'Title') tt = L.children[k].textContent.trim(); }
+        if (n) layers.push({ nome: n, titolo: tt || n });
+      });
+      var crs = Array.prototype.map.call(x.getElementsByTagName(ver >= '1.3' ? 'CRS' : 'SRS'), function (e) { return e.textContent.trim().toUpperCase(); });
+      return { ver: ver, href: href || url.split('?')[0], formati: formati, layers: layers, crs: crs };
+    });
+  }
+  // proiezioni: dalla CRS a lat/lon e viceversa
+  function verso(crs, lat, lon) {
+    if (crs === 'EPSG:32632' || crs === 'EPSG:25832') { var u = U.daLatLon(lat, lon, 32); return [u.E, u.N]; }
+    if (crs === 'EPSG:3857' || crs === 'EPSG:900913') { var R = 6378137; return [R * lon * Math.PI / 180, R * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))]; }
+    return [lon, lat];
+  }
+  function daCrs(crs, X, Y) {
+    if (crs === 'EPSG:32632' || crs === 'EPSG:25832') return U.aLatLon(32, true, X, Y);
+    if (crs === 'EPSG:3857' || crs === 'EPSG:900913') { var R = 6378137; return { lon: X / R * 180 / Math.PI, lat: (2 * Math.atan(Math.exp(Y / R)) - Math.PI / 2) * 180 / Math.PI }; }
+    return { lon: X, lat: Y };
+  }
+  function urlGetMap(caps, crs, layer, bb, w, h, fmt) {
+    var v13 = caps.ver >= '1.3', b = (v13 && crs === 'EPSG:4326') ? [bb[1], bb[0], bb[3], bb[2]] : bb;
+    var p = { SERVICE: 'WMS', VERSION: caps.ver, REQUEST: 'GetMap', LAYERS: layer, STYLES: '', FORMAT: fmt, TRANSPARENT: 'FALSE', WIDTH: w, HEIGHT: h, BBOX: b.join(',') };
+    p[v13 ? 'CRS' : 'SRS'] = crs;
+    var h = caps.href, base = /[?&]$/.test(h) ? h : h + (h.indexOf('?') >= 0 ? '&' : '?');
+    return base + Object.keys(p).map(function (k) { return k + '=' + encodeURIComponent(p[k]); }).join('&');
+  }
+  function caricaImg(url) {
+    return new Promise(function (ok, ko) { var i = new Image(); i.crossOrigin = 'anonymous'; i.onload = function () { ok(i); }; i.onerror = function () { ko(new Error('CORS')); }; i.src = url; });
+  }
+  /* zona: { lat, lon (centro), larghezza (m), altezza (m) } -> { d, w, h, angoli:[{x,y,lat,lon}] } */
+  function scaricaWms(sorg, urlAltro, layerScelto, zona, avanzamento) {
+    var capsUrl = sorg.id === 'altro' ? urlAltro : sorg.caps;
+    return leggiCaps(capsUrl).then(function (caps) {
+      var crs = CRS_BUONI.filter(function (k) { return caps.crs.indexOf(k) >= 0; })[0];
+      if (!crs) throw new Error('il servizio non offre coordinate UTM 32N, Web Mercator o WGS84');
+      var layer = layerScelto || sorg.layer || (caps.layers[0] && caps.layers[0].nome);
+      if (!layer) throw new Error('nessun livello nel servizio');
+      var fmt = caps.formati.indexOf('image/png') >= 0 || !caps.formati.length ? 'image/png' : caps.formati.indexOf('image/jpeg') >= 0 ? 'image/jpeg' : caps.formati[0];
+      // riquadro nella proiezione del servizio, che contiene la zona richiesta
+      var u = U.daLatLon(zona.lat, zona.lon, 32), hw = zona.larghezza / 2, hh = zona.altezza / 2;
+      var ang = [[u.E - hw, u.N + hh], [u.E + hw, u.N + hh], [u.E + hw, u.N - hh], [u.E - hw, u.N - hh]].map(function (q) { var ll = U.aLatLon(32, true, q[0], q[1]); return verso(crs, ll.lat, ll.lon); });
+      var x0 = Math.min.apply(null, ang.map(function (q) { return q[0]; })), x1 = Math.max.apply(null, ang.map(function (q) { return q[0]; }));
+      var y0 = Math.min.apply(null, ang.map(function (q) { return q[1]; })), y1 = Math.max.apply(null, ang.map(function (q) { return q[1]; }));
+      var asp = (x1 - x0) / (y1 - y0), W, H;
+      var lato = Math.min(LATO, Math.max(zona.larghezza, zona.altezza) / 0.35);   // circa 35 cm per pixel, al massimo 3000 px
+      if (asp >= 1) { W = Math.round(lato); H = Math.round(lato / asp); } else { H = Math.round(lato); W = Math.round(lato * asp); }
+      var T = 1000, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      var cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, W, H);
+      var pezzi = [];
+      for (var py = 0; py < H; py += T) for (var px = 0; px < W; px += T) pezzi.push([px, py, Math.min(T, W - px), Math.min(T, H - py)]);
+      var fatti = 0;
+      return Promise.all(pezzi.map(function (pz) {
+        var bb = [x0 + (x1 - x0) * pz[0] / W, y1 - (y1 - y0) * (pz[1] + pz[3]) / H, x0 + (x1 - x0) * (pz[0] + pz[2]) / W, y1 - (y1 - y0) * pz[1] / H];
+        return caricaImg(urlGetMap(caps, crs, layer, bb, pz[2], pz[3], fmt)).then(function (im) {
+          cx.drawImage(im, pz[0], pz[1], pz[2], pz[3]); fatti++; if (avanzamento) avanzamento(fatti, pezzi.length);
+        });
+      })).then(function () {
+        var cr = sorg.crediti || (layer + ' – ' + (capsUrl.split('/')[2] || ''));
+        cx.font = '600 ' + Math.round(W / 90) + 'px sans-serif'; var tw = cx.measureText(cr).width, pad = W / 200;
+        cx.fillStyle = 'rgba(255,255,255,.85)'; cx.fillRect(W - tw - pad * 3, H - W / 60 - pad * 2, tw + pad * 3, W / 60 + pad * 2);
+        cx.fillStyle = '#222'; cx.textAlign = 'right'; cx.textBaseline = 'bottom'; cx.fillText(cr, W - pad * 1.5, H - pad);
+        var r;
+        try { r = daCanvas(cv); } catch (e) { throw new Error('CORS'); }
+        var angoli = [[0, 0, x0, y1], [W, 0, x1, y1], [W, H, x1, y0], [0, H, x0, y0]].map(function (a) { var ll = daCrs(crs, a[2], a[3]); return { x: a[0], y: a[1], lat: ll.lat, lon: ll.lon }; });
+        r.angoli = angoli; r.crs = crs; r.layer = layer;
+        return r;
+      });
+    });
+  }
+
   /* opts: { campo (completo o null), onSalva(campo, imgNuova) -> Promise<campo>, onElimina(campo) -> Promise, onChiudi() } */
   function apri(box, opts) {
     var c = opts.campo ? JSON.parse(JSON.stringify(opts.campo)) : { id: null, nome: '', w: 0, h: 0, img: '', geo: null, mPerPx: null, controllo: [], punti: [], link: [] };
@@ -266,9 +356,59 @@
       return b;
     }
     function pCartina(body) {
-      body.appendChild(el('p', 'ed-txt', 'Carica la cartina del campo: un\'immagine (JPG, PNG) oppure il PDF. Meglio se ha la griglia UTM stampata, così la georeferenzi con precisione.'));
-      body.appendChild(btn(c.img ? 'Sostituisci la cartina…' : 'Carica immagine o PDF…', 'accent', function () { file.click(); }));
-      if (c.img) body.appendChild(el('p', 'ed-txt muto', 'Se la sostituisci con una dello stesso campo e stesse proporzioni, le aree restano al loro posto. Le coordinate vanno controllate.'));
+      body.appendChild(el('h4', 'ed-tit', 'Dal Geoportale Piemonte'));
+      body.appendChild(el('p', 'ed-txt', 'Scegli il centro e la grandezza della zona: la cartina arriva già georeferenziata, senza punti di controllo.'));
+      var sSel = el('select'); SORGENTI.forEach(function (o) { var x = el('option', null, o.nome); x.value = o.id; sSel.appendChild(x); });
+      sSel.value = geoScelta.sorg; body.appendChild(campoF('Cartografia', sSel));
+      var altro = el('input'); altro.placeholder = 'https://…?service=WMS&request=GetCapabilities'; altro.value = geoScelta.url || '';
+      var altroL = campoF('Indirizzo del servizio WMS', altro); body.appendChild(altroL);
+      var lay = el('input'); lay.placeholder = 'nome del livello (vuoto = il primo)'; lay.value = geoScelta.layer || '';
+      var layL = campoF('Livello', lay); body.appendChild(layL);
+      function mostraAltro() { altroL.hidden = layL.hidden = sSel.value !== 'altro'; }
+      sSel.onchange = function () { geoScelta.sorg = sSel.value; mostraAltro(); }; mostraAltro();
+      var centro = el('input'); centro.placeholder = '32T 375000 4983000 oppure 44.99, 7.41';
+      if (geoScelta.centro) centro.value = geoScelta.centro;
+      else if (c.geo) { var ll0 = U.daPixel(c.geo, c.w / 2, c.h / 2); centro.value = utmTesto(ll0.lat, ll0.lon); }
+      body.appendChild(campoF('Centro della zona', centro));
+      var dim = el('div', 'due');
+      var lar = el('select'), alt = el('select');
+      [400, 600, 800, 1000, 1200, 1500, 2000, 2500, 3000].forEach(function (m) {
+        [lar, alt].forEach(function (s2) { var o = el('option', null, m >= 1000 ? (m / 1000).toString().replace('.', ',') + ' km' : m + ' m'); o.value = m; s2.appendChild(o); });
+      });
+      lar.value = geoScelta.lar; alt.value = geoScelta.alt;
+      dim.appendChild(campoF('Larghezza', lar)); dim.appendChild(campoF('Altezza', alt));
+      body.appendChild(dim);
+      var msg = el('p', 'ed-txt muto');
+      var vai = btn(c.img ? 'Sostituisci con questa zona' : 'Prendi questa zona', 'accent', function () {
+        var ll = leggiCoordinate(centro.value, zonaPred);
+        if (!ll) { centro.classList.add('errato'); msg.className = 'ed-txt ko'; msg.textContent = 'Scrivi il centro in UTM (32T 375000 4983000) o lat, lon.'; return; }
+        if (sSel.value === 'altro' && !/^https:\/\//.test(altro.value.trim())) { msg.className = 'ed-txt ko'; msg.textContent = 'Serve un indirizzo https del servizio WMS.'; return; }
+        geoScelta = { sorg: sSel.value, url: altro.value.trim(), layer: lay.value.trim(), centro: centro.value, lar: +lar.value, alt: +alt.value };
+        vai.disabled = true; msg.className = 'ed-txt muto'; msg.textContent = 'Collegamento al servizio…';
+        var sorg = SORGENTI.filter(function (o) { return o.id === sSel.value; })[0];
+        scaricaWms(sorg, geoScelta.url, sSel.value === 'altro' ? geoScelta.layer : null, { lat: ll.lat, lon: ll.lon, larghezza: geoScelta.lar, altezza: geoScelta.alt }, function (n, tot) { msg.textContent = 'Scarico la cartina… ' + n + '/' + tot; })
+          .then(function (r) { applicaGeoportale(r); }, function (e) {
+            vai.disabled = false; msg.className = 'ed-txt ko';
+            msg.textContent = e.message === 'CORS'
+              ? 'Il servizio non permette alle app esterne di scaricare la cartina (blocco del browser). Puoi esportare la zona dal Geoportale come immagine o PDF e caricarla qui sotto.'
+              : 'Non riesco a scaricare la cartina: ' + e.message;
+          });
+      });
+      body.appendChild(vai); body.appendChild(msg);
+      body.appendChild(el('h4', 'ed-tit', 'Da un file'));
+      body.appendChild(el('p', 'ed-txt', 'Un\'immagine (JPG, PNG) oppure il PDF del campo. Meglio se ha la griglia UTM stampata, così la georeferenzi con precisione.'));
+      body.appendChild(btn(c.img ? 'Sostituisci con un file…' : 'Carica immagine o PDF…', '', function () { file.click(); }));
+      if (c.img) body.appendChild(el('p', 'ed-txt muto', 'Sostituendo la cartina, le aree con coordinate restano al loro posto.'));
+    }
+    var geoScelta = { sorg: 'colori', lar: 1200, alt: 1500 };
+    function applicaGeoportale(r) {
+      // le aree esistenti restano dove sono nel mondo reale: si ricalcolano dalle loro coordinate
+      c.punti.forEach(function (p) { if (p.lat != null) p.fonte = 'coord'; });
+      c.w = r.w; c.h = r.h; c.img = r.d; imgNuova = r.d;
+      c.controllo = r.angoli.map(function (a) { return { x: a.x, y: a.y, lat: a.lat, lon: a.lon, testo: utmTesto(a.lat, a.lon) }; });
+      img.onload = function () { adatta(); };
+      img.src = r.d;
+      tab = 'aree'; cambiato();
     }
     function pGeo(body, focusCoord) {
       body.appendChild(el('p', 'ed-txt', 'Clicca sulla cartina un punto di cui conosci le coordinate (meglio gli incroci della griglia UTM, lontani tra loro) e scrivile qui. Bastano 2 punti, con 3 o più è più preciso.'));
