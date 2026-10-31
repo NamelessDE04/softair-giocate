@@ -131,13 +131,14 @@ service cloud.firestore {
         allow read: if perm('conflitti') || invitato();
         allow create: if invitato()
           && request.resource.data.uid == request.auth.uid
-          && request.resource.data.team == c().fazioneDi[myTeam()]
+          // in addestramento la fazione è del singolo giocatore (attacco o difesa), altrimenti del suo team
+          && request.resource.data.team == c().get('fazioneUtente', {}).get(request.auth.uid, c().fazioneDi[myTeam()])
           && request.resource.data.t is number
           && request.time.toMillis() >= c().inizio - 3600000
           && request.time.toMillis() <= c().fine + 12 * 3600000
           && (request.resource.data.tipo == 'zona'
               || (request.resource.data.tipo == 'ordine'
-                  && (c().get('comandanti', {}).get(c().fazioneDi[myTeam()], 'ia') == request.auth.uid || perm('ordini'))));
+                  && (c().get('comandanti', {}).get(request.resource.data.team, 'ia') == request.auth.uid || perm('ordini'))));
         allow delete: if perm('conflitti');
       }
     }

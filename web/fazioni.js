@@ -84,6 +84,7 @@
         } else if (pr) { pr.v -= PASSO / 2; if (pr.v <= 0) delete prog[p.id]; }
       });
       squadre.forEach(function (s) {
+        if (R.attacco && s !== R.attacco) return;   // addestramento: vince in anticipo solo l'attacco, la difesa vince allo scadere
         var n = chiavi.filter(function (c) { return owner[c] === s; }).length;
         if (chiavi.length && n >= Math.min(R.chiavi, chiavi.length)) {
           if (vitDa[s] == null) { vitDa[s] = t; trans.push({ t: t, tipo: 'contovittoria', team: s }); }
@@ -94,7 +95,8 @@
     if (!vincitore && tNow >= tFine) {
       var conti = squadre.map(function (s) { return { s: s, n: chiavi.filter(function (c) { return owner[c] === s; }).length, tot: Object.keys(owner).filter(function (q) { return owner[q] === s; }).length }; })
         .sort(function (a, b) { return b.n - a.n || b.tot - a.tot; });
-      if (conti.length > 1 && (conti[0].n > conti[1].n || conti[0].tot > conti[1].tot)) { vincitore = conti[0].s; trans.push({ t: tFine, tipo: 'vittoria', team: vincitore, aTempo: true }); }
+      if (R.attacco) { vincitore = squadre.filter(function (q) { return q !== R.attacco; })[0]; trans.push({ t: tFine, tipo: 'vittoria', team: vincitore, aTempo: true }); }
+      else if (conti.length > 1 && (conti[0].n > conti[1].n || conti[0].tot > conti[1].tot)) { vincitore = conti[0].s; trans.push({ t: tFine, tipo: 'vittoria', team: vincitore, aTempo: true }); }
       else trans.push({ t: tFine, tipo: 'pareggio' });
     }
     var serveDi = function (pid) { return (owner[pid] ? R.tConquista : R.tNeutro) * 1000; };
@@ -143,6 +145,42 @@
     }
     return o.sort(function (a, b) { return b.prio - a.prio; }).slice(0, 2);
   }
+  /* ---------- addestramento: il comandante automatico della difesa dà a ogni difensore il suo posto.
+     difensori: elenco degli uid in difesa (stesso ordine su ogni telefono). Risultato: { uid: { pt, testo, rinforzo } }.
+     I posti ruotano ogni 8 minuti tra le aree di pari importanza, così l'attacco non trova sempre gli stessi. */
+  function postiDifesa(g, campo, st, team, difensori, tNow) {
+    var nemico = g.fazioni.filter(function (f) { return f.team !== team; })[0];
+    var tipo = function (id) { return punto(campo, id).tipo; }, nome = function (id) { return punto(campo, id).nome; };
+    var mie = campo.punti.filter(function (p) { return p.tipo !== 'mob' && st.owner[p.id] === team; }).map(function (p) { return p.id; });
+    var turno = Math.max(0, Math.floor((tNow - g.inizio) / 480000));
+    function caso(id) { var h = turno * 2654435761 % 4294967296; for (var i = 0; i < id.length; i++) h = (h ^ id.charCodeAt(i)) * 16777619 % 4294967296; return h / 4294967296; }
+    var lista = mie.map(function (id) {
+      var fronte = vicini(campo, id).some(function (q) { return nemico && st.owner[q] === nemico.team; });
+      var pr = st.prog[id], attaccato = (pr && pr.team !== team) || st.conteso[id];
+      var peso = (tipo(id) === 'chiave' ? 3 : 1) + (fronte ? 2 : 0) + (attaccato ? 6 : 0) + caso(id) * 0.9;
+      return { id: id, peso: peso, attaccato: !!attaccato };
+    });
+    // nessuna area da difendere: si va a riprendere quella collegata più vicina
+    if (!lista.length) {
+      var f = g.fazioni.filter(function (x) { return x.team === team; })[0];
+      var bers = campo.punti.filter(function (p) { return p.tipo !== 'mob' && st.attaccabile(team, p.id); })[0];
+      var r0 = {}; difensori.forEach(function (u) { r0[u] = bers ? { pt: bers.id, testo: 'Contrattacco: riprendete ' + bers.nome } : { pt: f && f.mob, testo: 'Tornate alla base' }; });
+      return r0;
+    }
+    lista.sort(function (a, b) { return b.peso - a.peso; });
+    // prima un difensore per ognuna delle aree più importanti, poi i restanti dove serve di più (le aree attaccate per prime)
+    var posti = [], n = difensori.length;
+    lista.slice(0, n).forEach(function (a) { posti.push(a); });
+    var i = 0, urgenti = lista.filter(function (a) { return a.attaccato; }), pool = urgenti.length ? urgenti : lista.slice(0, Math.max(1, Math.ceil(n / 2)));
+    while (posti.length < n) { posti.push(pool[i % pool.length]); i++; }
+    var out = {};
+    difensori.forEach(function (u, k) {
+      var a = posti[k];
+      out[u] = { pt: a.id, rinforzo: a.attaccato, testo: a.attaccato ? 'Rinforzo! ' + nome(a.id) + ' è sotto attacco' : 'Il tuo posto: difendi ' + nome(a.id) };
+    });
+    return out;
+  }
+
   function ordiniUmani(eventi, team) {
     return eventi.filter(function (e) { return e.tipo === 'ordine' && e.team === team; }).sort(function (a, b) { return b.t - a.t; }).slice(0, 2)
       .map(function (e) { return { azione: e.azione, pt: e.pt, testo: e.testo, t: e.t }; });
@@ -302,7 +340,7 @@
     if (opts.gps) { tieniAcceso(); document.addEventListener('visibilitychange', tieniAcceso); }
 
     // --- disegno
-    var st = null, eventi = [], visti = 0, ultimoOrdine = '', primo = true;
+    var st = null, eventi = [], visti = 0, ultimoOrdine = '', primo = true, posto = null;
     var NEUTRO = '#9a9a8c';
     function col(team) { return team ? (opts.colori[team] || '#888') : NEUTRO; }
     function nomeF(team) { return team ? (opts.nomi[team] || 'Fazione') : 'Neutrale'; }
@@ -338,6 +376,7 @@
           s += '<circle cx="' + q.x + '" cy="' + q.y + '" r="' + rr + '" fill="none" stroke="#000" stroke-opacity=".5" stroke-width="' + (6 * k) + '"/>';
           s += '<circle cx="' + q.x + '" cy="' + q.y + '" r="' + rr + '" fill="none" stroke="' + col(pr.team) + '" stroke-width="' + (5 * k) + '" stroke-dasharray="' + (giro * frac) + ' ' + giro + '" transform="rotate(-90 ' + q.x + ' ' + q.y + ')"/>';
         }
+        if (posto === p.id) s += '<circle class="fz-posto" cx="' + q.x + '" cy="' + q.y + '" r="' + (r + 20 * k) + '" fill="none" stroke="#e8c96a" stroke-width="' + (3 * k) + '" stroke-dasharray="' + (4 * k) + ' ' + (6 * k) + '"/>';
         if (cont) s += '<circle class="fz-cont" cx="' + q.x + '" cy="' + q.y + '" r="' + (r + 13 * k) + '" fill="none" stroke="#ffd23f" stroke-width="' + (4 * k) + '" stroke-dasharray="' + (10 * k) + ' ' + (7 * k) + '"/>';
         // simbolo al centro
         if (mob) s += testo('⚑', q.x, q.y, 30 * k, 'fz-sim', '#fff');
@@ -457,12 +496,13 @@
       var designato = f && f.comandante && f.comandante !== 'ia';
       var umani = ordiniUmani(eventi, opts.team).filter(function (o) { return now - o.t < 900000; });
       var umano = umani.length > 0;
-      var ord = !opts.team || st.finita || now < g.inizio ? [] : umano ? umani : designato ? [] : ordiniIA(g, campo, st, opts.team);
+      var ord = !opts.team || st.finita || now < g.inizio ? [] : opts.ordiniPersonali ? opts.ordiniPersonali(st, now, campo) : umano ? umani : designato ? [] : ordiniIA(g, campo, st, opts.team);
+      posto = opts.ordiniPersonali && ord[0] ? ord[0].pt : null;
       ordine.innerHTML = '';
       ordine.hidden = !ord.length;
       if (ord.length) {
         ordine.style.borderLeftColor = col(opts.team);
-        ordine.appendChild(el('small', null, umano ? 'ORDINE DEL COMANDANTE' : 'COMANDANTE AUTOMATICO'));
+        ordine.appendChild(el('small', null, opts.ordiniPersonali ? 'IL TUO POSTO · COMANDANTE AUTOMATICO' : umano ? 'ORDINE DEL COMANDANTE' : 'COMANDANTE AUTOMATICO'));
         ordine.appendChild(el('b', null, ord[0].testo || (ord[0].azione + ' ' + ord[0].pt)));
       }
       var firmaO = ord.length ? ord[0].testo : '';
@@ -527,26 +567,44 @@
 
   // ---------- modalità prova: partita simulata con giocatori finti, tempo accelerato
   function prova(box, onMenu, extraOpts, campo) {
+    var addestra = !!(extraOpts && extraOpts.addestramento);
     var vel = 10, t0 = Date.now(), base = Date.now();
     var ora = function () { return base + (Date.now() - t0) * vel; };
     var mobs = campo.punti.filter(function (p) { return p.tipo === 'mob'; }).sort(function (a, b) { return (a.fazione === 'rossa') - (b.fazione === 'rossa'); });
     var fob = function (f) { return campo.punti.filter(function (p) { return p.tipo === 'fob' && p.fazione === f; }).map(function (p) { return p.id; }); };
     var g = { id: 'prova', titolo: 'Prova fazioni', inizio: base + 5000, durata: 90, campo: campo.id,
       fazioni: [{ team: 'blu', mob: mobs[0].id, partenza: fob('blu'), comandante: 'ia' }, { team: 'rossa', mob: mobs[1].id, partenza: fob('rossa'), comandante: 'ia' }] };
+    if (addestra) {
+      // la difesa parte con tutte le aree tranne quelle dell'attacco
+      g.fazioni[1].partenza = campo.punti.filter(function (p) { return p.tipo !== 'mob' && !(p.tipo === 'fob' && p.fazione === 'blu'); }).map(function (p) { return p.id; });
+      g.regole = { attacco: 'blu' };
+    }
     var eventi = [], bots = [];
     ['blu', 'rossa'].forEach(function (team) {
       var mob = team === 'blu' ? mobs[0] : mobs[1];
       for (var i = 0; i < 4; i++) bots.push({ uid: team + i, team: team, lat: mob.lat + (Math.random() - .5) * 2e-4, lon: mob.lon + (Math.random() - .5) * 2e-4, meta: null, sosta: 0, zona: null, ultimo: 0 });
     });
-    var io = { uid: 'io', team: 'blu', zona: null };
+    var mioLato = addestra && extraOpts.lato === 'difesa' ? 'rossa' : 'blu';
+    var io = { uid: 'io', team: mioLato, zona: null };
+    // in addestramento i difensori (io compreso, se sono in difesa) prendono il posto dal comandante automatico
+    var difensori = bots.filter(function (b) { return b.team === 'rossa'; }).map(function (b) { return b.uid; });
+    if (mioLato === 'rossa') { difensori.push('io'); bots = bots.filter(function (b) { return b.uid !== 'rossa3'; }); difensori = difensori.filter(function (u) { return u !== 'rossa3'; }); }
+    difensori.sort();
     var v = vista(box, {
-      g: g, campo: campo, team: 'blu', uid: 'io', colori: { blu: '#2f7fd6', rossa: '#d23a2c' }, nomi: { blu: 'Blu', rossa: 'Rossa' }, ora: ora,
+      g: g, campo: campo, team: mioLato, uid: 'io', colori: { blu: '#2f7fd6', rossa: '#d23a2c' }, nomi: addestra ? { blu: 'Attacco', rossa: 'Difesa' } : { blu: 'Blu', rossa: 'Rossa' }, ora: ora,
+      ordiniPersonali: mioLato === 'rossa' ? function (st, now, cl) { var p = postiDifesa(g, cl, st, 'rossa', difensori, now)['io']; return p ? [p] : []; } : null,
       onTocco: function (lat, lon) { v.posizione(lat, lon, 6); },
-      onZona: function (pt) { eventi.push({ tipo: 'zona', uid: 'io', team: 'blu', pt: pt, t: ora() }); io.zona = pt; },
+      onZona: function (pt) { eventi.push({ tipo: 'zona', uid: 'io', team: mioLato, pt: pt, t: ora() }); io.zona = pt; },
       extra: function () { return bots; }, onMenu: onMenu, presenze: !!(extraOpts && extraOpts.presenze), comandante: !!(extraOpts && extraOpts.comandante),
-      onOrdine: function (pt, azione, testo) { eventi.push({ tipo: 'ordine', uid: 'io', team: 'blu', pt: pt, azione: azione, testo: testo, t: ora() }); }
+      onOrdine: function (pt, azione, testo) { eventi.push({ tipo: 'ordine', uid: 'io', team: mioLato, pt: pt, azione: azione, testo: testo, t: ora() }); }
     });
-    v.posizione(mobs[0].lat - 1e-4, mobs[0].lon - 1e-4, 6);
+    var partenzaIo = mioLato === 'blu' ? mobs[0] : mobs[1];
+    v.posizione(partenzaIo.lat - 1e-4, partenzaIo.lon - 1e-4, 6);
+    // difensori finti piazzati subito ai loro posti
+    if (addestra) {
+      var st0 = stato(g, campo, [], g.inizio), p0 = postiDifesa(g, campo, st0, 'rossa', difensori, g.inizio);
+      bots.forEach(function (b) { if (b.team !== 'rossa' || !p0[b.uid]) return; var q = punto(campo, p0[b.uid].pt); b.lat = q.lat + (Math.random() - .5) * 2e-4; b.lon = q.lon + (Math.random() - .5) * 2e-4; b.posto = q.id; b.meta = { lat: b.lat, lon: b.lon }; b.sosta = 1e9; });
+    }
     // i giocatori finti seguono gli ordini del comandante automatico della loro fazione
     var ultimoPasso = ora();
     var sim = setInterval(function () {
@@ -554,8 +612,11 @@
       if (now < g.inizio) { v.aggiorna(eventi); return; }
       var st = stato(g, campo, eventi, now);
       if (st.finita) { v.aggiorna(eventi); return; }
+      var posti = addestra ? postiDifesa(g, campo, st, 'rossa', difensori, now) : null;
       bots.forEach(function (b, i) {
-        if (!b.meta || (b.sosta <= 0 && arrivato(b))) {
+        if (posti && b.team === 'rossa' && posti[b.uid]) {
+          if (b.posto !== posti[b.uid].pt) { var pp = punto(campo, posti[b.uid].pt); b.posto = pp.id; b.meta = { lat: pp.lat + (Math.random() - .5) * 2e-4, lon: pp.lon + (Math.random() - .5) * 2e-4 }; b.sosta = 1e9; }
+        } else if (!b.meta || (b.sosta <= 0 && arrivato(b))) {
           var ord = ordiniIA(g, campo, st, b.team), scelta;
           var conPt = ord.filter(function (o) { return o.pt; });
           scelta = conPt.length ? conPt[(i % 2 && conPt[1]) ? 1 : 0].pt : null;
@@ -573,7 +634,7 @@
         var z = zonaDi(g, campo, b);
         if (z !== b.zona || (z && now - b.ultimo > 45000)) { eventi.push({ tipo: 'zona', uid: b.uid, team: b.team, pt: z, t: now }); b.zona = z; b.ultimo = now; }
       });
-      if (io.zona && now - (io.ultimo || 0) > 45000) { eventi.push({ tipo: 'zona', uid: 'io', team: 'blu', pt: io.zona, t: now }); io.ultimo = now; }
+      if (io.zona && now - (io.ultimo || 0) > 45000) { eventi.push({ tipo: 'zona', uid: 'io', team: mioLato, pt: io.zona, t: now }); io.ultimo = now; }
       v.aggiorna(eventi);
     }, 250);
     function arrivato(b) { return b.meta && metri(b, b.meta) < 3; }
@@ -583,5 +644,5 @@
     };
   }
 
-  window.S40F = { TEMI: TEMI, applicaTema: applicaTema, stato: stato, ordiniIA: ordiniIA, vista: vista, prova: prova, zonaDi: zonaDi, REGOLE: REGOLE, mmss: mmss, hms: hms };
+  window.S40F = { postiDifesa: postiDifesa, TEMI: TEMI, applicaTema: applicaTema, stato: stato, ordiniIA: ordiniIA, vista: vista, prova: prova, zonaDi: zonaDi, REGOLE: REGOLE, mmss: mmss, hms: hms };
 })();

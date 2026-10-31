@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.11';
+  var VERSIONE = '0.12';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -40,10 +40,15 @@
     S.caricaCampo(id).then(function (cm) { if (!vivo) return; w.remove(); fn(cm); }, function (e) { if (vivo) w.textContent = 'Cartina non disponibile: ' + (e.message || e); });
   }
   function nomeFaz(c, id) { var f = (c.fazioni || []).filter(function (x) { return x.id === id; })[0]; return f ? f.nome : id; }
-  function mieFaz(c) { var me = S.stato().me; return me && me.team && c.fazioneDi ? c.fazioneDi[me.team] || null : null; }
+  function mieFaz(c) {
+    var st = S.stato(), me = st.me;
+    if (c.fazioneUtente && st.user && c.fazioneUtente[st.user.uid]) return c.fazioneUtente[st.user.uid];
+    return me && me.team && c.fazioneDi ? c.fazioneDi[me.team] || null : null;
+  }
+  function addestramento(c) { return c.modo === 'addestramento'; }
   function motore(c) {
     return {
-      id: c.id, inizio: c.inizio, durata: (c.fine - c.inizio) / 60000, regole: c.regole || {},
+      id: c.id, inizio: c.inizio, durata: (c.fine - c.inizio) / 60000, regole: Object.assign({}, c.regole || {}, addestramento(c) ? { attacco: 'blu' } : {}),
       fazioni: (c.fazioni || []).map(function (f) { return { team: f.id, mob: f.mob, partenza: f.partenza || [], comandante: (c.comandanti || {})[f.id] || 'ia' }; })
     };
   }
@@ -243,6 +248,7 @@
     if (c.luogo || c.mapsUrl) lg.appendChild(link('Apri in Maps', mapsLink(c), 'btn piccolo'));
     hero.appendChild(lg);
     if (fase(c) === 'finito') hero.appendChild(el('div', 'conf-fine', 'CONFLICT CONCLUSO'));
+    if (addestramento(c)) hero.insertBefore(el('div', 'conf-tipo', 'ADDESTRAMENTO'), hero.firstChild);
     box.appendChild(hero);
 
     if (!P('conflitti') && st.me.team) {
@@ -267,6 +273,14 @@
       var h = el('div', 'faz-testa'); h.appendChild(el('b', null, f.nome.toUpperCase()));
       if (mia) h.appendChild(el('small', null, f.id === mia ? 'CON TE' : 'CONTRO DI TE'));
       k.appendChild(h);
+      if (addestramento(c)) {
+        var nomi = Object.keys(c.nomiGioc || {}).filter(function (u) { return ((c.fazioneUtente || {})[u] || 'blu') === f.id; }).map(function (u) { return c.nomiGioc[u]; }).sort();
+        var lst = el('div', 'faz-gioc'); nomi.forEach(function (n) { lst.appendChild(el('span', null, n)); });
+        if (!nomi.length) lst.appendChild(el('span', 'hint', 'Nessuno'));
+        k.appendChild(lst);
+        k.appendChild(el('small', 'faz-nota', f.id === 'blu' ? 'Comandante automatico · conquista i punti chiave' : 'Ognuno riceve il suo posto dal comandante automatico'));
+        fz.appendChild(k); return;
+      }
       (f.team || []).forEach(function (tid) {
         var t = teamDi(tid); if (!t) return;
         var row = el('div', 'faz-team');
@@ -418,9 +432,19 @@
     var box = el('div', 'pieno-mappa tutta'); p.appendChild(box);
     var tendina = el('div', 'tendina sopra'); tendina.hidden = true; p.appendChild(tendina);
     var comandante = !!f && ((c.comandanti && c.comandanti[f] === st.user.uid) || P('ordini'));
+    var ultimi = [];
+    // addestramento: i difensori attivi (che hanno dato segni di vita negli ultimi 10 minuti, più me) si dividono i posti
+    var personali = addestramento(c) && f === 'rossa' ? function (st2, now, cl) {
+      var assegnati = Object.keys(c.fazioneUtente || {}).filter(function (u) { return c.fazioneUtente[u] === 'rossa'; });
+      var attivi = {}; ultimi.forEach(function (e) { if (e.team === 'rossa' && now - e.t < 600000) attivi[e.uid] = 1; });
+      attivi[st.user.uid] = 1;
+      var dif = assegnati.filter(function (u) { return attivi[u]; }).sort();
+      var p = F.postiDifesa(motore(c), cl, st2, 'rossa', dif, now)[st.user.uid];
+      return p ? [p] : [];
+    } : null;
     conCampo(c.campo, box, function (cm) {
     var v = F.vista(box, {
-      g: motore(c), campo: cm, team: f, colori: COLORI, nomi: nomiFaz(c), ora: Date.now,
+      g: motore(c), campo: cm, team: f, ordiniPersonali: personali, colori: COLORI, nomi: nomiFaz(c), ora: Date.now,
       gps: !!f, comandante: comandante, presenze: P('presenze'),
       onZona: function (pt) { S.scriviEvento(c.id, { tipo: 'zona', uid: st.user.uid, team: f, pt: pt || null, t: Date.now() }); },
       onOrdine: function (pt, azione, testo) { S.scriviEvento(c.id, { tipo: 'ordine', uid: st.user.uid, team: f, pt: pt, azione: azione, testo: testo, t: Date.now() }); },
@@ -436,7 +460,7 @@
         tendina.hidden = false;
       }
     });
-    var stopE = S.ascoltaEventi(c.id, function (ev) { v.aggiorna(ev); });
+    var stopE = S.ascoltaEventi(c.id, function (ev) { ultimi = ev; v.aggiorna(ev); });
     var prima = chiusura; chiusura = function () { stopE(); v.chiudi(); if (prima) prima(); };
     });
   }
@@ -818,6 +842,23 @@
     var hR = oraInput(c.ritrovo), hI = oraInput(c.inizio), hF = oraInput(c.fine);
     tre.appendChild(campoForm('Ritrovo', hR)); tre.appendChild(campoForm('Inizio', hI)); tre.appendChild(campoForm('Fine', hF));
     form.appendChild(tre);
+    // tipo: conflict tra fazioni (più team) o addestramento (un team diviso in attacco e difesa)
+    var modo = c.modo || 'fazioni';
+    var segM = el('div', 'seg seg-largo');
+    [['fazioni', 'Conflict tra fazioni'], ['addestramento', 'Addestramento']].forEach(function (o) {
+      var b = bottone(o[1], 'seg-b' + (modo === o[0] ? ' on' : ''));
+      b.onclick = function () {
+        modo = o[0]; Array.prototype.forEach.call(segM.children, function (x) { x.classList.remove('on'); }); b.classList.add('on');
+        if (modo === 'addestramento') {
+          if (nB.value === 'Blu') nB.value = 'Attacco'; if (nR.value === 'Rossa') nR.value = 'Difesa';
+          if (!partenza.rossa.length) { partenza.rossa = difesaTutto(); partenza.blu = []; }
+        } else { if (nB.value === 'Attacco') nB.value = 'Blu'; if (nR.value === 'Difesa') nR.value = 'Rossa'; }
+        mostraModo(); disegnaBasi(); aggiornaComandanti();
+      };
+      segM.appendChild(b);
+    });
+    form.appendChild(campoForm('Tipo di giocata', segM));
+    var notaM = el('p', 'hint'); form.appendChild(notaM);
     // campo: cartina, basi di partenza, punti già tenuti all'inizio
     form.appendChild(el('h3', 'sez', 'Campo'));
     var cSel = select([['', '— scegli la cartina —']].concat(D.campi.map(function (x) { return [x.id, x.nome]; })), campoMeta(c.campo) ? c.campo : '');
@@ -869,7 +910,8 @@
       });
     }
     function nomeArea(p, f) { return (p.nomi && p.nomi[f]) || p.nome; }
-    cSel.onchange = function () { partenza = { blu: [], rossa: [] }; disegnaBasi(); };
+    function difesaTutto() { var cm0 = campoMeta(cSel.value); return ((cm0 && cm0.punti) || []).filter(function (p) { return p.tipo !== 'mob' && p.tipo !== 'fob'; }).map(function (p) { return p.id; }); }
+    cSel.onchange = function () { partenza = { blu: [], rossa: modo === 'addestramento' ? difesaTutto() : [] }; disegnaBasi(); };
     disegnaBasi();
     // fazioni e team
     form.appendChild(el('h3', 'sez', 'Fazioni'));
@@ -877,7 +919,7 @@
     var nB = el('input'); nB.value = c.fazioni[0].nome; var nR = el('input'); nR.value = c.fazioni[1].nome;
     nomi.appendChild(campoForm('Fazione blu', nB)); nomi.appendChild(campoForm('Fazione rossa', nR));
     form.appendChild(nomi);
-    form.appendChild(el('p', 'hint', 'Scegli per ogni team da che parte gioca. I team senza fazione non sono invitati.'));
+    var hintF = el('p', 'hint', 'Scegli per ogni team da che parte gioca. I team senza fazione non sono invitati.'); form.appendChild(hintF);
     var scelta = {};
     c.fazioni.forEach(function (f) { (f.team || []).forEach(function (t) { scelta[t] = f.id; }); });
     var tBox = el('div', 't-lista'); form.appendChild(tBox);
@@ -892,6 +934,50 @@
       r.appendChild(seg); tBox.appendChild(r);
     });
     if (!D.team.length) tBox.appendChild(el('p', 'hint', 'Crea prima i team da Organizza.'));
+    // addestramento: un team, ogni giocatore in attacco o in difesa
+    var adBox = el('div', 'modulo'); form.appendChild(adBox);
+    var tAd = (c.team || [])[0] || (D.team[0] && D.team[0].id) || '';
+    var ruolo = {}; Object.keys(c.fazioneUtente || {}).forEach(function (u) { ruolo[u] = c.fazioneUtente[u]; });
+    var tSelA = select(D.team.map(function (t) { return [t.id, t.nome]; }), tAd);
+    var gBox = el('div', 'm-lista');
+    var nDif = el('input'); nDif.type = 'number'; nDif.min = 1; nDif.value = Object.keys(ruolo).length || 3; nDif.style.width = '80px';
+    tSelA.onchange = function () { tAd = tSelA.value; ruolo = {}; disegnaRuoli(); aggiornaComandanti(); };
+    adBox.appendChild(campoForm('Team che si allena', tSelA));
+    var rnd = el('div', 'ed-riga');
+    rnd.appendChild(el('span', 'hint', 'Difensori estratti a caso:')); rnd.appendChild(nDif);
+    rnd.appendChild(bottone('Estrai', '', function () {
+      var m = (membriDi[tAd] || []).map(function (u) { return u.id; }), n = Math.max(1, Math.min(m.length - 1, +nDif.value || 1));
+      for (var i = m.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)), t = m[i]; m[i] = m[j]; m[j] = t; }
+      ruolo = {}; m.slice(0, n).forEach(function (u) { ruolo[u] = 'rossa'; });
+      disegnaRuoli(); aggiornaComandanti();
+    }));
+    adBox.appendChild(rnd); adBox.appendChild(gBox);
+    function disegnaRuoli() {
+      gBox.innerHTML = '';
+      var m = membriDi[tAd];
+      if (!m) { gBox.appendChild(el('p', 'hint', 'Caricamento dei giocatori…')); return; }
+      if (!m.length) { gBox.appendChild(el('p', 'hint', 'Il team non ha ancora giocatori.')); return; }
+      var nd = m.filter(function (u) { return ruolo[u.id] === 'rossa'; }).length;
+      gBox.appendChild(el('p', 'hint', (m.length - nd) + ' in attacco · ' + nd + ' in difesa'));
+      m.slice().sort(function (a, b) { return nomeG(a).localeCompare(nomeG(b)); }).forEach(function (u) {
+        var r = el('div', 'm-riga'); r.appendChild(el('span', null, nomeG(u)));
+        var sg = el('div', 'seg');
+        [['blu', 'Attacco'], ['rossa', 'Difesa']].forEach(function (o) {
+          var b = bottone(o[1], 'seg-b s-' + o[0] + ((ruolo[u.id] || 'blu') === o[0] ? ' on' : ''));
+          b.onclick = function () { if (o[0] === 'rossa') ruolo[u.id] = 'rossa'; else delete ruolo[u.id]; disegnaRuoli(); aggiornaComandanti(); };
+          sg.appendChild(b);
+        });
+        r.appendChild(sg); gBox.appendChild(r);
+      });
+    }
+    function mostraModo() {
+      var ad = modo === 'addestramento';
+      tBox.hidden = hintF.hidden = ad; adBox.hidden = !ad;
+      if (cmR && cmR.parentNode) cmR.parentNode.hidden = ad;
+      notaM.textContent = ad
+        ? 'Un solo team: chi è in attacco gioca con il comandante automatico, i difensori ricevono dal comandante automatico il loro posto sul telefono. La difesa vince se allo scadere l\'attacco non ha preso i punti chiave.'
+        : 'Due fazioni, uno o più team per parte.';
+    }
     // comandanti
     form.appendChild(el('h3', 'sez', 'Comandanti'));
     var cmB = el('select'), cmR = el('select');
@@ -902,16 +988,17 @@
         var id = x[0], s = x[1], val = s.value || (c.comandanti || {})[id] || 'ia';
         s.innerHTML = '';
         var o = el('option', null, 'Automatico (IA)'); o.value = 'ia'; s.appendChild(o);
-        Object.keys(scelta).filter(function (t) { return scelta[t] === id; }).forEach(function (t) {
-          (membriDi[t] || []).slice().sort(function (a, b) { return (b.ruolo === 'comandante') - (a.ruolo === 'comandante'); }).forEach(function (u) {
+        var tt = modo === 'addestramento' ? (id === 'blu' ? [tAd] : []) : Object.keys(scelta).filter(function (t) { return scelta[t] === id; });
+        tt.forEach(function (t) {
+          (membriDi[t] || []).filter(function (u) { return modo !== 'addestramento' || !ruolo[u.id]; }).slice().sort(function (a, b) { return (b.ruolo === 'comandante') - (a.ruolo === 'comandante'); }).forEach(function (u) {
             var q = el('option', null, (u.ruolo === 'comandante' ? '★ ' : '') + nomeG(u) + ' (' + (teamDi(t) || {}).nome + ')'); q.value = u.id; s.appendChild(q);
           });
         });
         s.value = val; if (!s.value) s.value = 'ia';
       });
     }
-    aggiornaComandanti();
-    Promise.all(D.team.map(function (t) { return S.leggiMembri(t.id).then(function (m) { membriDi[t.id] = m; }); })).then(aggiornaComandanti);
+    aggiornaComandanti(); mostraModo(); disegnaRuoli();
+    Promise.all(D.team.map(function (t) { return S.leggiMembri(t.id).then(function (m) { membriDi[t.id] = m; }); })).then(function () { aggiornaComandanti(); disegnaRuoli(); });
     // cartina e parcheggio
     form.appendChild(el('h3', 'sez', 'Cartina e parcheggio'));
     function giorniPrima(da) { if (da == null) return ''; var g = Math.round((mezzanotte(c.inizio) - mezzanotte(da)) / GIORNO); return String(g); }
@@ -930,8 +1017,15 @@
       if (!dt.value || !hI.value || !hF.value) { toast('Servono data, inizio e fine'); return; }
       function ms(h) { return h ? new Date(dt.value + 'T' + h).getTime() : null; }
       var ini = ms(hI.value), fin = ms(hF.value); if (fin <= ini) fin += GIORNO;
-      var team = [], fazioneDi = {};
-      Object.keys(scelta).forEach(function (t) { if (scelta[t]) { team.push(t); fazioneDi[t] = scelta[t]; } });
+      var team = [], fazioneDi = {}, fazioneUtente = {}, nomiGioc = {};
+      if (modo === 'addestramento') {
+        var mm = membriDi[tAd] || [], dif = mm.filter(function (u) { return ruolo[u.id] === 'rossa'; });
+        if (!tAd) { toast('Scegli il team'); return; }
+        if (!dif.length || dif.length === mm.length) { toast('Servono giocatori sia in attacco sia in difesa'); return; }
+        team = [tAd]; fazioneDi[tAd] = 'blu'; fazioneUtente = {}; nomiGioc = {};
+        dif.forEach(function (u) { fazioneUtente[u.id] = 'rossa'; });
+        mm.forEach(function (u) { nomiGioc[u.id] = nomeG(u); });
+      } else Object.keys(scelta).forEach(function (t) { if (scelta[t]) { team.push(t); fazioneDi[t] = scelta[t]; } });
       var cmS = campoMeta(cSel.value);
       function fobDi(f) { return ((cmS && cmS.punti) || []).filter(function (p) { return p.tipo === 'fob' && p.fazione === f; }).map(function (p) { return p.id; }); }
       if (!cmS) { toast('Scegli la cartina del campo'); return; }
@@ -940,10 +1034,11 @@
         id: c.id, titolo: tit.value.trim(), luogo: lg.value.trim(), mapsUrl: mu.value.trim(), campo: cSel.value,
         ritrovo: ms(hR.value), inizio: ini, fine: fin,
         fazioni: [
-          { id: 'blu', nome: nB.value.trim() || 'Blu', team: team.filter(function (t) { return fazioneDi[t] === 'blu'; }), mob: base.blu, partenza: partenza.blu.concat(fobDi('blu')) },
-          { id: 'rossa', nome: nR.value.trim() || 'Rossa', team: team.filter(function (t) { return fazioneDi[t] === 'rossa'; }), mob: base.rossa, partenza: partenza.rossa.concat(fobDi('rossa')) }
+          { id: 'blu', nome: nB.value.trim() || 'Blu', team: modo === 'addestramento' ? team : team.filter(function (t) { return fazioneDi[t] === 'blu'; }), mob: base.blu, partenza: partenza.blu.concat(fobDi('blu')) },
+          { id: 'rossa', nome: nR.value.trim() || 'Rossa', team: modo === 'addestramento' ? team : team.filter(function (t) { return fazioneDi[t] === 'rossa'; }), mob: base.rossa, partenza: partenza.rossa.concat(fobDi('rossa')) }
         ],
-        team: team, fazioneDi: fazioneDi, comandanti: { blu: cmB.value || 'ia', rossa: cmR.value || 'ia' },
+        team: team, fazioneDi: fazioneDi, comandanti: { blu: cmB.value || 'ia', rossa: modo === 'addestramento' ? 'ia' : (cmR.value || 'ia') },
+        modo: modo, fazioneUtente: fazioneUtente, nomiGioc: nomiGioc,
         mappaDa: mSel.value === '' ? null : mezzanotte(ini) - Number(mSel.value) * GIORNO,
         parcheggio: { testo: pT.value.trim(), mapsUrl: pU.value.trim(), da: pSel.value === '' ? null : mezzanotte(ini) - Number(pSel.value) * GIORNO },
         regole: c.regole || null
@@ -967,11 +1062,22 @@
       return;
     }
     id = id || buone[0].id;
+    var tipoProva = corrente().p2;
+    if (!tipoProva) {
+      testata('Prova la mappa di gioco');
+      app.appendChild(el('p', 'hint', 'Che partita vuoi simulare? Tocca la mappa per spostarti, il tempo va veloce.'));
+      [['conflict', 'Conflict tra fazioni', 'Sei nella fazione blu, contro la rossa.'], ['attacco', 'Addestramento: in attacco', 'Attacchi le aree tenute dai difensori.'], ['difesa', 'Addestramento: in difesa', 'Ricevi il tuo posto dal comandante automatico.']].forEach(function (o) {
+        var r = el('button', 'riga-lista'); r.type = 'button'; r.appendChild(el('b', null, o[1])); r.appendChild(el('small', null, o[2]));
+        r.onclick = function () { pila[pila.length - 1] = { v: 'prova', p: id, p2: o[0] }; mostra(); };
+        app.appendChild(r);
+      });
+      return;
+    }
     var p = aPieno();
     var box = el('div', 'pieno-mappa tutta'); p.appendChild(box);
     conCampo(id, box, function (cm) {
       var vel = el('div', 'prova-vel'); vel.appendChild(el('b', null, 'PROVA'));
-      var pr = F.prova(box, function () { indietro(); }, { presenze: P('presenze'), comandante: P('ordini') }, cm);
+      var pr = F.prova(box, function () { indietro(); }, { presenze: P('presenze'), comandante: P('ordini'), addestramento: tipoProva !== 'conflict', lato: tipoProva === 'difesa' ? 'difesa' : 'attacco' }, cm);
       [1, 10, 30].forEach(function (x) {
         var b = bottone('×' + x, 'piccolo' + (x === 10 ? ' on' : '')); b.onclick = function () { pr.velocita(x); Array.prototype.forEach.call(vel.querySelectorAll('.btn'), function (y) { y.classList.remove('on'); }); b.classList.add('on'); };
         vel.appendChild(b);
