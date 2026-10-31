@@ -1,0 +1,44 @@
+name: Pubblica su Firebase Hosting
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      HAS_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Chiave Firebase mancante
+        if: env.HAS_KEY != 'true'
+        run: echo "::warning::Aggiungi il segreto FIREBASE_SERVICE_ACCOUNT per pubblicare su softair-giocate.web.app"
+
+      - uses: actions/setup-node@v4
+        if: env.HAS_KEY == 'true'
+        with:
+          node-version: '20'
+
+      - name: Pubblica su softair-giocate.web.app
+        if: env.HAS_KEY == 'true'
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          printf '%s' "$SA" > "$RUNNER_TEMP/sa.json"
+          export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/sa.json"
+          if ! python3 -c "import json,sys; d=json.load(open('$RUNNER_TEMP/sa.json')); print('chiave per il progetto', d.get('project_id'), '-', d.get('client_email'))"; then
+            echo "::error::Il segreto FIREBASE_SERVICE_ACCOUNT non contiene un file JSON valido (va incollato tutto il contenuto del file .json)"; exit 1
+          fi
+          PROJECT_ID=$(python3 -c "import json; print(json.load(open('$RUNNER_TEMP/sa.json'))['project_id'])")
+          set +e
+          npx --yes firebase-tools@13 deploy --only hosting --project "$PROJECT_ID" --non-interactive > out.txt 2>&1
+          rc=$?
+          cat out.txt
+          if [ $rc -ne 0 ]; then
+            grep -v '^\s*$' out.txt | tail -n 15 | sed -e 's/%/%25/g' | while IFS= read -r l; do echo "::error::$l"; done
+          fi
+          rm -f "$RUNNER_TEMP/sa.json"
+          exit $rc

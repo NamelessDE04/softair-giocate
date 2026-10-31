@@ -1,0 +1,73 @@
+rules_version = '2';
+// Regole di sicurezza Firestore per Softair 4.0.
+// Da incollare in console Firebase → Firestore Database → Regole → Pubblica.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signed() { return request.auth != null; }
+    function isAdmin() {
+      return signed()
+        && request.auth.token.email == 'vaisittiluca@gmail.com'
+        && request.auth.token.email_verified == true;
+    }
+    function meRef() { return /databases/$(database)/documents/utenti/$(request.auth.uid); }
+    // team del giocatore che fa la richiesta (null se non è in nessun team)
+    function myTeam() { return exists(meRef()) ? get(meRef()).data.get('team', null) : null; }
+    function invito(cod) { return /databases/$(database)/documents/inviti/$(cod); }
+
+    // Profili: ognuno vede il proprio; i compagni di team si vedono tra loro; l'organizzatore vede tutti.
+    // Si entra in un team solo con un codice d'invito valido.
+    match /utenti/{uid} {
+      allow read: if isAdmin()
+        || (signed() && request.auth.uid == uid)
+        || (signed() && resource.data.get('team', null) != null && resource.data.get('team', null) == myTeam());
+      allow create: if signed() && request.auth.uid == uid && request.resource.data.get('team', null) == null;
+      allow update: if isAdmin() || (signed() && request.auth.uid == uid && (
+        request.resource.data.get('team', null) == resource.data.get('team', null)
+        || request.resource.data.get('team', null) == null
+        || (request.resource.data.get('codice', null) is string
+            && exists(invito(request.resource.data.codice))
+            && get(invito(request.resource.data.codice)).data.team == request.resource.data.team)
+      ));
+      allow delete: if isAdmin();
+    }
+
+    // Nomi e colori dei team: li vedono tutti, li crea solo l'organizzatore
+    match /team/{tid} {
+      allow read: if signed();
+      allow write: if isAdmin();
+    }
+
+    // Codici d'invito: si può leggere un codice solo conoscendolo; l'elenco lo vede solo l'organizzatore
+    match /inviti/{cod} {
+      allow get: if signed();
+      allow list, write: if isAdmin();
+    }
+
+    // Giocate: le vedono solo i team in gioco; le crea e modifica solo l'organizzatore
+    match /giocate/{gid} {
+      allow read: if isAdmin() || (signed() && myTeam() != null && myTeam() in resource.data.team);
+      allow write: if isAdmin();
+
+      // Catture: ognuno registra solo per sé e per il proprio team, solo nelle giocate del suo team.
+      // Arrivano anche ore dopo (telefono senza rete), ma non prima dell'inizio né il giorno dopo.
+      match /catture/{cid} {
+        function g() { return get(/databases/$(database)/documents/giocate/$(gid)).data; }
+        allow read: if isAdmin() || (signed() && myTeam() != null && myTeam() in g().team);
+        allow create: if signed()
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.team == myTeam()
+          && myTeam() in g().team
+          && request.resource.data.ora is number
+          && request.time.toMillis() >= g().inizio - 600000
+          && request.time.toMillis() <= g().inizio + g().durata * 60000 + 12 * 3600000;
+        allow delete: if isAdmin();
+      }
+    }
+
+    // Codici segreti dei QR: solo l'organizzatore (servono per stamparli)
+    match /segreti/{gid} {
+      allow read, write: if isAdmin();
+    }
+  }
+}

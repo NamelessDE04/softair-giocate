@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#14160f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Softair 4.0</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="img/icon-192.png">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@500;700&family=Saira+Stencil+One&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <span class="top-logo" aria-hidden="true"></span>
+  <div>
+    <h1>Softair 4.0</h1>
+    <p>Giocate con obiettivi a finestra</p>
+  </div>
+  <button type="button" class="icon-btn" id="account" aria-label="Account" hidden>
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="8" r="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+  </button>
+</header>
+
+<main id="app"></main>
+<p class="versione" id="versione"></p>
+
+<!-- accesso -->
+<div class="gate" id="gate">
+  <div class="gate-box">
+    <span class="gate-logo" aria-hidden="true"></span>
+    <h2>Softair 4.0</h2>
+    <div id="gate-carico"><p class="hint">Caricamento…</p></div>
+    <div id="gate-login" hidden>
+      <p>Accedi con il tuo account Google per entrare nelle giocate del tuo team.</p>
+      <button type="button" class="btn accent big" id="btnLogin">Accedi con Google</button>
+    </div>
+    <div id="gate-errore" hidden>
+      <p id="gateErrore"></p>
+      <button type="button" class="btn" id="btnRiprova">Riprova</button>
+    </div>
+  </div>
+</div>
+
+<!-- scanner QR -->
+<div class="scanner" id="scanner" hidden>
+  <div id="scanVista" class="scan-vista">
+    <div class="scan-bar"><b>Scansiona l'obiettivo</b><button type="button" class="btn" id="scanChiudi">Chiudi</button></div>
+    <div class="scan-video"><video id="scanVideo" muted playsinline></video><span class="mirino" aria-hidden="true"></span></div>
+    <p class="scan-msg" id="scanMsg"></p>
+    <div class="scan-man">
+      <input type="text" id="scanManuale" placeholder="Oppure scrivi il codice" autocapitalize="characters" autocomplete="off" maxlength="8">
+      <button type="button" class="btn accent" id="scanInvia">Invia</button>
+    </div>
+  </div>
+  <div id="scanEsito" class="esito" hidden>
+    <span class="esito-icona" id="esitoIcona"></span>
+    <h2 id="esitoTitolo"></h2>
+    <p id="esitoTesto"></p>
+    <button type="button" class="btn accent big" id="esitoOk">OK</button>
+    <button type="button" class="btn" id="esitoAncora">Scansiona un altro QR</button>
+  </div>
+</div>
+
+<!-- fogli da stampare con i QR -->
+<section class="stampa" id="stampa" hidden></section>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
+<script src="vendor/jsQR.js"></script>
+<script src="qr.js"></script>
+<script src="db.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
