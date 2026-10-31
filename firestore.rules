@@ -1,5 +1,5 @@
 rules_version = '2';
-// Regole di sicurezza Firestore per Softair 4.0.
+// Regole di sicurezza Firestore per Airsoft Conflict.
 // Da incollare in console Firebase → Firestore Database → Regole → Pubblica.
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -14,28 +14,41 @@ service cloud.firestore {
     // team del giocatore che fa la richiesta (null se non è in nessun team)
     function myTeam() { return exists(meRef()) ? get(meRef()).data.get('team', null) : null; }
     function invito(cod) { return /databases/$(database)/documents/inviti/$(cod); }
+    // è il referente di quel team?
+    function isRef(tid) {
+      return signed() && tid != null
+        && get(/databases/$(database)/documents/team/$(tid)).data.get('referenteUid', null) == request.auth.uid;
+    }
 
     // Profili: ognuno vede il proprio; i compagni di team si vedono tra loro; l'organizzatore vede tutti.
-    // Si entra in un team solo con un codice d'invito valido.
+    // Si entra in un team solo con un codice d'invito valido. Il referente assegna le squadre e può togliere giocatori.
     match /utenti/{uid} {
       allow read: if isAdmin()
         || (signed() && request.auth.uid == uid)
         || (signed() && resource.data.get('team', null) != null && resource.data.get('team', null) == myTeam());
       allow create: if signed() && request.auth.uid == uid && request.resource.data.get('team', null) == null;
-      allow update: if isAdmin() || (signed() && request.auth.uid == uid && (
-        request.resource.data.get('team', null) == resource.data.get('team', null)
-        || request.resource.data.get('team', null) == null
-        || (request.resource.data.get('codice', null) is string
-            && exists(invito(request.resource.data.codice))
-            && get(invito(request.resource.data.codice)).data.team == request.resource.data.team)
-      ));
+      allow update: if isAdmin()
+        || (signed() && request.auth.uid == uid && (
+          request.resource.data.get('team', null) == resource.data.get('team', null)
+          || request.resource.data.get('team', null) == null
+          || (request.resource.data.get('codice', null) is string
+              && exists(invito(request.resource.data.codice))
+              && get(invito(request.resource.data.codice)).data.team == request.resource.data.team)))
+        || (isRef(resource.data.get('team', null))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['squadra', 'team', 'codice'])
+          && (request.resource.data.get('team', null) == resource.data.get('team', null) || request.resource.data.get('team', null) == null));
       allow delete: if isAdmin();
     }
 
-    // Nomi e colori dei team: li vedono tutti, li crea solo l'organizzatore
+    // Anagrafica dei team (nome, logo, referente, squadre): la vedono tutti gli iscritti.
+    // La crea l'organizzatore; la modificano l'organizzatore e il referente (che non può cambiare chi è il referente).
     match /team/{tid} {
       allow read: if signed();
-      allow write: if isAdmin();
+      allow create, delete: if isAdmin();
+      allow update: if (isAdmin()
+          || (signed() && resource.data.get('referenteUid', null) == request.auth.uid
+              && request.resource.data.get('referenteUid', null) == resource.data.get('referenteUid', null)))
+        && request.resource.data.get('logo', '').size() < 300000;
     }
 
     // Codici d'invito: si può leggere un codice solo conoscendolo; l'elenco lo vede solo l'organizzatore
@@ -43,45 +56,46 @@ service cloud.firestore {
       allow get: if signed();
       allow list, write: if isAdmin();
     }
+    // Codice di ogni team: organizzatore e referente del team (per condividerlo)
+    match /codiciTeam/{tid} {
+      allow read: if isAdmin() || isRef(tid);
+      allow write: if isAdmin();
+    }
 
-    // Giocate: le vedono solo i team in gioco; le crea e modifica solo l'organizzatore
-    match /giocate/{gid} {
+    // Conflict: li vedono solo i team invitati; li crea e modifica solo l'organizzatore
+    match /conflitti/{cid} {
+      function c() { return get(/databases/$(database)/documents/conflitti/$(cid)).data; }
+      function invitato() { return signed() && myTeam() != null && myTeam() in c().team; }
       allow read: if isAdmin() || (signed() && myTeam() != null && myTeam() in resource.data.team);
       allow write: if isAdmin();
 
-      // Catture: ognuno registra solo per sé e per il proprio team, solo nelle giocate del suo team.
-      // Arrivano anche ore dopo (telefono senza rete), ma non prima dell'inizio né il giorno dopo.
-      match /catture/{cid} {
-        function g() { return get(/databases/$(database)/documents/giocate/$(gid)).data; }
-        allow read: if isAdmin() || (signed() && myTeam() != null && myTeam() in g().team);
-        allow create: if signed()
-          && request.resource.data.uid == request.auth.uid
-          && request.resource.data.team == myTeam()
-          && myTeam() in g().team
-          && request.resource.data.ora is number
-          && request.time.toMillis() >= g().inizio - 600000
-          && request.time.toMillis() <= g().inizio + g().durata * 60000 + 12 * 3600000;
+      // Bacheca (storia, prefazioni, info): la scrive l'organizzatore
+      match /bacheca/{pid} {
+        allow read: if isAdmin() || invitato();
+        allow write: if isAdmin() && request.resource.data.get('img', '').size() < 900000;
         allow delete: if isAdmin();
       }
 
-      // Giocate a fazioni: posizione nei punti e ordini del comandante umano
+      // Risposte agli inviti: ognuno risponde solo per sé e per il proprio team
+      match /adesioni/{uid} {
+        allow read: if isAdmin() || invitato();
+        allow create, update: if invitato() && request.auth.uid == uid && request.resource.data.team == myTeam();
+        allow delete: if isAdmin() || (signed() && request.auth.uid == uid);
+      }
+
+      // Partita: posizione nei punti e ordini del comandante, solo per la propria fazione e solo nell'orario del conflict
       match /eventi/{eid} {
-        function g2() { return get(/databases/$(database)/documents/giocate/$(gid)).data; }
-        allow read: if isAdmin() || (signed() && myTeam() != null && myTeam() in g2().team);
-        allow create: if signed()
+        allow read: if isAdmin() || invitato();
+        allow create: if invitato()
           && request.resource.data.uid == request.auth.uid
-          && request.resource.data.team == myTeam()
-          && myTeam() in g2().team
+          && request.resource.data.team == c().fazioneDi[myTeam()]
           && request.resource.data.t is number
+          && request.time.toMillis() >= c().inizio - 3600000
+          && request.time.toMillis() <= c().fine + 12 * 3600000
           && (request.resource.data.tipo == 'zona'
-              || (request.resource.data.tipo == 'ordine' && g2().get('comandanti', {}).get(myTeam(), 'ia') == request.auth.uid));
+              || (request.resource.data.tipo == 'ordine' && c().get('comandanti', {}).get(c().fazioneDi[myTeam()], 'ia') == request.auth.uid));
         allow delete: if isAdmin();
       }
-    }
-
-    // Codici segreti dei QR: solo l'organizzatore (servono per stamparli)
-    match /segreti/{gid} {
-      allow read, write: if isAdmin();
     }
   }
 }

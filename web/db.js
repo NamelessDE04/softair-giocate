@@ -1,11 +1,13 @@
-/* Collegamento al database (Firebase) di Softair 4.0.
+/* Collegamento al database (Firebase) di Airsoft Conflict.
    Raccolte:
-   - utenti/{uid}            { email, nome, callsign, team, codice }   il team lo sceglie il giocatore con il codice d'invito
-   - team/{tid}              { nome, colore }                          i nomi dei team li vedono tutti
-   - inviti/{codice}         { team }                                  si legge solo conoscendo il codice
-   - giocate/{gid}           { titolo, luogo, inizio, durata, team[], obiettivi[] }
-   - segreti/{gid}           { <obiettivo>: codice }                   solo l'organizzatore (servono per stampare i QR)
-   - giocate/{gid}/catture   { obiettivo, team, uid, nome, ora }       una per ogni QR scansionato */
+   - utenti/{uid}                 { email, nome, callsign, team, squadra, codice }
+   - team/{tid}                   { nome, logo, referente:{nome,tel}, referenteUid, squadre:[{id,nome}] }
+   - inviti/{codice}              { team }          si legge solo conoscendo il codice
+   - codiciTeam/{tid}             { codice }        lo vedono organizzatore e referente del team
+   - conflitti/{cid}              { titolo, luogo, mapsUrl, ritrovo, inizio, fine, campo, fazioni[], team[], fazioneDi{}, comandanti{}, mappaDa, parcheggio{} }
+   - conflitti/{cid}/bacheca      { tipo, titolo, testo, img, pubblica }
+   - conflitti/{cid}/adesioni/{uid} { team, nome, si, t }
+   - conflitti/{cid}/eventi       { tipo:'zona'|'ordine', uid, team(=fazione), pt, t, ... } */
 (function () {
   'use strict';
 
@@ -29,7 +31,6 @@
     fb = window.firebase;
     fb.initializeApp(C.firebase);
     auth = fb.auth(); db = fb.firestore();
-    // cache sul telefono: si gioca anche senza rete, le catture partono appena torna il segnale
     try { db.enablePersistence({ synchronizeTabs: true }).catch(function () {}); } catch (e) {}
     var stopMe = null;
     auth.onAuthStateChanged(function (u) {
@@ -40,9 +41,8 @@
       var ref = db.collection('utenti').doc(u.uid);
       stopMe = ref.onSnapshot(function (s) {
         if (!s.exists) {
-          // primo accesso: si crea il profilo (senza team)
           if (s.metadata && s.metadata.fromCache) return;
-          ref.set({ email: u.email || '', nome: u.displayName || '', callsign: '', team: null }).catch(function (e) {
+          ref.set({ email: u.email || '', nome: u.displayName || '', callsign: '', team: null, squadra: null }).catch(function (e) {
             stato.fase = 'errore'; stato.errore = 'Profilo non creato: ' + (e.message || e); emetti();
           });
           return;
@@ -60,93 +60,92 @@
   };
   api.logout = function () { return auth.signOut(); };
 
-  // ---------- letture in tempo reale (ognuna restituisce la funzione per smettere di ascoltare)
   function lista(qs) { return qs.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); }); }
+  function doc(s) { return s.exists ? Object.assign({ id: s.id }, s.data()) : null; }
+
+  // ---------- profilo
+  api.aggiornaProfilo = function (p) { return db.collection('utenti').doc(stato.user.uid).set(p, { merge: true }); };
+
+  // ---------- team
+  var ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // niente 0/O e 1/I
+  function codice(n) {
+    var a = new Uint8Array(n); (window.crypto || window.msCrypto).getRandomValues(a);
+    return Array.prototype.map.call(a, function (x) { return ALFABETO[x % ALFABETO.length]; }).join('');
+  }
+  api.idBreve = function () { return codice(5).toLowerCase(); };
   api.ascoltaTeam = function (cb) { return db.collection('team').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); }); };
-  api.ascoltaGiocate = function (cb) {
-    var q = db.collection('giocate');
+  api.ascoltaUnTeam = function (tid, cb) { return db.collection('team').doc(tid).onSnapshot(function (s) { cb(doc(s)); }, function () { cb(null); }); };
+  api.creaTeam = function (nome) {
+    var tid = db.collection('team').doc().id, cod = codice(6);
+    var b = db.batch();
+    b.set(db.collection('team').doc(tid), { nome: nome, logo: '', referente: { nome: '', tel: '' }, referenteUid: null, squadre: [] });
+    b.set(db.collection('inviti').doc(cod), { team: tid });
+    b.set(db.collection('codiciTeam').doc(tid), { codice: cod });
+    return b.commit().then(function () { return tid; });
+  };
+  api.salvaTeam = function (tid, dati) { return db.collection('team').doc(tid).set(dati, { merge: true }); };
+  api.eliminaTeam = function (tid) {
+    return db.collection('codiciTeam').doc(tid).get().then(function (s) {
+      var b = db.batch();
+      if (s.exists && s.data().codice) b.delete(db.collection('inviti').doc(s.data().codice));
+      b.delete(db.collection('codiciTeam').doc(tid));
+      b.delete(db.collection('team').doc(tid));
+      return b.commit();
+    });
+  };
+  api.codiceTeam = function (tid) {
+    return db.collection('codiciTeam').doc(tid).get().then(function (s) { return s.exists ? s.data().codice : ''; }, function () { return ''; });
+  };
+  api.entraTeam = function (cod) {
+    cod = (cod || '').trim().toUpperCase();
+    return db.collection('inviti').doc(cod).get().then(function (s) {
+      if (!s.exists) throw new Error('Codice non valido');
+      return api.aggiornaProfilo({ team: s.data().team, codice: cod, squadra: null });
+    });
+  };
+  api.ascoltaMembri = function (tid, cb) {
+    return db.collection('utenti').where('team', '==', tid).onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); });
+  };
+  api.leggiMembri = function (tid) {
+    return db.collection('utenti').where('team', '==', tid).get().then(lista, function () { return []; });
+  };
+  api.impostaSquadra = function (uid, sq) { return db.collection('utenti').doc(uid).set({ squadra: sq || null }, { merge: true }); };
+  api.togliMembro = function (uid) { return db.collection('utenti').doc(uid).set({ team: null, codice: null, squadra: null }, { merge: true }); };
+
+  // ---------- conflitti
+  api.nuovoId = function () { return db.collection('conflitti').doc().id; };
+  api.ascoltaConflitti = function (cb) {
+    var q = db.collection('conflitti');
     if (!stato.admin) {
       if (!stato.me || !stato.me.team) { cb([]); return function () {}; }
       q = q.where('team', 'array-contains', stato.me.team);
     }
     return q.onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); });
   };
-  api.ascoltaCatture = function (gid, cb) {
-    return db.collection('giocate/' + gid + '/catture').onSnapshot({ includeMetadataChanges: true }, function (qs) {
-      cb(qs.docs.map(function (d) {
-        return Object.assign({ id: d.id, inAttesa: !!(d.metadata && d.metadata.hasPendingWrites) }, d.data());
-      }));
-    }, function () { cb([]); });
+  api.salvaConflitto = function (c) {
+    var dati = JSON.parse(JSON.stringify(c)); var cid = dati.id; delete dati.id;
+    return db.collection('conflitti').doc(cid).set(dati);
   };
-  api.ascoltaMembri = function (tid, cb) {
-    return db.collection('utenti').where('team', '==', tid).onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); });
+  api.eliminaConflitto = function (cid) { return db.collection('conflitti').doc(cid).delete(); };
+  api.ascoltaBacheca = function (cid, cb) {
+    return db.collection('conflitti/' + cid + '/bacheca').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); });
   };
-
-  // ---------- profilo e team
-  api.aggiornaProfilo = function (p) { return db.collection('utenti').doc(stato.user.uid).set(p, { merge: true }); };
-  var ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // niente 0/O e 1/I: si leggono male
-  function codice(n) {
-    var a = new Uint8Array(n); (window.crypto || window.msCrypto).getRandomValues(a);
-    return Array.prototype.map.call(a, function (x) { return ALFABETO[x % ALFABETO.length]; }).join('');
-  }
-  api.codice = codice;
-  api.creaTeam = function (nome, colore) {
-    var tid = db.collection('team').doc().id, cod = codice(6);
-    var b = db.batch();
-    // il codice NON va nel documento del team (che leggono tutti): sta solo in inviti/, che l'organizzatore può elencare
-    b.set(db.collection('team').doc(tid), { nome: nome, colore: colore });
-    b.set(db.collection('inviti').doc(cod), { team: tid });
-    return b.commit().then(function () { return tid; });
+  api.salvaPost = function (cid, p) {
+    var dati = Object.assign({}, p), id = dati.id || db.collection('conflitti/' + cid + '/bacheca').doc().id; delete dati.id;
+    return db.collection('conflitti/' + cid + '/bacheca').doc(id).set(dati);
   };
-  api.entraTeam = function (cod) {
-    cod = (cod || '').trim().toUpperCase();
-    return db.collection('inviti').doc(cod).get().then(function (s) {
-      if (!s.exists) throw new Error('Codice non valido');
-      return api.aggiornaProfilo({ team: s.data().team, codice: cod });
-    });
+  api.eliminaPost = function (cid, id) { return db.collection('conflitti/' + cid + '/bacheca').doc(id).delete(); };
+  api.ascoltaAdesioni = function (cid, cb) {
+    return db.collection('conflitti/' + cid + '/adesioni').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); });
   };
-  // solo per l'organizzatore: codice d'invito di ogni team { tid: codice }
-  api.ascoltaInviti = function (cb) {
-    return db.collection('inviti').onSnapshot(function (qs) {
-      var m = {}; qs.docs.forEach(function (d) { m[d.data().team] = d.id; }); cb(m);
-    }, function () { cb({}); });
+  api.rispondiInvito = function (cid, si) {
+    var me = stato.me;
+    return db.collection('conflitti/' + cid + '/adesioni').doc(stato.user.uid)
+      .set({ team: me.team, nome: me.callsign || me.nome || '', si: !!si, t: Date.now() });
   };
-  api.togliMembro = function (uid) { return db.collection('utenti').doc(uid).set({ team: null, codice: null }, { merge: true }); };
-
-  // ---------- giocate
-  api.nuovoId = function () { return db.collection('giocate').doc().id; };
-  api.salvaGiocata = function (g, segreti) {
-    var dati = JSON.parse(JSON.stringify(g)); var gid = dati.id; delete dati.id;
-    var b = db.batch();
-    b.set(db.collection('giocate').doc(gid), dati);
-    b.set(db.collection('segreti').doc(gid), segreti);
-    return b.commit();
+  // eventi di gioco (posizione nei punti, ordini del comandante)
+  api.ascoltaEventi = function (cid, cb) {
+    return db.collection('conflitti/' + cid + '/eventi').onSnapshot(function (qs) { cb(qs.docs.map(function (d) { return d.data(); })); }, function () { cb([]); });
   };
-  api.leggiSegreti = function (gid) { return db.collection('segreti').doc(gid).get().then(function (s) { return s.exists ? s.data() : {}; }); };
-  api.eliminaGiocata = function (gid) {
-    return Promise.all([db.collection('giocate').doc(gid).delete(), db.collection('segreti').doc(gid).delete()]);
-  };
-  // la cattura viene scritta subito nella cache del telefono: senza rete parte appena c'è segnale
-  api.registraCattura = function (gid, c) {
-    var ref = db.collection('giocate/' + gid + '/catture').doc();
-    ref.set(c).catch(function (e) { console.warn('cattura non salvata', e); });
-    return ref.id;
-  };
-  // giocate a fazioni: eventi (posizione nei punti, ordini del comandante)
-  api.ascoltaEventi = function (gid, cb) {
-    return db.collection('giocate/' + gid + '/eventi').onSnapshot(function (qs) { cb(qs.docs.map(function (d) { return d.data(); })); }, function () { cb([]); });
-  };
-  api.scriviEvento = function (gid, e) { db.collection('giocate/' + gid + '/eventi').doc().set(e).catch(function (x) { console.warn('evento non salvato', x); }); };
-  api.leggiMembri = function (tid) {
-    return db.collection('utenti').where('team', '==', tid).get().then(function (qs) { return lista(qs); }, function () { return []; });
-  };
-  api.annullaCattura = function (gid, cid) { return db.collection('giocate/' + gid + '/catture').doc(cid).delete(); };
-
-  // impronta del codice di un obiettivo: nel piano della giocata c'è solo l'impronta, non il codice
-  api.impronta = function (gid, cod) {
-    var txt = new TextEncoder().encode(gid + ':' + (cod || '').trim().toUpperCase());
-    return crypto.subtle.digest('SHA-256', txt).then(function (buf) {
-      return Array.prototype.map.call(new Uint8Array(buf), function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
-    });
-  };
+  api.scriviEvento = function (cid, e) { db.collection('conflitti/' + cid + '/eventi').doc().set(e).catch(function (x) { console.warn('evento non salvato', x); }); };
 })();

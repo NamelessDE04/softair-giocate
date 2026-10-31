@@ -1,4 +1,4 @@
-/* Configurazione di Softair 4.0 (progetto Firebase dedicato, separato dai tesserini).
+/* Configurazione di Airsoft Conflict (progetto Firebase dedicato, separato dai tesserini).
    I valori "firebase" vanno presi dalla console: Impostazioni progetto → Le tue app → app web. */
 window.S40_CONFIG = {
   // organizzatore: per ora l'unico che crea team e giocate

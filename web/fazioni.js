@@ -1,4 +1,4 @@
-/* Softair 4.0 — giocate a fazioni (modello Arma Reforger: Conflict).
+/* Airsoft Conflict — giocate a fazioni (modello Arma Reforger: Conflict).
    Lo stato della partita si ricalcola sempre dall'elenco degli eventi con il loro orario:
    - { tipo:'zona', uid, team, pt, t }      il giocatore è nel cerchio del punto pt (pt null = fuori); ripetuto ogni 45 s
    - { tipo:'ordine', team, pt, azione, t } ordine del comandante umano alla sua fazione
@@ -143,33 +143,47 @@
   }
   function mmss(ms) { ms = Math.max(0, ms); var s = Math.round(ms / 1000); return Math.floor(s / 60) + ':' + ('0' + s % 60).slice(-2); }
 
-  // ---------- mappa di gioco
-  /* opts: { g, campo, team (la mia fazione), uid, colori:{team:hex}, nomi:{team:nome}, ora():ms,
-             comandante: bool (sono io il comandante umano), onOrdine(pt, azione), onTocco(lat,lon) (solo prova),
-             gps: bool, onZona(pt) } */
+  // ---------- mappa di gioco (simbologia del video: cerchi, stelle, bandiere, collegamenti tratteggiati)
+  /* opts: { g, campo, team (la mia fazione), colori:{fazione:hex}, nomi:{fazione:nome}, ora():ms,
+             anteprima: bool (solo cartina, niente partita), comandante: bool, onOrdine(pt, azione, testo),
+             onTocco(lat,lon) (solo prova), gps: bool, onZona(pt), extra(): [{lat,lon,team}], onMenu() } */
+  function hms(ms) {
+    ms = Math.max(0, ms); var s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+    return (h ? h + ':' + ('0' + m).slice(-2) : m) + ':' + ('0' + s % 60).slice(-2);
+  }
   function vista(box, opts) {
-    var campo = opts.campo, g = opts.g;
+    var campo = opts.campo, g = opts.g, ante = !!opts.anteprima;
     box.innerHTML = '';
     box.classList.add('fz');
-    var bar = el('div', 'fz-bar'), mapBox = el('div', 'fz-map'), inner = el('div', 'fz-inner'), img = new Image();
+    var mapBox = el('div', 'fz-map'), inner = el('div', 'fz-inner'), img = new Image();
     img.src = campo.img; img.className = 'fz-img'; img.draggable = false;
     var svgNS = 'http://www.w3.org/2000/svg', svg = document.createElementNS(svgNS, 'svg');
     svg.setAttribute('viewBox', '0 0 ' + campo.w + ' ' + campo.h); svg.setAttribute('class', 'fz-svg');
     inner.style.width = campo.w + 'px'; inner.style.height = campo.h + 'px';
     inner.appendChild(img); inner.appendChild(svg); mapBox.appendChild(inner);
-    var stato_ = el('div', 'fz-stato'), ordini = el('div', 'fz-ordini'), pop = el('div', 'fz-pop');
-    box.appendChild(bar); box.appendChild(mapBox); box.appendChild(pop); box.appendChild(ordini); box.appendChild(stato_);
+    box.appendChild(mapBox);
+    var top = el('div', 'fz-top'), pop = el('div', 'fz-pop'), ordine = el('div', 'fz-ordine'), stato_ = el('div', 'fz-stato'), score = el('div', 'fz-score');
+    if (!ante) { box.appendChild(top); box.appendChild(ordine); box.appendChild(pop); box.appendChild(stato_); box.appendChild(score); }
+    else box.appendChild(pop);
+    var btnCentra = el('button', 'fz-centra', '◎'); btnCentra.type = 'button'; btnCentra.setAttribute('aria-label', 'Centra la mappa');
+    btnCentra.onclick = function () { if (mia) centraSu(mia); else adatta(); };
+    box.appendChild(btnCentra);
 
     // --- pan e zoom
     var vw = 0, vh = 0, sc = 1, tx = 0, ty = 0, minSc = 0.2;
     function adatta() {
       vw = mapBox.clientWidth; vh = mapBox.clientHeight;
+      if (!vw || !vh) return;
       minSc = Math.min(vw / campo.w, vh / campo.h);
-      sc = Math.max(vw / campo.w, vh / campo.h) * 1.05;   // la mappa riempie lo schermo
-      var cx = 0, cy = 0, n = 0;
-      campo.punti.forEach(function (p) { var q = px(campo, p.lat, p.lon); cx += q.x; cy += q.y; n++; });
-      tx = vw / 2 - cx / n * sc; ty = vh / 2 - cy / n * sc; applica();
+      // i punti riempiono lo schermo (lasciando spazio alle barre)
+      var xs = [], ys = [];
+      campo.punti.forEach(function (p) { var q = px(campo, p.lat, p.lon); xs.push(q.x); ys.push(q.y); });
+      var x0 = Math.min.apply(null, xs) - 70, x1 = Math.max.apply(null, xs) + 70, y0 = Math.min.apply(null, ys) - 80, y1 = Math.max.apply(null, ys) + 80;
+      var padT = ante ? 20 : 110, padB = ante ? 20 : 150;
+      sc = Math.max(minSc, Math.min(vw / (x1 - x0), (vh - padT - padB) / (y1 - y0)));
+      tx = vw / 2 - (x0 + x1) / 2 * sc; ty = padT + (vh - padT - padB) / 2 - (y0 + y1) / 2 * sc; applica();
     }
+    function centraSu(pos) { var q = px(campo, pos.lat, pos.lon); tx = vw / 2 - q.x * sc; ty = vh / 2 - q.y * sc; applica(); }
     function limita() {
       sc = Math.max(minSc, Math.min(3, sc));
       var w = campo.w * sc, h = campo.h * sc;
@@ -200,9 +214,8 @@
     mapBox.addEventListener('wheel', function (e) { e.preventDefault(); var r = mapBox.getBoundingClientRect(); zoomA(e.deltaY < 0 ? 1.2 : 1 / 1.2, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
     function tocco(e) {
       var r = mapBox.getBoundingClientRect(), x = (e.clientX - r.left - tx) / sc, y = (e.clientY - r.top - ty) / sc;
-      // tocco su un punto: scheda del punto (e ordini, per il comandante)
       if (opts.onTocco) { var ll = latlon(campo, x, y); opts.onTocco(ll.lat, ll.lon); return; }
-      var hit = campo.punti.filter(function (p) { var q = px(campo, p.lat, p.lon); return Math.hypot(q.x - x, q.y - y) < Math.max(40, 26 / sc); })[0];
+      var hit = campo.punti.filter(function (p) { var q = px(campo, p.lat, p.lon); return Math.hypot(q.x - x, q.y - y) < Math.max(50, 30 / sc); })[0];
       if (hit) schedaPunto(hit);
     }
 
@@ -227,114 +240,176 @@
 
     // --- disegno
     var st = null, eventi = [], visti = 0, ultimoOrdine = '', primo = true;
-    function col(team) { return team ? (opts.colori[team] || '#888') : '#8a8a80'; }
+    var NEUTRO = '#9a9a8c';
+    function col(team) { return team ? (opts.colori[team] || '#888') : NEUTRO; }
     function nomeF(team) { return team ? (opts.nomi[team] || 'Fazione') : 'Neutrale'; }
+    function esc(t) { return String(t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+    function testo(s, x, y, size, cls, fill) {
+      return '<text x="' + x + '" y="' + y + '" font-size="' + size + '" text-anchor="middle" dominant-baseline="central" class="' + cls + '"' + (fill ? ' fill="' + fill + '"' : '') + '>' + esc(s) + '</text>';
+    }
     function disegna() {
       if (!st) return;
-      var R = st.regole, rpx = R.raggio / campo.mPerPx, k = 1 / sc, s = '';
-      var fs = 15 * k, sw = 3 * k;
+      var R = st.regole, k = Math.max(.72, Math.min(1, sc / .6)) / sc, s = '';
+      var rBase = Math.max(R.raggio / campo.mPerPx, 24 * k);
+      // collegamenti: grigi tratteggiati; pieni se entrambi i capi sono della stessa fazione; tratteggio colorato in movimento se ne tiene uno solo
       campo.link.forEach(function (l) {
         var a = punto(campo, l[0]), b = punto(campo, l[1]), pa = px(campo, a.lat, a.lon), pb = px(campo, b.lat, b.lon);
-        var mio = st.owner[a.id] === opts.team || st.owner[b.id] === opts.team;
-        s += '<line x1="' + pa.x + '" y1="' + pa.y + '" x2="' + pb.x + '" y2="' + pb.y + '" stroke="#111" stroke-opacity=".55" stroke-width="' + (7 * k) + '"/>' +
-          '<line x1="' + pa.x + '" y1="' + pa.y + '" x2="' + pb.x + '" y2="' + pb.y + '" stroke="#fff" stroke-width="' + (3.5 * k) + '"' + (mio ? '' : ' stroke-dasharray="' + (10 * k) + ' ' + (8 * k) + '"') + '/>';
+        var oa = st.owner[a.id], ob = st.owner[b.id], c2 = 'rgba(230,226,210,.5)', dash = (9 * k) + ' ' + (8 * k), w = 2.6 * k, cls = '';
+        if (oa && oa === ob) { c2 = col(oa); dash = ''; w = 3.6 * k; }
+        else if (oa || ob) { c2 = col(oa || ob); dash = (11 * k) + ' ' + (7 * k); w = 3.6 * k; cls = ' class="lk-run" style="--d:' + (18 * k) + 'px"'; }
+        var xy = 'x1="' + pa.x + '" y1="' + pa.y + '" x2="' + pb.x + '" y2="' + pb.y + '"';
+        s += '<line ' + xy + ' stroke="#000" stroke-opacity=".45" stroke-linecap="round" stroke-width="' + (6 * k) + '"/>';
+        s += '<line ' + xy + cls + ' stroke="' + c2 + '" stroke-linecap="round" stroke-width="' + w + '"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/>';
       });
       campo.punti.forEach(function (p) {
         var q = px(campo, p.lat, p.lon), o = st.owner[p.id], c = col(o), pr = st.prog[p.id], cont = st.conteso[p.id];
-        var r = p.tipo === 'mob' ? Math.max(rpx, 26 * k) : rpx;
-        s += '<circle cx="' + q.x + '" cy="' + q.y + '" r="' + r + '" fill="' + c + '" fill-opacity="' + (p.tipo === 'mob' ? .55 : .28) + '" stroke="' + c + '" stroke-width="' + (p.tipo === 'mob' ? 5 * k : sw) + '"/>';
+        var mob = p.tipo === 'mob', r = mob ? rBase * 1.25 : rBase;
+        s += '<circle cx="' + q.x + '" cy="' + q.y + '" r="' + r + '" fill="' + c + '" fill-opacity="' + (mob ? .75 : .55) + '" stroke="' + c + '" stroke-width="' + ((mob ? 4 : 2.6) * k) + '"/>';
         if (pr) {
-          var giro = 2 * Math.PI * (r + 7 * k), frac = Math.min(1, pr.v / st.serveDi(p.id));
-          s += '<circle cx="' + q.x + '" cy="' + q.y + '" r="' + (r + 7 * k) + '" fill="none" stroke="' + col(pr.team) + '" stroke-width="' + (7 * k) + '" stroke-dasharray="' + (giro * frac) + ' ' + giro + '" transform="rotate(-90 ' + q.x + ' ' + q.y + ')"/>';
+          var rr = r + 6 * k, giro = 2 * Math.PI * rr, frac = Math.min(1, pr.v / st.serveDi(p.id));
+          s += '<circle cx="' + q.x + '" cy="' + q.y + '" r="' + rr + '" fill="none" stroke="#000" stroke-opacity=".5" stroke-width="' + (6 * k) + '"/>';
+          s += '<circle cx="' + q.x + '" cy="' + q.y + '" r="' + rr + '" fill="none" stroke="' + col(pr.team) + '" stroke-width="' + (5 * k) + '" stroke-dasharray="' + (giro * frac) + ' ' + giro + '" transform="rotate(-90 ' + q.x + ' ' + q.y + ')"/>';
         }
-        if (cont) s += '<circle class="fz-cont" cx="' + q.x + '" cy="' + q.y + '" r="' + (r + 14 * k) + '" fill="none" stroke="#ffd23f" stroke-width="' + (5 * k) + '" stroke-dasharray="' + (12 * k) + ' ' + (8 * k) + '"/>';
-        var etichetta = (p.tipo === 'chiave' ? '★ ' : p.tipo === 'mob' ? '⚑ ' : p.tipo === 'torre' ? '📡 ' : '') + p.nome;
-        s += '<text x="' + q.x + '" y="' + (q.y - r - 9 * k) + '" font-size="' + fs + '" text-anchor="middle" class="fz-lab">' + esc(etichetta) + '</text>';
-        var n = st.presenti[p.id] || {}, conti = Object.keys(n).filter(function (t) { return n[t] > 0; }).map(function (t) { return n[t]; });
-        if (conti.length) s += '<text x="' + q.x + '" y="' + (q.y + fs * .35) + '" font-size="' + (fs * 1.1) + '" text-anchor="middle" class="fz-n">' + Object.keys(n).filter(function (t) { return n[t] > 0; }).map(function (t) { return n[t]; }).join(' · ') + '</text>';
+        if (cont) s += '<circle class="fz-cont" cx="' + q.x + '" cy="' + q.y + '" r="' + (r + 13 * k) + '" fill="none" stroke="#ffd23f" stroke-width="' + (4 * k) + '" stroke-dasharray="' + (10 * k) + ' ' + (7 * k) + '"/>';
+        // simbolo al centro
+        if (mob) s += testo('⚑', q.x, q.y, 30 * k, 'fz-sim', '#fff');
+        else if (p.tipo === 'chiave') s += testo('★', q.x, q.y, 28 * k, 'fz-sim', '#ffe08a');
+        else if (p.tipo === 'torre') s += torre(q.x, q.y, k);
+        s += testo(p.nome.toUpperCase(), q.x, q.y + r + 13 * k, 15 * k, 'fz-lab');
+        // fuori rete: sono in un punto che la mia fazione non può conquistare
+        if (!ante && zonaMia === p.id && opts.team && o !== opts.team && !st.attaccabile(opts.team, p.id)) {
+          var d = r * .6;
+          s += '<path class="fz-x" d="M' + (q.x - d) + ' ' + (q.y - d) + 'L' + (q.x + d) + ' ' + (q.y + d) + 'M' + (q.x + d) + ' ' + (q.y - d) + 'L' + (q.x - d) + ' ' + (q.y + d) + '" stroke="#ff5a4a" stroke-width="' + (5 * k) + '" stroke-linecap="round"/>';
+          s += testo('FUORI RETE', q.x, q.y - r - 30 * k, 19 * k, 'fz-fuori');
+          s += testo('conquista bloccata', q.x, q.y - r - 13 * k, 13 * k, 'fz-lab');
+        }
+        // conteggio giocatori nel punto dove sono io
+        if (!ante && zonaMia === p.id && opts.team) {
+          var n = st.presenti[p.id] || {}, noi = n[opts.team] || 0, loro = 0;
+          Object.keys(n).forEach(function (t) { if (t !== opts.team) loro += n[t]; });
+          var nem = g.fazioni.filter(function (f) { return f.team !== opts.team; })[0];
+          var bx = q.x + r + 46 * k, by = q.y;
+          s += '<rect x="' + (bx - 40 * k) + '" y="' + (by - 15 * k) + '" width="' + (80 * k) + '" height="' + (30 * k) + '" rx="' + (7 * k) + '" fill="rgba(10,12,8,.88)"/>';
+          s += '<text x="' + bx + '" y="' + by + '" font-size="' + (19 * k) + '" text-anchor="middle" dominant-baseline="central" class="fz-vs"><tspan fill="' + col(opts.team) + '">' + noi + '</tspan><tspan font-size="' + (13 * k) + '" fill="#f1ece0"> vs </tspan><tspan fill="' + col(nem && nem.team) + '">' + loro + '</tspan></text>';
+        }
       });
       if (mia) {
         var m = px(campo, mia.lat, mia.lon);
         if (mia.acc) s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + (mia.acc / campo.mPerPx) + '" fill="#4ea4ff" fill-opacity=".15" stroke="none"/>';
-        s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + (9 * k) + '" fill="#2f8cff" stroke="#fff" stroke-width="' + (3 * k) + '"/>';
+        s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + (8 * k) + '" fill="' + (opts.team ? col(opts.team) : '#2f8cff') + '" stroke="#fff" stroke-width="' + (3 * k) + '"/>';
       }
       (opts.extra ? opts.extra() : []).forEach(function (b) {
         var m = px(campo, b.lat, b.lon);
-        s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + (6 * k) + '" fill="' + col(b.team) + '" stroke="#fff" stroke-width="' + (1.5 * k) + '"/>';
+        s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + (5.5 * k) + '" fill="' + col(b.team) + '" stroke="#fff" stroke-width="' + (1.6 * k) + '"/>';
       });
       svg.innerHTML = s;
     }
-    function esc(t) { return String(t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+    function torre(x, y, k) {
+      var h = 16 * k;
+      return '<path d="M' + x + ' ' + (y - h) + 'L' + (x - h * .55) + ' ' + (y + h) + 'M' + x + ' ' + (y - h) + 'L' + (x + h * .55) + ' ' + (y + h) +
+        'M' + (x - h * .3) + ' ' + (y + h * .2) + 'L' + (x + h * .3) + ' ' + (y + h * .2) + '" stroke="#fff" stroke-width="' + (2.6 * k) + '" fill="none" stroke-linecap="round"/>' +
+        '<circle cx="' + x + '" cy="' + (y - h) + '" r="' + (3 * k) + '" fill="#fff"/>' +
+        '<path d="M' + (x - 8 * k) + ' ' + (y - h - 7 * k) + 'a' + (10 * k) + ' ' + (10 * k) + ' 0 0 1 ' + (16 * k) + ' 0" stroke="#fff" stroke-width="' + (2 * k) + '" fill="none"/>';
+    }
 
-    // --- barra, stato, ordini, avvisi
+    // --- barre, stato, ordini, avvisi
     function aggiorna(evs) {
       if (evs) eventi = evs;
       var now = opts.ora();
-      st = stato(g, campo, eventi, now);
-      var nemico = g.fazioni.filter(function (f) { return f.team !== opts.team; })[0];
+      st = stato(g, campo, ante ? [] : eventi, ante ? g.inizio : now);
+      if (ante) { disegna(); return; }
       var fine = g.inizio + g.durata * 60000;
-      bar.innerHTML = '';
-      bar.appendChild(chip(opts.team, 'Tu: ' + nomeF(opts.team)));
-      bar.appendChild(el('span', 'fz-sp'));
-      bar.appendChild(el('span', 'fz-score', '★ ' + st.chiaviDi(opts.team) + ' – ' + (nemico ? st.chiaviDi(nemico.team) : 0)));
-      bar.appendChild(el('b', 'fz-clock', now < g.inizio ? 'tra ' + mmss(g.inizio - now) : st.finita ? 'FINE' : mmss(fine - now)));
+      var fz = g.fazioni, A = fz[0], B = fz[1];
+      // in alto: tempo trascorso e rimanente
+      top.innerHTML = '';
+      var menu = el('button', 'fz-menu', '☰'); menu.type = 'button'; menu.setAttribute('aria-label', 'Menu');
+      menu.onclick = function () { if (opts.onMenu) opts.onMenu(); };
+      var t1 = el('div', 'fz-t'), t2 = el('div', 'fz-t dx');
+      t1.appendChild(el('small', null, now < g.inizio ? 'INIZIO TRA' : 'TRASCORSO'));
+      t1.appendChild(el('b', null, now < g.inizio ? hms(g.inizio - now) : hms(Math.min(now, fine) - g.inizio)));
+      t2.appendChild(el('small', null, 'RIMANENTE'));
+      t2.appendChild(el('b', null, hms(fine - Math.max(now, g.inizio))));
+      top.appendChild(menu); top.appendChild(t1);
+      if (opts.team) { var ch = el('span', 'fz-chip', nomeF(opts.team)); ch.style.background = col(opts.team); top.appendChild(ch); }
+      else top.appendChild(el('span', 'fz-sp'));
+      top.appendChild(t2);
+      // in basso: punti chiave
+      score.innerHTML = '';
+      score.appendChild(el('small', null, 'PUNTI CHIAVE'));
+      var riga = el('div', 'fz-sc-riga');
+      var nA = el('span', 'fz-sc-nome', nomeF(A.team)); nA.style.color = col(A.team);
+      var nB = el('span', 'fz-sc-nome', nomeF(B.team)); nB.style.color = col(B.team);
+      [nA, nB].forEach(function (n) { var L = n.textContent.length; n.style.fontSize = L > 11 ? '15px' : L > 7 ? '18px' : ''; });
+      riga.appendChild(nA); riga.appendChild(el('b', 'fz-sc-n', String(st.chiaviDi(A.team))));
+      riga.appendChild(el('span', 'fz-sc-tr', '–'));
+      riga.appendChild(el('b', 'fz-sc-n', String(st.chiaviDi(B.team)))); riga.appendChild(nB);
+      score.appendChild(riga);
+      var vA = st.vittoriaTra(A.team), vB = st.vittoriaTra(B.team);
+      if (vA != null || vB != null) {
+        var vt = el('div', 'fz-sc-vit', (vA != null ? nomeF(A.team) : nomeF(B.team)) + ' vince tra ' + mmss(vA != null ? vA : vB));
+        score.appendChild(vt);
+      }
       // la mia posizione
-      var testo = '';
-      if (now < g.inizio) testo = 'La partita inizia tra ' + mmss(g.inizio - now);
-      else if (st.finita) testo = st.vincitore ? (st.vincitore === opts.team ? '🏆 VITTORIA!' : 'Sconfitta: vince ' + nomeF(st.vincitore)) : 'Pareggio';
-      else if (!mia) testo = opts.gps ? 'In attesa del GPS…' : 'Tocca la mappa per spostarti';
-      else if (!zonaMia) testo = 'Fuori dai punti' + (mia.acc ? ' · GPS ±' + Math.round(mia.acc) + ' m' : '');
+      var testoS = '', cls = '';
+      if (now < g.inizio) testoS = 'In attesa dell\'inizio';
+      else if (st.finita) { testoS = st.vincitore ? (st.vincitore === opts.team ? 'VITTORIA!' : 'Vince ' + nomeF(st.vincitore)) : 'Pareggio'; cls = st.vincitore === opts.team ? ' ok' : ''; }
+      else if (!opts.team) testoS = 'Modalità spettatore';
+      else if (!mia) testoS = opts.gps ? 'In attesa del GPS…' : 'Tocca la mappa per spostarti';
+      else if (!zonaMia) testoS = 'Fuori dai punti' + (mia.acc ? ' · GPS ±' + Math.round(mia.acc) + ' m' : '');
       else {
         var p = punto(campo, zonaMia), pr = st.prog[zonaMia], o = st.owner[zonaMia];
-        if (st.conteso[zonaMia]) testo = '⚔ ' + p.nome + ' CONTESO: conquista ferma';
-        else if (pr && pr.team === opts.team) testo = '⏱ Conquista di ' + p.nome + ': ' + mmss(st.serveDi(zonaMia) - pr.v);
-        else if (o === opts.team) testo = '🛡 Sei a ' + p.nome + ' (nostro)';
-        else if (!st.attaccabile(opts.team, zonaMia)) testo = '✕ ' + p.nome + ' fuori dalla vostra rete: prendete prima un punto collegato';
-        else testo = p.nome;
+        if (st.conteso[zonaMia]) { testoS = p.nome + ' CONTESO: conquista ferma'; cls = ' warn'; }
+        else if (pr && pr.team === opts.team) { testoS = 'Conquista di ' + p.nome + ': ' + mmss(st.serveDi(zonaMia) - pr.v); cls = ' ok'; }
+        else if (o === opts.team) testoS = 'Sei a ' + p.nome + ' (nostro)';
+        else if (!st.attaccabile(opts.team, zonaMia)) { testoS = p.nome + ' fuori rete: prima un punto collegato'; cls = ' ko'; }
+        else testoS = p.nome;
       }
-      stato_.textContent = testo;
-      stato_.className = 'fz-stato' + (/CONTESO|✕/.test(testo) ? ' warn' : /Conquista|VITTORIA/.test(testo) ? ' ok' : '');
-      // ordini
+      stato_.textContent = testoS; stato_.className = 'fz-stato' + cls;
+      // ordine attuale
       var f = g.fazioni.filter(function (x) { return x.team === opts.team; })[0];
-      var ord = !opts.team || st.finita || now < g.inizio ? [] : f && f.comandante && f.comandante !== 'ia' ? ordiniUmani(eventi, opts.team) : ordiniIA(g, campo, st, opts.team);
-      ordini.innerHTML = '';
-      ordini.appendChild(el('small', null, f && f.comandante && f.comandante !== 'ia' ? 'ORDINI DEL COMANDANTE' : 'COMANDANTE AUTOMATICO'));
-      if (!ord.length) ordini.appendChild(el('span', null, now < g.inizio ? 'In attesa dell\'inizio' : '—'));
-      ord.forEach(function (o, i) { ordini.appendChild(el('span', i ? 'fz-o2' : 'fz-o1', o.testo || (o.azione + ' ' + o.pt))); });
+      var umano = f && f.comandante && f.comandante !== 'ia';
+      var ord = !opts.team || st.finita || now < g.inizio ? [] : umano ? ordiniUmani(eventi, opts.team) : ordiniIA(g, campo, st, opts.team);
+      ordine.innerHTML = '';
+      ordine.hidden = !ord.length;
+      if (ord.length) {
+        ordine.style.borderLeftColor = col(opts.team);
+        ordine.appendChild(el('small', null, umano ? 'ORDINE DEL COMANDANTE' : 'COMANDANTE AUTOMATICO'));
+        ordine.appendChild(el('b', null, ord[0].testo || (ord[0].azione + ' ' + ord[0].pt)));
+      }
       var firmaO = ord.length ? ord[0].testo : '';
-      if (primo) { primo = false; visti = st.transizioni.length; ultimoOrdine = firmaO; disegna(); return; }  // all'apertura non si ripete il passato
-      if (firmaO && firmaO !== ultimoOrdine) { mostraPop('📣 ' + firmaO, 'ordine'); vibra([60, 40, 60]); }
+      if (primo) { primo = false; visti = st.transizioni.length; ultimoOrdine = firmaO; disegna(); return; }
+      if (firmaO && firmaO !== ultimoOrdine) vibra([60, 40, 60]);
       ultimoOrdine = firmaO;
-      // avvisi: solo transizioni nuove che riguardano la mia fazione o i punti chiave
       st.transizioni.slice(visti).forEach(function (tr) {
         var nm = tr.pt ? punto(campo, tr.pt).nome : '';
-        if (tr.tipo === 'attacco' && tr.contro === opts.team) { mostraPop('⚠ Ti stanno attaccando ' + nm + '!', 'ko'); vibra([300, 100, 300]); }
-        else if (tr.tipo === 'conquista' && tr.team === opts.team) { mostraPop('✓ ' + nm + ' conquistato!', 'ok'); vibra(120); }
-        else if (tr.tipo === 'conquista' && tr.contro === opts.team) { mostraPop('✕ Abbiamo perso ' + nm, 'ko'); vibra([300, 100, 300]); }
-        else if (tr.tipo === 'conquista') mostraPop(nomeF(tr.team) + ' ha preso ' + nm, '');
-        else if (tr.tipo === 'contovittoria') mostraPop(tr.team === opts.team ? '★ Teniamo ' + st.regole.chiavi + ' punti chiave: vittoria tra ' + mmss(st.regole.tVittoria * 1000) : '⚠ Il nemico tiene ' + st.regole.chiavi + ' punti chiave: contrattaccate!', tr.team === opts.team ? 'ok' : 'ko');
-        else if (tr.tipo === 'vittoria') mostraPop(tr.team === opts.team ? '🏆 Vittoria!' : 'Partita persa', tr.team === opts.team ? 'ok' : 'ko');
+        if (tr.tipo === 'attacco' && tr.contro === opts.team) { mostraPop('Ci stanno attaccando ' + nm + '!', 'ko', tr.team); vibra([300, 100, 300]); }
+        else if (tr.tipo === 'conquista' && tr.team === opts.team) { mostraPop(nm + ' conquistato!', 'ok', tr.team); vibra(120); }
+        else if (tr.tipo === 'conquista' && tr.contro === opts.team) { mostraPop('Abbiamo perso ' + nm, 'ko', tr.team); vibra([300, 100, 300]); }
+        else if (tr.tipo === 'conquista') mostraPop(nomeF(tr.team) + ' ha preso ' + nm, '', tr.team);
+        else if (tr.tipo === 'contovittoria') mostraPop(tr.team === opts.team ? 'Teniamo ' + st.regole.chiavi + ' punti chiave: vittoria tra ' + mmss(st.regole.tVittoria * 1000) : 'Il nemico tiene ' + st.regole.chiavi + ' punti chiave: contrattaccate!', tr.team === opts.team ? 'ok' : 'ko', tr.team);
+        else if (tr.tipo === 'vittoria') mostraPop(tr.team === opts.team ? 'Vittoria!' : 'Partita persa', tr.team === opts.team ? 'ok' : 'ko', tr.team);
       });
       visti = st.transizioni.length;
       disegna();
     }
-    function chip(team, testo) { var c = el('span', 'fz-chip', testo); c.style.background = col(team); return c; }
-    function mostraPop(t, cls) {
-      var p = el('div', 'fz-msg ' + (cls || ''), t); pop.appendChild(p);
+    function mostraPop(t, cls, team) {
+      var p = el('div', 'fz-msg ' + (cls || ''), t); if (team) p.style.borderLeftColor = col(team);
+      pop.appendChild(p);
       while (pop.children.length > 3) pop.removeChild(pop.firstChild);
       setTimeout(function () { p.classList.add('via'); setTimeout(function () { p.remove(); }, 400); }, 6000);
     }
     function vibra(v) { try { if (navigator.vibrate) navigator.vibrate(v); } catch (e) {} }
     function schedaPunto(p) {
       var o = st && st.owner[p.id], fp = el('div', 'fz-scheda');
-      var tipo = { mob: 'Base principale (MOB)', chiave: 'Punto chiave', torre: 'Torre radio', deposito: 'Deposito', base: 'Base' }[p.tipo];
-      fp.appendChild(el('b', null, p.nome)); fp.appendChild(el('small', null, tipo + ' · ' + nomeF(o)));
-      if (p.tipo !== 'mob' && st) fp.appendChild(el('span', null, st.attaccabile(opts.team, p.id) || o === opts.team ? 'Nella vostra rete' : 'Fuori dalla vostra rete'));
-      if (opts.comandante && opts.onOrdine && p.tipo !== 'mob') {
+      var tipo = { mob: 'Base principale', chiave: 'Punto chiave ★', torre: 'Torre radio', deposito: 'Deposito', base: 'Punto base' }[p.tipo];
+      var tt = el('b', null, p.nome.toUpperCase()); fp.appendChild(tt);
+      var sub = el('small', null, tipo + ' · ' + nomeF(o)); fp.appendChild(sub);
+      if (!ante && p.tipo !== 'mob' && st && opts.team) fp.appendChild(el('span', null, o === opts.team ? 'Nostro' : st.attaccabile(opts.team, p.id) ? 'Nella nostra rete: conquistabile' : 'Fuori dalla nostra rete'));
+      if (!ante && opts.comandante && opts.onOrdine && p.tipo !== 'mob') {
         var r = el('div', 'fz-az');
         [['attacca', 'Attaccate'], ['difendi', 'Difendete'], ['raggruppa', 'Raggruppatevi']].forEach(function (a) {
           var b = el('button', 'btn', a[1]); b.type = 'button';
-          b.onclick = function () { opts.onOrdine(p.id, a[0], a[1] + ' ' + p.nome); fp.remove(); mostraPop('Ordine inviato: ' + a[1] + ' ' + p.nome, 'ordine'); };
+          b.onclick = function () { opts.onOrdine(p.id, a[0], a[1] + ' ' + p.nome); fp.remove(); mostraPop('Ordine inviato: ' + a[1] + ' ' + p.nome, 'ok', opts.team); };
           r.appendChild(b);
         });
         fp.appendChild(r);
@@ -348,6 +423,7 @@
     img.onload = adatta;
     window.addEventListener('resize', adatta);
     var tic = setInterval(function () { aggiorna(); }, 1000);
+    aggiorna();
     return {
       aggiorna: aggiorna, posizione: impostaPos, centra: adatta,
       chiudi: function () {
@@ -361,7 +437,7 @@
   }
 
   // ---------- modalità prova: partita simulata con giocatori finti, tempo accelerato
-  function prova(box, onEsci) {
+  function prova(box, onMenu) {
     var campo = window.S40_CAMPI.tauri, vel = 10, t0 = Date.now(), base = Date.now();
     var ora = function () { return base + (Date.now() - t0) * vel; };
     var g = { id: 'prova', titolo: 'Prova fazioni', inizio: base + 5000, durata: 90, campo: 'tauri',
@@ -373,10 +449,10 @@
     });
     var io = { uid: 'io', team: 'blu', zona: null };
     var v = vista(box, {
-      g: g, campo: campo, team: 'blu', uid: 'io', colori: { blu: '#1f6fb2', rossa: '#c0392b' }, nomi: { blu: 'Blu', rossa: 'Rossa' }, ora: ora,
+      g: g, campo: campo, team: 'blu', uid: 'io', colori: { blu: '#2f7fd6', rossa: '#d23a2c' }, nomi: { blu: 'Blu', rossa: 'Rossa' }, ora: ora,
       onTocco: function (lat, lon) { v.posizione(lat, lon, 6); },
       onZona: function (pt) { eventi.push({ tipo: 'zona', uid: 'io', team: 'blu', pt: pt, t: ora() }); io.zona = pt; },
-      extra: function () { return bots; }
+      extra: function () { return bots; }, onMenu: onMenu
     });
     var hq = punto(campo, 'HQ'); v.posizione(hq.lat - 1e-4, hq.lon - 1e-4, 6);
     // i giocatori finti seguono gli ordini del comandante automatico della loro fazione
@@ -415,5 +491,5 @@
     };
   }
 
-  window.S40F = { stato: stato, ordiniIA: ordiniIA, vista: vista, prova: prova, zonaDi: zonaDi, REGOLE: REGOLE, mmss: mmss };
+  window.S40F = { stato: stato, ordiniIA: ordiniIA, vista: vista, prova: prova, zonaDi: zonaDi, REGOLE: REGOLE, mmss: mmss, hms: hms };
 })();
