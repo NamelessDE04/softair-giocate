@@ -16,7 +16,43 @@
   window.S40 = api;
 
   var fb = null, auth = null, db = null;
-  var stato = { fase: 'carico', user: null, me: null, admin: false, errore: '' };
+  var stato = { fase: 'carico', user: null, me: null, admin: false, dev: false, ruolo: 'truppa', permessi: null, errore: '' };
+
+  // ---------- ruoli e permessi (la tabella la decide il developer, in config/permessi)
+  var RUOLI = [['organizzatore', 'Organizzatore'], ['comandante', 'Comandante di fazione'], ['caposquadra', 'Caposquadra'], ['truppa', 'Truppa']];
+  var PERMESSI = [
+    ['Organizzazione', [
+      ['conflitti', 'Creare e modificare conflict e bacheca (vede tutti i conflict)'],
+      ['team', 'Creare, modificare ed eliminare team e codici'],
+      ['giocatori', 'Modificare, spostare ed eliminare giocatori'],
+      ['risposte', 'Vedere chi ha risposto agli inviti']]],
+    ['Prima del conflict', [
+      ['bachecaPrima', 'Leggere i post della bacheca prima della pubblicazione'],
+      ['cartinaPrima', 'Vedere la cartina del campo prima della data'],
+      ['parcheggioPrima', 'Vedere il parcheggio prima della data'],
+      ['telefoni', 'Vedere il numero di cellulare dei referenti'],
+      ['rosa', 'Vedere i giocatori del proprio team']]],
+    ['In partita', [
+      ['ordini', 'Dare ordini alla propria fazione'],
+      ['presenze', 'Vedere i compagni presenti in tutti i punti'],
+      ['prova', 'Usare la mappa di prova']]]
+  ];
+  var DEFAULT = {
+    organizzatore: { conflitti: true, team: true, giocatori: true, risposte: true, bachecaPrima: true, cartinaPrima: true, parcheggioPrima: true, telefoni: true, rosa: true, ordini: true, presenze: true, prova: true },
+    comandante: { risposte: true, cartinaPrima: true, parcheggioPrima: true, telefoni: true, rosa: true, ordini: true, presenze: true, prova: true },
+    caposquadra: { parcheggioPrima: true, telefoni: true, rosa: true, presenze: true, prova: true },
+    truppa: { telefoni: true, rosa: true, prova: true }
+  };
+  api.RUOLI = RUOLI; api.PERMESSI = PERMESSI; api.DEFAULT = DEFAULT;
+  api.nomeRuolo = function (r) { if (r === 'developer') return 'Developer'; var x = RUOLI.filter(function (q) { return q[0] === r; })[0]; return x ? x[1] : 'Truppa'; };
+  // può fare/vedere p? il developer può sempre tutto
+  api.puo = function (p) {
+    if (stato.dev) return true;
+    var tab = stato.permessi || DEFAULT, r = tab[stato.ruolo] || {};
+    return r[p] === true;
+  };
+  api.permessi = function () { return JSON.parse(JSON.stringify(stato.permessi || DEFAULT)); };
+  api.salvaPermessi = function (tab) { return db.collection('config').doc('permessi').set(tab); };
   var ascoltatori = [];
   function emetti() { ascoltatori.forEach(function (f) { try { f(stato); } catch (e) { console.error(e); } }); }
   api.onStato = function (f) { ascoltatori.push(f); f(stato); };
@@ -32,10 +68,14 @@
     fb.initializeApp(C.firebase);
     auth = fb.auth(); db = fb.firestore();
     try { db.enablePersistence({ synchronizeTabs: true }).catch(function () {}); } catch (e) {}
-    var stopMe = null;
+    var stopMe = null, stopPerm = null;
     auth.onAuthStateChanged(function (u) {
       if (stopMe) { stopMe(); stopMe = null; }
-      stato.user = u; stato.admin = isAdmin(u); stato.me = null;
+      if (stopPerm) { stopPerm(); stopPerm = null; }
+      stato.user = u; stato.dev = stato.admin = isAdmin(u); stato.me = null;
+      if (u) stopPerm = db.collection('config').doc('permessi').onSnapshot(function (s) {
+        stato.permessi = s.exists ? s.data() : null; if (stato.fase === 'pronto') emetti();
+      }, function () {});
       if (!u) { stato.fase = 'login'; emetti(); return; }
       stato.fase = 'carico'; emetti();
       var ref = db.collection('utenti').doc(u.uid);
@@ -48,6 +88,7 @@
           return;
         }
         stato.me = Object.assign({ uid: u.uid }, s.data());
+        stato.ruolo = stato.dev ? 'developer' : (stato.me.ruolo || 'truppa');
         stato.fase = 'pronto'; emetti();
       }, function (e) { stato.fase = 'errore'; stato.errore = 'Database non raggiungibile: ' + (e.message || e); emetti(); });
     });
@@ -84,6 +125,13 @@
     return b.commit().then(function () { return tid; });
   };
   api.salvaTeam = function (tid, dati) { return db.collection('team').doc(tid).set(dati, { merge: true }); };
+  // cellulare del referente: sta a parte, così lo vede solo chi ha il permesso
+  api.ascoltaContatti = function (cb) {
+    if (!api.puo('telefoni') && !api.puo('team')) { cb({}); return function () {}; }
+    return db.collection('contatti').onSnapshot(function (qs) { var m = {}; qs.docs.forEach(function (d) { m[d.id] = d.data().tel || ''; }); cb(m); }, function () { cb({}); });
+  };
+  api.leggiContatto = function (tid) { return db.collection('contatti').doc(tid).get().then(function (s) { return s.exists ? s.data().tel || '' : ''; }, function () { return ''; }); };
+  api.salvaContatto = function (tid, tel) { return db.collection('contatti').doc(tid).set({ tel: tel || '' }); };
   // elimina il team: i giocatori restano senza team e il team esce dai conflict
   api.eliminaTeam = function (tid) {
     return Promise.all([
@@ -102,6 +150,7 @@
         }, { merge: true });
       });
       b.delete(db.collection('codiciTeam').doc(tid));
+      b.delete(db.collection('contatti').doc(tid));
       b.delete(db.collection('team').doc(tid));
       return b.commit();
     });
@@ -144,7 +193,7 @@
   api.nuovoId = function () { return db.collection('conflitti').doc().id; };
   api.ascoltaConflitti = function (cb) {
     var q = db.collection('conflitti');
-    if (!stato.admin) {
+    if (!api.puo('conflitti')) {
       if (!stato.me || !stato.me.team) { cb([]); return function () {}; }
       q = q.where('team', 'array-contains', stato.me.team);
     }
@@ -164,6 +213,10 @@
   };
   api.eliminaPost = function (cid, id) { return db.collection('conflitti/' + cid + '/bacheca').doc(id).delete(); };
   api.ascoltaAdesioni = function (cid, cb) {
+    // senza il permesso si legge solo la propria risposta
+    if (!api.puo('risposte') && !api.puo('conflitti')) {
+      return db.collection('conflitti/' + cid + '/adesioni').doc(stato.user.uid).onSnapshot(function (s) { cb(s.exists ? [Object.assign({ id: s.id }, s.data())] : []); }, function () { cb([]); });
+    }
     return db.collection('conflitti/' + cid + '/adesioni').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); });
   };
   api.rispondiInvito = function (cid, si) {

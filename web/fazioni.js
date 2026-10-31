@@ -283,6 +283,15 @@
           s += testo('FUORI RETE', q.x, q.y - r - 30 * k, 19 * k, 'fz-fuori');
           s += testo('conquista bloccata', q.x, q.y - r - 13 * k, 13 * k, 'fz-lab');
         }
+        // compagni presenti negli altri punti (se il ruolo lo permette)
+        if (!ante && opts.presenze && opts.team && zonaMia !== p.id) {
+          var noiQui = (st.presenti[p.id] || {})[opts.team] || 0;
+          if (noiQui) {
+            var cx2 = q.x + r * .75, cy2 = q.y - r * .75;
+            s += '<circle cx="' + cx2 + '" cy="' + cy2 + '" r="' + (11 * k) + '" fill="' + col(opts.team) + '" stroke="#fff" stroke-width="' + (2 * k) + '"/>';
+            s += testo(String(noiQui), cx2, cy2, 13 * k, 'fz-vs', '#fff');
+          }
+        }
         // conteggio giocatori nel punto dove sono io
         if (!ante && zonaMia === p.id && opts.team) {
           var n = st.presenti[p.id] || {}, noi = n[opts.team] || 0, loro = 0;
@@ -367,8 +376,11 @@
       stato_.textContent = testoS; stato_.className = 'fz-stato' + cls;
       // ordine attuale
       var f = g.fazioni.filter(function (x) { return x.team === opts.team; })[0];
-      var umano = f && f.comandante && f.comandante !== 'ia';
-      var ord = !opts.team || st.finita || now < g.inizio ? [] : umano ? ordiniUmani(eventi, opts.team) : ordiniIA(g, campo, st, opts.team);
+      // ordini di una persona (comandante scelto o chi ha il permesso) negli ultimi 15 minuti; altrimenti il comandante automatico
+      var designato = f && f.comandante && f.comandante !== 'ia';
+      var umani = ordiniUmani(eventi, opts.team).filter(function (o) { return now - o.t < 900000; });
+      var umano = umani.length > 0;
+      var ord = !opts.team || st.finita || now < g.inizio ? [] : umano ? umani : designato ? [] : ordiniIA(g, campo, st, opts.team);
       ordine.innerHTML = '';
       ordine.hidden = !ord.length;
       if (ord.length) {
@@ -437,7 +449,7 @@
   }
 
   // ---------- modalità prova: partita simulata con giocatori finti, tempo accelerato
-  function prova(box, onMenu) {
+  function prova(box, onMenu, extraOpts) {
     var campo = window.S40_CAMPI.tauri, vel = 10, t0 = Date.now(), base = Date.now();
     var ora = function () { return base + (Date.now() - t0) * vel; };
     var g = { id: 'prova', titolo: 'Prova fazioni', inizio: base + 5000, durata: 90, campo: 'tauri',
@@ -452,7 +464,8 @@
       g: g, campo: campo, team: 'blu', uid: 'io', colori: { blu: '#2f7fd6', rossa: '#d23a2c' }, nomi: { blu: 'Blu', rossa: 'Rossa' }, ora: ora,
       onTocco: function (lat, lon) { v.posizione(lat, lon, 6); },
       onZona: function (pt) { eventi.push({ tipo: 'zona', uid: 'io', team: 'blu', pt: pt, t: ora() }); io.zona = pt; },
-      extra: function () { return bots; }, onMenu: onMenu
+      extra: function () { return bots; }, onMenu: onMenu, presenze: !!(extraOpts && extraOpts.presenze), comandante: !!(extraOpts && extraOpts.comandante),
+      onOrdine: function (pt, azione, testo) { eventi.push({ tipo: 'ordine', uid: 'io', team: 'blu', pt: pt, azione: azione, testo: testo, t: ora() }); }
     });
     var hq = punto(campo, 'HQ'); v.posizione(hq.lat - 1e-4, hq.lon - 1e-4, 6);
     // i giocatori finti seguono gli ordini del comandante automatico della loro fazione

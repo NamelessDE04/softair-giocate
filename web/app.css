@@ -257,3 +257,13 @@ main > .btn.accent { width: 100%; }
 .gioc > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ris-tit { color: var(--oro); margin: 8px 0 2px; font-size: 17px; }
 .logo-riga .btn.link { margin-left: auto; }
+
+.perm { background: var(--pan); border: 1px solid var(--linea); border-radius: 12px; padding: 4px 10px 8px; }
+.perm-riga { display: grid; grid-template-columns: minmax(0, 1fr) repeat(4, 44px); align-items: center; gap: 2px; padding: 7px 0; border-top: 1px solid rgba(255,255,255,.06); }
+.perm-riga > span { font-size: 16px; line-height: 1.2; padding-right: 6px; }
+.perm-testa { position: sticky; top: calc(56px + var(--sa-t)); background: var(--pan); z-index: 2; border-top: 0; }
+.perm-testa b { text-align: center; font-size: 13px; color: var(--oro); letter-spacing: .5px; }
+.perm-gruppo { color: var(--oro); font-size: 15px; letter-spacing: 1px; text-transform: uppercase; margin: 12px 0 2px; }
+.perm-c { display: grid; place-items: center; min-height: 40px; cursor: pointer; }
+.perm-c input { width: 24px; height: 24px; accent-color: var(--oro); padding: 0; }
+.riga2.fisso .btn:not(.big) { flex: 0 0 100%; }

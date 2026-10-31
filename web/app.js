@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.4';
+  var VERSIONE = '0.5';
   var S = window.S40, F = window.S40F, CAMPI = window.S40_CAMPI;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -45,10 +45,12 @@
     if (stessoGiorno(now, c.inizio)) return 'giorno';
     return 'settimana';
   }
-  function visibile(da, c) { return S.stato().admin || da == null || Date.now() >= da; }
+  function P(p) { return S.puo(p); }
+  function organizza() { return P('conflitti') || P('team') || P('giocatori') || S.stato().dev; }
+  function visibile(da, perm) { return P(perm) || da == null || Date.now() >= da; }
 
   // ---------- dati condivisi
-  var D = { team: [], conflitti: [], adesioni: {} };
+  var D = { team: [], conflitti: [], adesioni: {}, contatti: {} };
   var stopAdesioni = {};
   function teamDi(tid) { return D.team.filter(function (t) { return t.id === tid; })[0]; }
   function miaAdesione(cid) { var u = S.stato().user; return (D.adesioni[cid] || []).filter(function (a) { return a.id === u.uid; })[0]; }
@@ -75,7 +77,7 @@
     app.innerHTML = ''; window.scrollTo(0, 0);
     $('pieno').hidden = true; $('pieno').innerHTML = '';
     document.body.classList.remove('a-pieno');
-    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, giocatori: pagGiocatori, conflittoModifica: pagConflittoModifica, prova: pagProva }[c.v];
+    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, giocatori: pagGiocatori, permessi: pagPermessi, conflittoModifica: pagConflittoModifica, prova: pagProva }[c.v];
     (r || home)(c.p);
   }
   function aPieno() { document.body.classList.add('a-pieno'); var p = $('pieno'); p.hidden = false; p.innerHTML = ''; return p; }
@@ -108,13 +110,13 @@
     apriFoglio(function (f) {
       var chi = el('div', 'menu-chi');
       chi.appendChild(el('b', null, me.callsign || me.nome || (st.user && st.user.email) || ''));
-      var t = teamDi(me.team); chi.appendChild(el('small', null, t ? t.nome : 'Nessun team'));
+      var t = teamDi(me.team); chi.appendChild(el('small', null, (t ? t.nome : 'Nessun team') + ' · ' + S.nomeRuolo(st.ruolo)));
       f.appendChild(chi);
       var voci = [];
       if (me.team) voci.push(['Il mio team', function () { vai('team', me.team); }]);
       voci.push(['Profilo', function () { vai('profilo'); }]);
-      voci.push(['Prova la mappa di gioco', function () { vai('prova'); }]);
-      if (st.admin) voci.push(['Organizza', function () { vai('organizza'); }]);
+      if (P('prova')) voci.push(['Prova la mappa di gioco', function () { vai('prova'); }]);
+      if (organizza()) voci.push(['Organizza', function () { vai('organizza'); }]);
       voci.push(['Esci', function () { S.logout(); }]);
       voci.forEach(function (v) {
         var b = bottone(v[0], 'voce'); b.onclick = function () { chiudiFoglio(); setTimeout(v[1], 30); }; f.appendChild(b);
@@ -128,7 +130,7 @@
     var st = S.stato(), me = st.me;
     var lista = attivi(), inviti = [], promemoria = [];
     lista.forEach(function (c) {
-      if (st.admin) { promemoria.push(c); return; }
+      if (P('conflitti')) { promemoria.push(c); return; }
       if (!me.team || (c.team || []).indexOf(me.team) < 0) return;
       var a = miaAdesione(c.id);
       if (!a) inviti.push(c); else if (a.si) promemoria.push(c);
@@ -163,7 +165,7 @@
       var cambia = bottone('Ho un codice di un altro team', 'link', function () { form.hidden = false; cambia.remove(); inp.focus(); });
       box.appendChild(form); box.appendChild(cambia);
     } else box.appendChild(form);
-    if (S.stato().admin) box.appendChild(bottone('Organizza conflict e team', '', function () { vai('organizza'); }));
+    if (organizza()) box.appendChild(bottone('Organizza conflict e team', '', function () { vai('organizza'); }));
     app.appendChild(box);
   }
 
@@ -234,13 +236,13 @@
     if (fase(c) === 'finito') hero.appendChild(el('div', 'conf-fine', 'CONFLICT CONCLUSO'));
     box.appendChild(hero);
 
-    if (!st.admin && st.me.team) {
+    if (!P('conflitti') && st.me.team) {
       var a = miaAdesione(c.id), r = el('div', 'risposta');
       r.appendChild(el('span', null, a ? (a.si ? 'Hai confermato la presenza' : 'Hai detto che non vieni') : 'Ci sarai?'));
       r.appendChild(bottone(a && a.si ? 'Non vengo più' : 'Partecipo', a && a.si ? 'piccolo' : 'accent piccolo', function () { S.rispondiInvito(c.id, !(a && a.si)).then(function () { mostra(); }, errore); }));
       box.appendChild(r);
     }
-    if (st.admin) {
+    if (P('conflitti')) {
       var adm = el('div', 'riga2');
       adm.appendChild(bottone('Modifica conflict', '', function () { vai('conflittoModifica', c.id); }));
       adm.appendChild(bottone('+ Nuovo post', 'accent', function () { editorPost(c, null); }));
@@ -262,13 +264,14 @@
         row.appendChild(logo(t, 40));
         var info = el('div', 'faz-info');
         info.appendChild(el('b', null, t.nome));
-        var n = ades.filter(function (x) { return x.team === tid && x.si; }).length;
+        var n = P('risposte') ? ades.filter(function (x) { return x.team === tid && x.si; }).length : 0;
         info.appendChild(el('small', null, (t.referente && t.referente.nome ? 'Ref. ' + t.referente.nome : 'Referente da indicare') + (n ? ' · ' + n + ' confermati' : '')));
         row.appendChild(info);
-        if (t.referente && t.referente.tel) {
+        var tel = D.contatti[tid];
+        if (tel) {
           var az = el('div', 'faz-az');
-          az.appendChild(link('☎', telLink(t.referente.tel), 'btn icon'));
-          az.appendChild(link('WA', waLink(t.referente.tel), 'btn icon wa'));
+          az.appendChild(link('☎', telLink(tel), 'btn icon'));
+          az.appendChild(link('WA', waLink(tel), 'btn icon wa'));
           row.appendChild(az);
         }
         k.appendChild(row);
@@ -279,7 +282,7 @@
     box.appendChild(fz);
 
     // risposte agli inviti (solo organizzatore: si possono togliere)
-    if (st.admin) {
+    if (P('risposte')) {
       box.appendChild(el('h3', 'sez', 'Risposte'));
       var rBox = el('div', 'carta');
       var si = ades.filter(function (x) { return x.si; }), no = ades.filter(function (x) { return !x.si; });
@@ -302,7 +305,7 @@
     box.appendChild(bach);
     var stopB = S.ascoltaBacheca(c.id, function (posts) {
       var now = Date.now();
-      posts = posts.filter(function (p) { return st.admin || !p.pubblica || p.pubblica <= now; }).sort(function (a, b) { return (b.pubblica || 0) - (a.pubblica || 0); });
+      posts = posts.filter(function (p) { return P('bachecaPrima') || P('conflitti') || !p.pubblica || p.pubblica <= now; }).sort(function (a, b) { return (b.pubblica || 0) - (a.pubblica || 0); });
       bach.innerHTML = '';
       if (!posts.length) bach.appendChild(el('p', 'hint', 'Ancora niente. Durante la settimana qui arrivano storia, prefazioni e indicazioni.'));
       posts.forEach(function (p) { bach.appendChild(cartaPost(c, p)); });
@@ -311,11 +314,11 @@
 
     // cartina del campo
     box.appendChild(el('h3', 'sez', 'Cartina del campo'));
-    if (tutto || visibile(c.mappaDa)) {
+    if (tutto || visibile(c.mappaDa, 'cartinaPrima')) {
       var mp = el('button', 'mini-mappa'); mp.type = 'button';
       var im = new Image(); im.src = campo(c).img; im.alt = ''; mp.appendChild(im);
       mp.appendChild(el('span', null, 'Apri la cartina'));
-      if (st.admin && c.mappaDa && Date.now() < c.mappaDa) mp.appendChild(el('small', 'prog', 'I giocatori la vedono dal ' + dataBreve(c.mappaDa)));
+      if (c.mappaDa && Date.now() < c.mappaDa) mp.appendChild(el('small', 'prog', 'I giocatori la vedono dal ' + dataBreve(c.mappaDa)));
       mp.onclick = function () { cartinaPiena(c); };
       box.appendChild(mp);
     } else box.appendChild(bloccato('La cartina sarà visibile da ' + dataLunga(c.mappaDa)));
@@ -324,11 +327,11 @@
     var pk = c.parcheggio || {};
     if (pk.testo || pk.mapsUrl) {
       box.appendChild(el('h3', 'sez', 'Parcheggio'));
-      if (tutto || visibile(pk.da)) {
+      if (tutto || visibile(pk.da, 'parcheggioPrima')) {
         var k = el('div', 'carta');
         if (pk.testo) k.appendChild(el('p', 'testo', pk.testo));
         if (pk.mapsUrl) k.appendChild(link('Portami al parcheggio', pk.mapsUrl, 'btn accent'));
-        if (st.admin && pk.da && Date.now() < pk.da) k.appendChild(el('small', 'prog', 'I giocatori lo vedono dal ' + dataBreve(pk.da)));
+        if (pk.da && Date.now() < pk.da) k.appendChild(el('small', 'prog', 'I giocatori lo vedono dal ' + dataBreve(pk.da)));
         box.appendChild(k);
       } else box.appendChild(bloccato('Le indicazioni arrivano da ' + dataLunga(pk.da)));
     }
@@ -351,7 +354,7 @@
     if (p.titolo) k.appendChild(el('h4', null, p.titolo));
     if (p.img) { var i = new Image(); i.src = p.img; i.alt = ''; i.className = 'post-img'; k.appendChild(i); }
     if (p.testo) k.appendChild(el('p', 'testo', p.testo));
-    if (S.stato().admin) k.appendChild(bottone('Modifica', 'link', function () { editorPost(c, p); }));
+    if (P('conflitti')) k.appendChild(bottone('Modifica', 'link', function () { editorPost(c, p); }));
     return k;
   }
 
@@ -400,10 +403,10 @@
     var p = aPieno(), st = S.stato(), f = mieFaz(c);
     var box = el('div', 'pieno-mappa tutta'); p.appendChild(box);
     var tendina = el('div', 'tendina sopra'); tendina.hidden = true; p.appendChild(tendina);
-    var comandante = f && c.comandanti && c.comandanti[f] === st.user.uid;
+    var comandante = !!f && ((c.comandanti && c.comandanti[f] === st.user.uid) || P('ordini'));
     var v = F.vista(box, {
       g: motore(c), campo: campo(c), team: f, colori: COLORI, nomi: nomiFaz(c), ora: Date.now,
-      gps: !!f, comandante: comandante,
+      gps: !!f, comandante: comandante, presenze: P('presenze'),
       onZona: function (pt) { S.scriviEvento(c.id, { tipo: 'zona', uid: st.user.uid, team: f, pt: pt || null, t: Date.now() }); },
       onOrdine: function (pt, azione, testo) { S.scriviEvento(c.id, { tipo: 'ordine', uid: st.user.uid, team: f, pt: pt, azione: azione, testo: testo, t: Date.now() }); },
       onMenu: function () {
@@ -475,7 +478,7 @@
   }
 
   // ================= TEAM
-  function puoGestire(t) { var st = S.stato(); return st.admin || (t && t.referenteUid === st.user.uid); }
+  function puoGestire(t) { var st = S.stato(); return P('team') || !!(t && t.referenteUid === st.user.uid); }
   function pagTeam(tid) {
     var t = teamDi(tid);
     testata('Team');
@@ -487,12 +490,15 @@
     var rr = el('div', 'team-ref');
     rr.appendChild(el('small', null, 'REFERENTE'));
     rr.appendChild(el('b', null, ref.nome || 'Da indicare'));
-    if (ref.tel) {
+    function mostraTel(tel) {
+      if (!tel) return;
       var az = el('div', 'riga2');
-      az.appendChild(link('☎ ' + ref.tel, telLink(ref.tel), 'btn'));
-      az.appendChild(link('WhatsApp', waLink(ref.tel), 'btn wa'));
+      az.appendChild(link('☎ ' + tel, telLink(tel), 'btn'));
+      az.appendChild(link('WhatsApp', waLink(tel), 'btn wa'));
       rr.appendChild(az);
     }
+    if (D.contatti[tid]) mostraTel(D.contatti[tid]);
+    else if (t.referenteUid === S.stato().user.uid) S.leggiContatto(tid).then(mostraTel);
     h.appendChild(rr);
     app.appendChild(h);
     if (puoGestire(t)) {
@@ -508,11 +514,12 @@
           var msg = 'Entra nel team ' + t.nome + ' su Airsoft Conflict: ' + location.origin + location.pathname + ' — codice ' + k;
           if (navigator.share) navigator.share({ text: msg }).catch(function () {}); else { navigator.clipboard && navigator.clipboard.writeText(msg); toast('Copiato'); }
         }));
-        if (S.stato().admin) cod.appendChild(bottone('Nuovo codice', 'piccolo', function () {
+        if (P('team')) cod.appendChild(bottone('Nuovo codice', 'piccolo', function () {
           if (confirm('Creare un nuovo codice? Quello vecchio smette di funzionare (chi è già nel team resta dentro).')) S.nuovoCodice(tid).then(function () { mostra(); }, errore);
         }));
       });
     }
+    if (!P('rosa') && !puoGestire(t)) return;
     var el_ = el('div', 'giocatori'); app.appendChild(el_);
     var stop = S.ascoltaMembri(tid, function (m) { elencoGiocatori(el_, t, m); });
     chiusura = stop;
@@ -531,7 +538,8 @@
         var r = el('div', 'gioc');
         r.appendChild(el('span', null, nomeG(u)));
         if (u.id === t.referenteUid) r.appendChild(el('small', 'tag', 'REFERENTE'));
-        if (S.stato().admin) { r.classList.add('apribile'); r.onclick = function () { editorGiocatore(u); }; }
+        else if (u.ruolo && u.ruolo !== 'truppa') r.appendChild(el('small', 'tag', S.nomeRuolo(u.ruolo).toUpperCase()));
+        if (P('giocatori')) { r.classList.add('apribile'); r.onclick = function () { editorGiocatore(u); }; }
         g.appendChild(r);
       });
       if (!dentro.length) g.appendChild(el('p', 'hint', 'Nessuno'));
@@ -558,7 +566,8 @@
     var nome = el('input'); nome.value = dati.nome; form.appendChild(campoForm('Nome del team', nome));
     // referente
     var refSel = el('select'), refNome = el('input'), refTel = el('input');
-    refNome.value = dati.referente.nome; refTel.value = dati.referente.tel; refTel.type = 'tel'; refTel.placeholder = '333 1234567';
+    refNome.value = dati.referente.nome; refTel.value = D.contatti[tid] || dati.referente.tel || '';
+    if (!refTel.value) S.leggiContatto(tid).then(function (x) { if (x && !refTel.value) refTel.value = x; }); refTel.type = 'tel'; refTel.placeholder = '333 1234567';
     form.appendChild(el('h3', 'sez', 'Referente'));
     form.appendChild(campoForm('Chi è (tra i giocatori del team)', refSel));
     form.appendChild(campoForm('Nome da mostrare', refNome));
@@ -591,7 +600,7 @@
           s.onchange = function () { S.impostaSquadra(u.id, s.value).catch(errore); };
           r.appendChild(s);
         }
-        if (S.stato().admin) r.appendChild(bottone('✎', 'icon', function () { editorGiocatore(u); }));
+        if (P('giocatori')) r.appendChild(bottone('✎', 'icon', function () { editorGiocatore(u); }));
         else r.appendChild(bottone('Togli', 'link pericolo', function () { if (confirm('Togliere ' + nomeG(u) + ' dal team?')) S.togliMembro(u.id).catch(errore); }));
         mBox.appendChild(r);
       });
@@ -608,11 +617,11 @@
     var salva = el('div', 'riga2 fisso');
     salva.appendChild(bottone('Salva', 'accent big', function () {
       if (!nome.value.trim()) { toast('Serve il nome del team'); return; }
-      var out = { nome: nome.value.trim(), logo: dati.logo, referente: { nome: refNome.value.trim(), tel: refTel.value.trim() }, squadre: dati.squadre.filter(function (s) { return s.nome.trim(); }) };
-      if (S.stato().admin) out.referenteUid = dati.referenteUid;
-      S.salvaTeam(tid, out).then(function () { toast('Team salvato'); indietro(); }, errore);
+      var out = { nome: nome.value.trim(), logo: dati.logo, referente: { nome: refNome.value.trim(), tel: '' }, squadre: dati.squadre.filter(function (s) { return s.nome.trim(); }) };
+      if (P('team')) out.referenteUid = dati.referenteUid;
+      Promise.all([S.salvaTeam(tid, out), S.salvaContatto(tid, refTel.value.trim())]).then(function () { toast('Team salvato'); indietro(); }, errore);
     }));
-    if (!S.stato().admin) refSel.disabled = true;
+    if (!P('team')) refSel.disabled = true;
     else salva.appendChild(bottone('Elimina team', 'pericolo', function () {
       if (!confirm('Eliminare il team "' + t.nome + '"? I giocatori restano iscritti ma senza team, e il team esce dai conflict.')) return;
       S.eliminaTeam(tid).then(function () { toast('Team eliminato'); tornaIndietro(2); }, errore);
@@ -639,6 +648,8 @@
       if (u.email) f.appendChild(el('p', 'hint', u.email));
       var n = el('input'); n.value = u.nome || ''; f.appendChild(campoForm('Nome', n));
       var cs = el('input'); cs.value = u.callsign || ''; f.appendChild(campoForm('Callsign', cs));
+      var rSel = null;
+      if (S.stato().dev) { rSel = select(S.RUOLI, u.ruolo || 'truppa'); f.appendChild(campoForm('Ruolo', rSel)); }
       var tSel = select([['', 'Nessun team']].concat(D.team.map(function (t) { return [t.id, t.nome]; })), u.team || '');
       f.appendChild(campoForm('Team', tSel));
       var sSel = el('select'), sLab = campoForm('Squadra', sSel); f.appendChild(sLab);
@@ -651,7 +662,9 @@
       tSel.onchange = squadre; squadre();
       var r = el('div', 'riga2');
       r.appendChild(bottone('Salva', 'accent', function () {
-        S.salvaUtente(u.id, { nome: n.value.trim(), callsign: cs.value.trim(), team: tSel.value || null, squadra: sSel.value || null })
+        var dati = { nome: n.value.trim(), callsign: cs.value.trim(), team: tSel.value || null, squadra: sSel.value || null };
+        if (rSel) dati.ruolo = rSel.value === 'truppa' ? null : rSel.value;
+        S.salvaUtente(u.id, dati)
           .then(function () { toast('Giocatore salvato'); chiudiFoglio(); }, errore);
       }));
       r.appendChild(bottone('Elimina giocatore', 'pericolo', function () {
@@ -674,7 +687,9 @@
         if (!dentro.length) return;
         var k = el('div', 'squadra'); k.appendChild(el('h4', null, g.nome + ' · ' + dentro.length));
         dentro.sort(function (a, b) { return nomeG(a).localeCompare(nomeG(b)); }).forEach(function (u) {
-          var r = el('div', 'gioc apribile'); r.appendChild(el('span', null, nomeG(u))); r.appendChild(el('small', 'hint', u.email || ''));
+          var r = el('div', 'gioc apribile'); r.appendChild(el('span', null, nomeG(u)));
+          if (u.ruolo && u.ruolo !== 'truppa') r.appendChild(el('small', 'tag', S.nomeRuolo(u.ruolo).toUpperCase()));
+          r.appendChild(el('small', 'hint', u.email || ''));
           r.onclick = function () { editorGiocatore(u); };
           k.appendChild(r);
         });
@@ -686,29 +701,74 @@
   // ================= ORGANIZZA (solo organizzatore)
   function pagOrganizza() {
     testata('Organizza');
-    app.appendChild(el('h3', 'sez', 'Conflict'));
-    app.appendChild(bottone('+ Nuovo conflict', 'accent', function () { vai('conflittoModifica', null); }));
-    D.conflitti.slice().sort(function (a, b) { return b.inizio - a.inizio; }).forEach(function (c) {
-      var r = el('button', 'riga-lista'); r.type = 'button';
-      r.appendChild(el('b', null, c.titolo)); r.appendChild(el('small', null, dataBreve(c.inizio) + ' · ' + (c.team || []).length + ' team'));
-      r.onclick = function () { vai('conflitto', c.id); };
-      app.appendChild(r);
-    });
-    app.appendChild(el('h3', 'sez', 'Giocatori'));
-    app.appendChild(bottone('Tutti i giocatori iscritti', '', function () { vai('giocatori'); }));
-    app.appendChild(el('h3', 'sez', 'Team'));
-    app.appendChild(bottone('+ Nuovo team', 'accent', function () {
-      var n = prompt('Nome del nuovo team'); if (!n || !n.trim()) return;
-      S.creaTeam(n.trim()).then(function (tid) { vai('team', tid); }, errore);
-    }));
-    D.team.slice().sort(function (a, b) { return a.nome.localeCompare(b.nome); }).forEach(function (t) {
-      var r = el('button', 'riga-lista con-logo'); r.type = 'button';
-      r.appendChild(logo(t, 36));
-      var i = el('div'); i.appendChild(el('b', null, t.nome)); i.appendChild(el('small', null, t.referente && t.referente.nome ? 'Ref. ' + t.referente.nome : 'Referente da indicare')); r.appendChild(i);
-      r.onclick = function () { vai('team', t.id); };
-      app.appendChild(r);
-    });
+    if (S.stato().dev) {
+      app.appendChild(el('h3', 'sez', 'Ruoli e permessi'));
+      app.appendChild(bottone('Cosa può vedere e fare ogni ruolo', 'accent', function () { vai('permessi'); }));
+    }
+    if (P('conflitti')) {
+      app.appendChild(el('h3', 'sez', 'Conflict'));
+      app.appendChild(bottone('+ Nuovo conflict', 'accent', function () { vai('conflittoModifica', null); }));
+      D.conflitti.slice().sort(function (a, b) { return b.inizio - a.inizio; }).forEach(function (c) {
+        var r = el('button', 'riga-lista'); r.type = 'button';
+        r.appendChild(el('b', null, c.titolo)); r.appendChild(el('small', null, dataBreve(c.inizio) + ' · ' + (c.team || []).length + ' team'));
+        r.onclick = function () { vai('conflitto', c.id); };
+        app.appendChild(r);
+      });
+    }
+    if (P('giocatori')) {
+      app.appendChild(el('h3', 'sez', 'Giocatori'));
+      app.appendChild(bottone(S.stato().dev ? 'Tutti i giocatori e i loro ruoli' : 'Tutti i giocatori iscritti', '', function () { vai('giocatori'); }));
+    }
+    if (P('team')) {
+      app.appendChild(el('h3', 'sez', 'Team'));
+      app.appendChild(bottone('+ Nuovo team', 'accent', function () {
+        var n = prompt('Nome del nuovo team'); if (!n || !n.trim()) return;
+        S.creaTeam(n.trim()).then(function (tid) { vai('team', tid); }, errore);
+      }));
+      D.team.slice().sort(function (a, b) { return a.nome.localeCompare(b.nome); }).forEach(function (t) {
+        var r = el('button', 'riga-lista con-logo'); r.type = 'button';
+        r.appendChild(logo(t, 36));
+        var i = el('div'); i.appendChild(el('b', null, t.nome)); i.appendChild(el('small', null, t.referente && t.referente.nome ? 'Ref. ' + t.referente.nome : 'Referente da indicare')); r.appendChild(i);
+        r.onclick = function () { vai('team', t.id); };
+        app.appendChild(r);
+      });
+    }
   }
+
+  // ================= RUOLI E PERMESSI (solo developer)
+  function pagPermessi() {
+    testata('Ruoli e permessi');
+    if (!S.stato().dev) { app.appendChild(el('p', 'hint', 'Solo il developer può modificare i permessi.')); return; }
+    var tab = S.permessi();
+    S.RUOLI.forEach(function (r) { tab[r[0]] = tab[r[0]] || {}; });
+    app.appendChild(el('p', 'hint', 'Tu, come developer, puoi sempre tutto. Spunta cosa può vedere e fare ogni ruolo; il ruolo di ogni giocatore lo scegli da Organizza → Giocatori.'));
+    var corte = { organizzatore: 'ORG', comandante: 'COM', caposquadra: 'CAPO', truppa: 'TRUP' };
+    var tb = el('div', 'perm');
+    var th = el('div', 'perm-riga perm-testa'); th.appendChild(el('span'));
+    S.RUOLI.forEach(function (r) { th.appendChild(el('b', null, corte[r[0]])); });
+    tb.appendChild(th);
+    S.PERMESSI.forEach(function (gr) {
+      tb.appendChild(el('h4', 'perm-gruppo', gr[0]));
+      gr[1].forEach(function (p) {
+        var riga = el('div', 'perm-riga'); riga.appendChild(el('span', null, p[1]));
+        S.RUOLI.forEach(function (r) {
+          var cb = el('input'); cb.type = 'checkbox'; cb.checked = tab[r[0]][p[0]] === true;
+          cb.setAttribute('aria-label', p[1] + ' — ' + r[1]);
+          cb.onchange = function () { tab[r[0]][p[0]] = cb.checked; };
+          var cell = el('label', 'perm-c'); cell.appendChild(cb); riga.appendChild(cell);
+        });
+        tb.appendChild(riga);
+      });
+    });
+    app.appendChild(tb);
+    var leg = el('p', 'hint', S.RUOLI.map(function (r) { return corte[r[0]] + ' = ' + r[1]; }).join(' · '));
+    app.appendChild(leg);
+    var az = el('div', 'riga2 fisso');
+    az.appendChild(bottone('Salva permessi', 'accent big', function () { S.salvaPermessi(tab).then(function () { toast('Permessi salvati'); indietro(); }, errore); }));
+    az.appendChild(bottone('Ripristina predefiniti', '', function () { if (confirm('Tornare ai permessi predefiniti?')) S.salvaPermessi(JSON.parse(JSON.stringify(S.DEFAULT))).then(function () { toast('Ripristinati'); indietro(); }, errore); }));
+    app.appendChild(az);
+  }
+
 
   var PRIMA = [[null, 'Subito'], [1, '1 giorno prima'], [2, '2 giorni prima'], [3, '3 giorni prima'], [5, '5 giorni prima'], [7, '7 giorni prima'], [0, 'Solo il giorno del conflict']];
   function pagConflittoModifica(cid) {
@@ -763,7 +823,9 @@
         s.innerHTML = '';
         var o = el('option', null, 'Automatico (IA)'); o.value = 'ia'; s.appendChild(o);
         Object.keys(scelta).filter(function (t) { return scelta[t] === id; }).forEach(function (t) {
-          (membriDi[t] || []).forEach(function (u) { var q = el('option', null, nomeG(u) + ' (' + (teamDi(t) || {}).nome + ')'); q.value = u.id; s.appendChild(q); });
+          (membriDi[t] || []).slice().sort(function (a, b) { return (b.ruolo === 'comandante') - (a.ruolo === 'comandante'); }).forEach(function (u) {
+            var q = el('option', null, (u.ruolo === 'comandante' ? '★ ' : '') + nomeG(u) + ' (' + (teamDi(t) || {}).nome + ')'); q.value = u.id; s.appendChild(q);
+          });
         });
         s.value = val; if (!s.value) s.value = 'ia';
       });
@@ -816,7 +878,7 @@
     var p = aPieno();
     var box = el('div', 'pieno-mappa tutta'); p.appendChild(box);
     var vel = el('div', 'prova-vel'); vel.appendChild(el('b', null, 'PROVA'));
-    var pr = F.prova(box, function () { indietro(); });
+    var pr = F.prova(box, function () { indietro(); }, { presenze: P('presenze'), comandante: P('ordini') });
     [1, 10, 30].forEach(function (x) {
       var b = bottone('×' + x, 'piccolo' + (x === 10 ? ' on' : '')); b.onclick = function () { pr.velocita(x); Array.prototype.forEach.call(vel.querySelectorAll('.btn'), function (y) { y.classList.remove('on'); }); b.classList.add('on'); };
       vel.appendChild(b);
@@ -826,7 +888,7 @@
   }
 
   // ================= AVVIO
-  var avviato = false, aperturaFatta = false, stopTeam = null, stopConf = null, uidPrima = null;
+  var avviato = false, aperturaFatta = false, stopContatti = null, stopTeam = null, stopConf = null, uidPrima = null;
   function ascoltaAdesioniDi(lista) {
     var ids = lista.map(function (c) { return c.id; });
     Object.keys(stopAdesioni).forEach(function (id) { if (ids.indexOf(id) < 0) { stopAdesioni[id](); delete stopAdesioni[id]; delete D.adesioni[id]; } });
@@ -851,7 +913,7 @@
     var st = S.stato();
     var c = attivi().filter(function (x) {
       var f = fase(x); if (f !== 'giorno' && f !== 'live') return false;
-      if (st.admin) return true;
+      if (P('conflitti')) return true;
       var a = miaAdesione(x.id); return a && a.si;
     })[0];
     if (c) { aperturaFatta = true; vai('conflitto', c.id); }
@@ -866,13 +928,15 @@
     gate.hidden = st.fase === 'pronto';
     $('btnMenu').hidden = st.fase !== 'pronto';
     if (st.fase !== 'pronto') return;
-    var uid = st.user.uid, teamOra = st.me.team || null;
+    var uid = st.user.uid, teamOra = (st.me.team || '') + '|' + st.ruolo + '|' + JSON.stringify((S.permessi() || {})[st.ruolo] || {});
     if (uid !== uidPrima || teamOra !== avviato) {
       // nuovo utente o cambio di team: si riparte
       if (uid !== uidPrima) { pila = [{ v: 'home' }]; aperturaFatta = false; }
       uidPrima = uid; avviato = teamOra;
       if (stopTeam) stopTeam(); if (stopConf) stopConf();
       Object.keys(stopAdesioni).forEach(function (id) { stopAdesioni[id](); }); stopAdesioni = {}; D.adesioni = {};
+      if (stopContatti) stopContatti();
+      stopContatti = S.ascoltaContatti(function (m) { D.contatti = m; ridisegna(); });
       stopTeam = S.ascoltaTeam(function (t) { D.team = t; ridisegna(); });
       stopConf = S.ascoltaConflitti(function (c) { D.conflitti = c; ascoltaAdesioniDi(attivi()); ridisegna(); });
     }
