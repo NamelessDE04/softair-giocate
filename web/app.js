@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.8';
+  var VERSIONE = '0.9';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -829,21 +829,36 @@
       var cm = campoMeta(cSel.value);
       if (!cm) { mobBox.appendChild(el('p', 'hint', D.campi.length ? 'Scegli la cartina del campo.' : 'Nessuna cartina: creala da Organizza → Cartine (da computer).')); return; }
       if (!cm.geo) mobBox.appendChild(el('p', 'hint avviso', 'Questa cartina non è georeferenziata: il GPS non potrà riconoscere le aree.'));
-      var mobs = (cm.punti || []).filter(function (p) { return p.tipo === 'mob'; }), altri = (cm.punti || []).filter(function (p) { return p.tipo !== 'mob'; });
-      if (mobs.length < 2) { mobBox.appendChild(el('p', 'hint avviso', 'La cartina ha ' + mobs.length + ' basi di partenza: ne servono 2.')); return; }
-      if (!mobs.some(function (p) { return p.id === base.blu; })) base.blu = mobs[0].id;
-      if (!mobs.some(function (p) { return p.id === base.rossa; }) || base.rossa === base.blu) base.rossa = (mobs.filter(function (p) { return p.id !== base.blu; })[0] || mobs[1]).id;
-      var due = el('div', 'due');
-      [['blu', 'Base blu'], ['rossa', 'Base rossa']].forEach(function (x) {
-        var s2 = select(mobs.map(function (p) { return [p.id, p.nome]; }), base[x[0]]);
-        s2.onchange = function () { base[x[0]] = s2.value; };
-        due.appendChild(campoForm(x[1], s2));
-      });
-      mobBox.appendChild(due);
+      var mobs = (cm.punti || []).filter(function (p) { return p.tipo === 'mob'; }), altri = (cm.punti || []).filter(function (p) { return p.tipo !== 'mob' && p.tipo !== 'fob'; });
+      var mB = mobs.filter(function (p) { return p.fazione === 'blu'; })[0], mR = mobs.filter(function (p) { return p.fazione === 'rossa'; })[0];
+      if (mB && mR) {
+        // basi e FOB sono già assegnate alle fazioni nella cartina
+        base.blu = mB.id; base.rossa = mR.id;
+        var info = el('div', 'basi-info');
+        [['blu', mB], ['rossa', mR]].forEach(function (x) {
+          var fobs = (cm.punti || []).filter(function (p) { return p.tipo === 'fob' && p.fazione === x[0]; });
+          var r = el('div', 'basi-r s-' + x[0]); r.appendChild(el('b', null, '⚑ ' + nomeArea(x[1], x[0])));
+          if (fobs.length) r.appendChild(el('small', null, '▲ ' + fobs.map(function (p) { return nomeArea(p, x[0]); }).join(', ')));
+          info.appendChild(r);
+        });
+        mobBox.appendChild(campoForm('Basi dalla cartina', info));
+      } else {
+        // cartina vecchia, senza fazione sulle basi: si sceglie qui
+        if (mobs.length < 2) { mobBox.appendChild(el('p', 'hint avviso', 'Nella cartina serve una base principale (MOB) per ogni fazione.')); return; }
+        if (!mobs.some(function (p) { return p.id === base.blu; })) base.blu = mobs[0].id;
+        if (!mobs.some(function (p) { return p.id === base.rossa; }) || base.rossa === base.blu) base.rossa = (mobs.filter(function (p) { return p.id !== base.blu; })[0] || mobs[1]).id;
+        var due = el('div', 'due');
+        [['blu', 'Base blu'], ['rossa', 'Base rossa']].forEach(function (x) {
+          var s2 = select(mobs.map(function (p) { return [p.id, p.nome]; }), base[x[0]]);
+          s2.onchange = function () { base[x[0]] = s2.value; };
+          due.appendChild(campoForm(x[1], s2));
+        });
+        mobBox.appendChild(due);
+      }
       [['blu', 'La fazione blu parte già con'], ['rossa', 'La fazione rossa parte già con']].forEach(function (x) {
         var w = el('div', 'chips'); w.appendChild(el('span', 'chips-tit', x[1]));
         altri.forEach(function (p) {
-          var on = partenza[x[0]].indexOf(p.id) >= 0, b = bottone((p.tipo === 'chiave' ? '★ ' : '') + p.nome, 'chip' + (on ? ' on s-' + x[0] : ''));
+          var on = partenza[x[0]].indexOf(p.id) >= 0, b = bottone((p.tipo === 'chiave' ? '★ ' : '') + nomeArea(p, x[0]), 'chip' + (on ? ' on s-' + x[0] : ''));
           b.onclick = function () {
             var i = partenza[x[0]].indexOf(p.id); if (i >= 0) partenza[x[0]].splice(i, 1); else { partenza[x[0]].push(p.id); var alt = x[0] === 'blu' ? 'rossa' : 'blu', j = partenza[alt].indexOf(p.id); if (j >= 0) partenza[alt].splice(j, 1); }
             disegnaBasi();
@@ -853,6 +868,7 @@
         mobBox.appendChild(w);
       });
     }
+    function nomeArea(p, f) { return (p.nomi && p.nomi[f]) || p.nome; }
     cSel.onchange = function () { partenza = { blu: [], rossa: [] }; disegnaBasi(); };
     disegnaBasi();
     // fazioni e team
@@ -917,14 +933,15 @@
       var team = [], fazioneDi = {};
       Object.keys(scelta).forEach(function (t) { if (scelta[t]) { team.push(t); fazioneDi[t] = scelta[t]; } });
       var cmS = campoMeta(cSel.value);
+      function fobDi(f) { return ((cmS && cmS.punti) || []).filter(function (p) { return p.tipo === 'fob' && p.fazione === f; }).map(function (p) { return p.id; }); }
       if (!cmS) { toast('Scegli la cartina del campo'); return; }
       if ((cmS.punti || []).filter(function (p) { return p.tipo === 'mob'; }).length < 2 || base.blu === base.rossa) { toast('Servono due basi di partenza diverse'); return; }
       var out = {
         id: c.id, titolo: tit.value.trim(), luogo: lg.value.trim(), mapsUrl: mu.value.trim(), campo: cSel.value,
         ritrovo: ms(hR.value), inizio: ini, fine: fin,
         fazioni: [
-          { id: 'blu', nome: nB.value.trim() || 'Blu', team: team.filter(function (t) { return fazioneDi[t] === 'blu'; }), mob: base.blu, partenza: partenza.blu },
-          { id: 'rossa', nome: nR.value.trim() || 'Rossa', team: team.filter(function (t) { return fazioneDi[t] === 'rossa'; }), mob: base.rossa, partenza: partenza.rossa }
+          { id: 'blu', nome: nB.value.trim() || 'Blu', team: team.filter(function (t) { return fazioneDi[t] === 'blu'; }), mob: base.blu, partenza: partenza.blu.concat(fobDi('blu')) },
+          { id: 'rossa', nome: nR.value.trim() || 'Rossa', team: team.filter(function (t) { return fazioneDi[t] === 'rossa'; }), mob: base.rossa, partenza: partenza.rossa.concat(fobDi('rossa')) }
         ],
         team: team, fazioneDi: fazioneDi, comandanti: { blu: cmB.value || 'ia', rossa: cmR.value || 'ia' },
         mappaDa: mSel.value === '' ? null : mezzanotte(ini) - Number(mSel.value) * GIORNO,

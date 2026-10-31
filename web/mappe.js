@@ -4,7 +4,10 @@
 (function () {
   'use strict';
   var U = window.AC_UTM;
-  var TIPI = [['mob', '⚑ Base di partenza (MOB)'], ['chiave', '★ Punto chiave'], ['base', '● Punto base'], ['torre', '📡 Torre radio']];
+  var TIPI = [['mob', '⚑ Base principale (MOB)'], ['fob', '▲ Base avanzata (FOB)'], ['chiave', '★ Punto chiave'], ['base', '● Punto base'], ['torre', '📡 Torre radio']];
+  var FAZ = [['blu', 'Fazione blu'], ['rossa', 'Fazione rossa']], COLF = { blu: '#2f7fd6', rossa: '#d23a2c' };
+  function conFazione(t) { return t === 'mob' || t === 'fob'; }
+  function simbolo(t) { return t === 'mob' ? '⚑' : t === 'fob' ? '▲' : t === 'chiave' ? '★' : t === 'torre' ? '📡' : '●'; }
   var LATO = 3000;   // lato massimo dell'immagine salvata (pixel)
 
   function el(tag, cls, testo) { var e = document.createElement(tag); if (cls) e.className = cls; if (testo != null) e.textContent = testo; return e; }
@@ -319,7 +322,9 @@
         var p = puntoSotto(q);
         if (p) sel = p.id;
         else {
-          p = { id: idNuovo(), nome: 'Area ' + (c.punti.length + 1), tipo: c.punti.filter(function (x) { return x.tipo === 'mob'; }).length < 2 ? 'mob' : 'base', x: q.x, y: q.y, raggio: 30, fonte: 'mappa' };
+          var mobs = c.punti.filter(function (x) { return x.tipo === 'mob'; });
+          p = { id: idNuovo(), nome: 'Area ' + (c.punti.length + 1), tipo: mobs.length < 2 ? 'mob' : 'base', x: q.x, y: q.y, raggio: 30, fonte: 'mappa' };
+          if (p.tipo === 'mob') p.fazione = mobs.some(function (x) { return x.fazione === 'blu'; }) ? 'rossa' : 'blu';
           c.punti.push(p); sel = p.id; cambiato(); setTimeout(function () { var n = side.querySelector('.ed-nome-punto'); if (n) { n.focus(); n.select(); } }, 30); return;
         }
         disegna(); pannello();
@@ -357,11 +362,13 @@
       });
       c.punti.forEach(function (p) {
         var r = Math.max(raggioPx(p), 14 * k), on = p.id === sel || p.id === linkDa;
-        var col = p.tipo === 'mob' ? '#e8c96a' : p.tipo === 'chiave' ? '#ffe08a' : '#cfcab8';
-        s += '<circle cx="' + p.x + '" cy="' + p.y + '" r="' + r + '" fill="#9a9a8c" fill-opacity=".45" stroke="' + (on ? '#2f9bff' : col) + '" stroke-width="' + ((on ? 5 : 3) * k) + '"/>';
-        var sim = p.tipo === 'mob' ? '⚑' : p.tipo === 'chiave' ? '★' : p.tipo === 'torre' ? '📡' : '';
-        if (sim) s += '<text x="' + p.x + '" y="' + p.y + '" font-size="' + (20 * k) + '" text-anchor="middle" dominant-baseline="central" class="ed-sim" fill="' + (p.tipo === 'mob' ? '#fff' : '#ffe08a') + '">' + sim + '</text>';
+        var fc = conFazione(p.tipo) && COLF[p.fazione], col = fc || (p.tipo === 'chiave' ? '#ffe08a' : '#cfcab8');
+        s += '<circle cx="' + p.x + '" cy="' + p.y + '" r="' + r + '" fill="' + (fc || '#9a9a8c') + '" fill-opacity="' + (fc ? .6 : .45) + '" stroke="' + (on ? '#ffd23f' : col) + '" stroke-width="' + ((on ? 5 : 3) * k) + '"/>';
+        var sim = p.tipo === 'base' ? '' : simbolo(p.tipo);
+        if (sim) s += '<text x="' + p.x + '" y="' + p.y + '" font-size="' + (20 * k) + '" text-anchor="middle" dominant-baseline="central" class="ed-sim" fill="' + (fc ? '#fff' : '#ffe08a') + '">' + sim + '</text>';
         s += '<text x="' + p.x + '" y="' + (p.y + r + 12 * k) + '" font-size="' + (14 * k) + '" text-anchor="middle" dominant-baseline="central" class="ed-lab">' + esc(p.nome.toUpperCase()) + '</text>';
+        var alt = [p.nomi && p.nomi.blu, p.nomi && p.nomi.rossa];
+        if (alt[0] || alt[1]) s += '<text x="' + p.x + '" y="' + (p.y + r + 27 * k) + '" font-size="' + (11 * k) + '" text-anchor="middle" dominant-baseline="central" class="ed-lab"><tspan fill="#8fc0ff">' + esc(alt[0] || p.nome) + '</tspan><tspan fill="#cfcab8"> · </tspan><tspan fill="#ff9a8f">' + esc(alt[1] || p.nome) + '</tspan></text>';
       });
       c.controllo.forEach(function (p, i) {
         var on = p === selCp, col = p.lat == null ? '#ff6b5a' : '#ffd23f', d = 12 * k;
@@ -403,13 +410,14 @@
       aggiornaAiuto();
     }
     function stato() {
-      var b = el('div', 'ed-stato'), mob = c.punti.filter(function (p) { return p.tipo === 'mob'; }).length, ch = c.punti.filter(function (p) { return p.tipo === 'chiave'; }).length;
+      var mobB = c.punti.filter(function (p) { return p.tipo === 'mob' && p.fazione === 'blu'; }).length, mobR = c.punti.filter(function (p) { return p.tipo === 'mob' && p.fazione === 'rossa'; }).length;
+      var b = el('div', 'ed-stato'), ch = c.punti.filter(function (p) { return p.tipo === 'chiave'; }).length;
       var collegati = {}; c.link.forEach(function (l) { collegati[l[0]] = collegati[l[1]] = 1; });
       var isolati = c.punti.filter(function (p) { return !collegati[p.id]; }).length;
       var righe = [
         [!!c.img, c.img ? 'Cartina caricata (' + c.w + '×' + c.h + ')' : 'Manca la cartina'],
         [!!c.geo, c.geo ? 'Georeferenziata · errore medio ' + c._err.medio.toFixed(1) + ' m' : 'Non georeferenziata: senza coordinate il GPS non funziona'],
-        [mob >= 2, mob + ' basi di partenza (ne servono 2)'],
+        [mobB === 1 && mobR === 1, 'Basi principali: ' + mobB + ' blu, ' + mobR + ' rossa (ne serve una per fazione)'],
         [ch >= 1, ch + ' punti chiave · ' + c.punti.length + ' aree in tutto'],
         [!isolati && c.link.length > 0, c.link.length + ' collegamenti' + (isolati ? ' · ' + isolati + ' aree non collegate' : '')]
       ];
@@ -555,8 +563,28 @@
         var n = el('input'); n.className = 'ed-nome-punto'; n.value = p.nome; n.oninput = function () { p.nome = n.value; modificato = true; disegna(); aggiornaLista(); };
         f.appendChild(campoF('Nome', n));
         var t = el('select'); TIPI.forEach(function (o) { var x = el('option', null, o[1]); x.value = o[0]; t.appendChild(x); }); t.value = p.tipo;
-        t.onchange = function () { p.tipo = t.value; cambiato(); };
+        t.onchange = function () {
+          p.tipo = t.value;
+          if (conFazione(p.tipo) && !p.fazione) p.fazione = c.punti.some(function (x) { return x !== p && x.tipo === p.tipo && x.fazione === 'blu'; }) ? 'rossa' : 'blu';
+          if (!conFazione(p.tipo)) delete p.fazione;
+          cambiato();
+        };
         f.appendChild(campoF('Tipo', t));
+        if (conFazione(p.tipo)) {
+          var fz = el('div', 'seg ed-seg');
+          FAZ.forEach(function (o) {
+            var b = btn(o[1], 'seg-b s-' + o[0] + (p.fazione === o[0] ? ' on' : ''), function () { p.fazione = o[0]; cambiato(); });
+            fz.appendChild(b);
+          });
+          f.appendChild(campoF('Di quale fazione è', fz));
+        }
+        var nb = el('input'), nr = el('input'); p.nomi = p.nomi || {};
+        nb.placeholder = nr.placeholder = 'come sopra';
+        nb.value = p.nomi.blu || ''; nr.value = p.nomi.rossa || '';
+        nb.oninput = function () { p.nomi.blu = nb.value; modificato = true; disegna(); };
+        nr.oninput = function () { p.nomi.rossa = nr.value; modificato = true; disegna(); };
+        var dn = el('div', 'due'); dn.appendChild(campoF('Nome per i blu', nb)); dn.appendChild(campoF('Nome per i rossi', nr));
+        f.appendChild(dn);
         var r = el('input'); r.type = 'number'; r.min = 5; r.max = 200; r.value = p.raggio || 30;
         r.onchange = function () { p.raggio = Math.max(5, Math.min(200, +r.value || 30)); cambiato(); };
         f.appendChild(campoF('Raggio dell\'area (metri)', r));
@@ -592,7 +620,7 @@
         lista.innerHTML = '';
         lista.appendChild(el('h4', null, 'Aree (' + c.punti.length + ')'));
         c.punti.forEach(function (q) {
-          var b = btn((q.tipo === 'mob' ? '⚑ ' : q.tipo === 'chiave' ? '★ ' : q.tipo === 'torre' ? '📡 ' : '● ') + q.nome, 'ed-voce' + (q.id === sel ? ' on' : ''), function () {
+          var b = btn(simbolo(q.tipo) + ' ' + q.nome + (conFazione(q.tipo) ? (q.fazione === 'rossa' ? ' · rossa' : q.fazione === 'blu' ? ' · blu' : ' · fazione?') : ''), 'ed-voce' + (q.id === sel ? ' on' : '') + (conFazione(q.tipo) && q.fazione ? ' f-' + q.fazione : ''), function () {
             sel = q.id; tx = vw / 2 - q.x * sc; ty = vh / 2 - q.y * sc; applica(); pannello();
           });
           lista.appendChild(b);
@@ -640,7 +668,9 @@
       var out = {
         id: c.id, nome: c.nome.trim(), w: c.w, h: c.h, geo: c.geo, mPerPx: c.mPerPx,
         controllo: c.controllo.map(function (p) { return { x: p.x, y: p.y, lat: p.lat, lon: p.lon, testo: p.testo || null }; }),
-        punti: c.punti.map(function (p) { return { id: p.id, nome: p.nome.trim() || 'Area', tipo: p.tipo, x: p.x, y: p.y, lat: p.lat == null ? null : p.lat, lon: p.lon == null ? null : p.lon, raggio: p.raggio || 30, fonte: p.fonte || 'mappa' }; }),
+        punti: c.punti.map(function (p) { return { id: p.id, nome: p.nome.trim() || 'Area', tipo: p.tipo, x: p.x, y: p.y, lat: p.lat == null ? null : p.lat, lon: p.lon == null ? null : p.lon, raggio: p.raggio || 30, fonte: p.fonte || 'mappa',
+          fazione: conFazione(p.tipo) ? (p.fazione || null) : null,
+          nomi: { blu: (p.nomi && p.nomi.blu || '').trim() || null, rossa: (p.nomi && p.nomi.rossa || '').trim() || null } }; }),
         link: c.link.map(function (l) { return [l[0], l[1]]; }),
         parti: c.parti || 0, imgVer: c.imgVer || null, aggiornato: Date.now()
       };

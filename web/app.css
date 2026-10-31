@@ -338,3 +338,12 @@ input.errato { border-color: var(--ko); }
 .ed-ante-l img { position: absolute; }
 .ed-ante-cr { position: absolute; right: 4px; bottom: 4px; background: rgba(255,255,255,.85); color: #222; font: 600 11px sans-serif; padding: 2px 6px; }
 .btn.ed-ante-x { align-self: center; }
+
+.ed-seg { display: grid; grid-template-columns: 1fr 1fr; }
+.btn.ed-voce.f-blu { color: #8fc0ff; } .btn.ed-voce.f-rossa { color: #ff9a8f; }
+
+.basi-info { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.basi-r { border-radius: 10px; padding: 8px 12px; display: grid; }
+.basi-r.s-blu { background: color-mix(in srgb, var(--blu) 30%, var(--pan)); border: 1px solid var(--blu); }
+.basi-r.s-rossa { background: color-mix(in srgb, var(--rossa) 30%, var(--pan)); border: 1px solid var(--rossa); }
+.basi-r small { color: var(--ink); opacity: .85; }

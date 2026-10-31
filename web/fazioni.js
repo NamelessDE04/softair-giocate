@@ -157,8 +157,15 @@
     ms = Math.max(0, ms); var s = Math.floor(ms / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
     return (h ? h + ':' + ('0' + m).slice(-2) : m) + ':' + ('0' + s % 60).slice(-2);
   }
+  // nomi delle aree come li vede una fazione (es. "Cervino" per una, "Atlanta" per l'altra)
+  function localizza(campo, team) {
+    if (!team) return campo;
+    var c2 = Object.assign({}, campo);
+    c2.punti = campo.punti.map(function (p) { var n = p.nomi && p.nomi[team]; return n ? Object.assign({}, p, { nome: n }) : p; });
+    return c2;
+  }
   function vista(box, opts) {
-    var campo = opts.campo, g = opts.g, ante = !!opts.anteprima;
+    var campo = localizza(opts.campo, opts.team), g = opts.g, ante = !!opts.anteprima;
     box.innerHTML = '';
     box.classList.add('fz');
     var mapBox = el('div', 'fz-map'), inner = el('div', 'fz-inner'), img = new Image();
@@ -280,6 +287,7 @@
         // simbolo al centro
         if (mob) s += testo('⚑', q.x, q.y, 30 * k, 'fz-sim', '#fff');
         else if (p.tipo === 'chiave') s += testo('★', q.x, q.y, 28 * k, 'fz-sim', '#ffe08a');
+        else if (p.tipo === 'fob') s += testo('▲', q.x, q.y, 24 * k, 'fz-sim', '#fff');
         else if (p.tipo === 'torre') s += torre(q.x, q.y, k);
         s += testo(p.nome.toUpperCase(), q.x, q.y + r + 13 * k, 15 * k, 'fz-lab');
         // fuori rete: sono in un punto che la mia fazione non può conquistare
@@ -419,7 +427,7 @@
     function vibra(v) { try { if (navigator.vibrate) navigator.vibrate(v); } catch (e) {} }
     function schedaPunto(p) {
       var o = st && st.owner[p.id], fp = el('div', 'fz-scheda');
-      var tipo = { mob: 'Base principale', chiave: 'Punto chiave ★', torre: 'Torre radio', deposito: 'Deposito', base: 'Punto base' }[p.tipo];
+      var tipo = { mob: 'Base principale', fob: 'Base avanzata (FOB)', chiave: 'Punto chiave ★', torre: 'Torre radio', deposito: 'Deposito', base: 'Punto base' }[p.tipo];
       var tt = el('b', null, p.nome.toUpperCase()); fp.appendChild(tt);
       var sub = el('small', null, tipo + ' · ' + nomeF(o)); fp.appendChild(sub);
       if (!ante && p.tipo !== 'mob' && st && opts.team) fp.appendChild(el('span', null, o === opts.team ? 'Nostro' : st.attaccabile(opts.team, p.id) ? 'Nella nostra rete: conquistabile' : 'Fuori dalla nostra rete'));
@@ -458,9 +466,10 @@
   function prova(box, onMenu, extraOpts, campo) {
     var vel = 10, t0 = Date.now(), base = Date.now();
     var ora = function () { return base + (Date.now() - t0) * vel; };
-    var mobs = campo.punti.filter(function (p) { return p.tipo === 'mob'; });
+    var mobs = campo.punti.filter(function (p) { return p.tipo === 'mob'; }).sort(function (a, b) { return (a.fazione === 'rossa') - (b.fazione === 'rossa'); });
+    var fob = function (f) { return campo.punti.filter(function (p) { return p.tipo === 'fob' && p.fazione === f; }).map(function (p) { return p.id; }); };
     var g = { id: 'prova', titolo: 'Prova fazioni', inizio: base + 5000, durata: 90, campo: campo.id,
-      fazioni: [{ team: 'blu', mob: mobs[0].id, partenza: [], comandante: 'ia' }, { team: 'rossa', mob: mobs[1].id, partenza: [], comandante: 'ia' }] };
+      fazioni: [{ team: 'blu', mob: mobs[0].id, partenza: fob('blu'), comandante: 'ia' }, { team: 'rossa', mob: mobs[1].id, partenza: fob('rossa'), comandante: 'ia' }] };
     var eventi = [], bots = [];
     ['blu', 'rossa'].forEach(function (team) {
       var mob = team === 'blu' ? mobs[0] : mobs[1];
