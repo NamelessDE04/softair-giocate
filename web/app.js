@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.13';
+  var VERSIONE = '0.13.1';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -1252,7 +1252,12 @@
         cm.punti.slice().sort(function (a, b) { return 'mobfobchiavebasetorre'.indexOf(a.tipo) - 'mobfobchiavebasetorre'.indexOf(b.tipo) || a.nome.localeCompare(b.nome); })
           .forEach(function (p) { fogli.appendChild(foglioQr(cm, p, cod[p.id])); });
       }
-      S.preparaQr(cm, false).then(disegna, errore);
+      S.preparaQr(cm, false).then(disegna, function (e) {
+        box.innerHTML = '';
+        if (e && (e.code === 'permission-denied' || /permission/i.test(e.message || ''))) {
+          box.appendChild(el('p', 'hint avviso', 'Il database non permette ancora di salvare i codici QR: vanno pubblicate in Firebase le regole aggiornate (Firestore Database → Regole → incolla tutto il file → Pubblica). Poi riapri questa pagina.'));
+        } else errore(e);
+      });
     });
   }
 
