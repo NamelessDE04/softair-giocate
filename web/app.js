@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.12';
+  var VERSIONE = '0.13';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -87,11 +87,12 @@
 
   function mostra() {
     if (chiusura) { try { chiusura(); } catch (e) {} chiusura = null; }
+    chiudiScanner();
     var c = corrente();
     app.innerHTML = ''; window.scrollTo(0, 0);
     $('pieno').hidden = true; $('pieno').innerHTML = '';
     document.body.classList.remove('a-pieno');
-    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva }[c.v];
+    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva }[c.v];
     (r || home)(c.p);
   }
   function aPieno() { document.body.classList.add('a-pieno'); var p = $('pieno'); p.hidden = false; p.innerHTML = ''; return p; }
@@ -129,6 +130,7 @@
       var voci = [];
       if (me.team) voci.push(['Il mio team', function () { vai('team', me.team); }]);
       voci.push(['Profilo', function () { vai('profilo'); }]);
+      if (posaConsentita()) voci.push(['Posa i QR sul campo', function () { vai('posa'); }]);
       if (P('prova')) voci.push(['Prova la mappa di gioco', function () { vai('prova'); }]);
       if (organizza()) voci.push(['Organizza', function () { vai('organizza'); }]);
       voci.push(['Esci', function () { S.logout(); }]);
@@ -445,7 +447,7 @@
     conCampo(c.campo, box, function (cm) {
     var v = F.vista(box, {
       g: motore(c), campo: cm, team: f, ordiniPersonali: personali, colori: COLORI, nomi: nomiFaz(c), ora: Date.now,
-      gps: !!f, comandante: comandante, presenze: P('presenze'),
+      gps: !!f, qr: !!f, comandante: comandante, presenze: P('presenze'),
       onZona: function (pt) { S.scriviEvento(c.id, { tipo: 'zona', uid: st.user.uid, team: f, pt: pt || null, t: Date.now() }); },
       onOrdine: function (pt, azione, testo) { S.scriviEvento(c.id, { tipo: 'ordine', uid: st.user.uid, team: f, pt: pt, azione: azione, testo: testo, t: Date.now() }); },
       onMenu: function () {
@@ -460,6 +462,22 @@
         tendina.hidden = false;
       }
     });
+    if (f) {
+      var bq = bottone('QR', 'fz-qr'); bq.setAttribute('aria-label', 'Scansiona il QR dell\'area');
+      var scQr = function (pre) {
+        apriScanner('Scansiona il QR dell\'area', function (t) {
+          return S.leggiQr(cm, pre || t).then(function (r) {
+            if (!r.punto) return { ok: false, titolo: 'QR non valido', testo: r.errore };
+            var nm = (r.punto.nomi && r.punto.nomi[f]) || r.punto.nome;
+            v.zonaQr(r.punto.id);
+            return { ok: true, titolo: (r.punto.tipo === 'mob' ? 'Sei alla base: ' : 'Sei a ') + nm, testo: 'Conti come presente qui per 6 minuti. Poi torna a valere il GPS, oppure scansiona di nuovo.' };
+          });
+        });
+      };
+      bq.onclick = function () { scQr(); };
+      box.appendChild(bq);
+      if (qrInSospeso) { var pre = qrInSospeso; qrInSospeso = null; setTimeout(function () { scQr(pre); }, 400); }
+    }
     var stopE = S.ascoltaEventi(c.id, function (ev) { ultimi = ev; v.aggiorna(ev); });
     var prima = chiusura; chiusura = function () { stopE(); v.chiudi(); if (prima) prima(); };
     });
@@ -689,9 +707,12 @@
       var n = el('input'); n.value = u.nome || ''; f.appendChild(campoForm('Nome', n));
       var cs = el('input'); cs.value = u.callsign || ''; f.appendChild(campoForm('Callsign', cs));
       var rSel = null;
+      var attivo = (u.posaQrFino || 0) > Date.now();
+      var pSel = select([['', 'No']].concat(attivo ? [['tieni', 'Sì, fino a ' + dataBreve(u.posaQrFino)]] : []).concat([['1', 'Per 1 giorno'], ['3', 'Per 3 giorni'], ['7', 'Per 7 giorni']]), attivo ? 'tieni' : '');
       if (S.stato().dev) { rSel = select(S.RUOLI, u.ruolo || 'truppa'); f.appendChild(campoForm('Ruolo', rSel)); }
       var tSel = select([['', 'Nessun team']].concat(D.team.map(function (t) { return [t.id, t.nome]; })), u.team || '');
       f.appendChild(campoForm('Team', tSel));
+      f.appendChild(campoForm('Può posare i QR sul campo', pSel));
       var sSel = el('select'), sLab = campoForm('Squadra', sSel); f.appendChild(sLab);
       function squadre() {
         var t = teamDi(tSel.value), sq = (t && t.squadre) || [];
@@ -704,6 +725,7 @@
       r.appendChild(bottone('Salva', 'accent', function () {
         var dati = { nome: n.value.trim(), callsign: cs.value.trim(), team: tSel.value || null, squadra: sSel.value || null };
         if (rSel) dati.ruolo = rSel.value === 'truppa' ? null : rSel.value;
+        if (pSel.value !== 'tieni') dati.posaQrFino = pSel.value ? Date.now() + Number(pSel.value) * GIORNO : null;
         S.salvaUtente(u.id, dati)
           .then(function () { toast('Giocatore salvato'); chiudiFoglio(); }, errore);
       }));
@@ -765,6 +787,10 @@
         r.appendChild(el('b', null, cm.nome)); r.appendChild(el('small', null, n + ' aree · ' + (cm.link || []).length + ' collegamenti · ' + (cm.geo ? 'georeferenziata' : 'senza coordinate')));
         r.onclick = function () { vai('mappa', cm.id); };
         app.appendChild(r);
+        var az = el('div', 'riga-az');
+        az.appendChild(bottone('Stampa i QR', 'piccolo', function () { vai('stampaQr', cm.id); }));
+        az.appendChild(bottone('Posa i QR', 'piccolo', function () { vai('posa', cm.id); }));
+        app.appendChild(az);
       });
     }
     if (P('giocatori')) {
@@ -1087,6 +1113,230 @@
     });
   }
 
+  // ================= QR: scanner, fogli da stampare, posa sul campo
+  var SIMB = { mob: '⚑', fob: '▲', chiave: '★', base: '●', torre: '📡' };
+  var DESCR = { mob: 'Base principale', fob: 'Base avanzata (FOB)', chiave: 'Punto chiave', base: 'Punto base', torre: 'Torre radio' };
+  function posaConsentita() { var me = S.stato().me || {}; return P('mappe') || (me.posaQrFino || 0) > Date.now(); }
+  function urlQr(cm, p, tok) { return location.origin + location.pathname.replace(/index\.html$/, '') + '?qr=' + cm.id + '.' + p.id + '.' + tok; }
+
+  var scan = null;
+  function apriScanner(titolo, onCodice) {
+    chiudiScanner();
+    var ov = el('div', 'scanner'); document.body.appendChild(ov);
+    var bar = el('div', 'scan-bar'); bar.appendChild(el('b', null, titolo)); bar.appendChild(bottone('Chiudi', '', chiudiScanner)); ov.appendChild(bar);
+    var vb = el('div', 'scan-video'), video = el('video'); video.muted = true; video.setAttribute('playsinline', ''); video.setAttribute('autoplay', '');
+    vb.appendChild(video); vb.appendChild(el('span', 'mirino')); ov.appendChild(vb);
+    var msg = el('p', 'scan-msg', 'Inquadra il QR del foglio'); ov.appendChild(msg);
+    var man = el('form', 'scan-man'), inp = el('input'); inp.placeholder = 'oppure il codice sotto il QR'; inp.maxLength = 8; inp.setAttribute('autocapitalize', 'characters'); inp.autocomplete = 'off';
+    var ok = el('button', 'btn accent', 'Invia'); ok.type = 'submit'; man.appendChild(inp); man.appendChild(ok); ov.appendChild(man);
+    var sc = scan = { ov: ov, attivo: true, stream: null, occupato: false };
+    man.onsubmit = function (e) { e.preventDefault(); if (inp.value.trim()) gestisci(inp.value); };
+    function ferma() { sc.attivo = false; if (sc.stream) sc.stream.getTracks().forEach(function (t) { t.stop(); }); }
+    function gestisci(t) {
+      if (sc.occupato) return; sc.occupato = true; msg.textContent = 'Controllo…';
+      Promise.resolve(onCodice(t)).then(esito, function (e) { esito({ ok: false, titolo: 'Errore', testo: e.message || String(e) }); });
+    }
+    function esito(r) {
+      ferma(); if (scan !== sc) return;
+      ov.innerHTML = '';
+      var e = el('div', 'esito ' + (r.ok ? 'ok' : r.avviso ? 'avviso' : 'ko'));
+      e.appendChild(el('span', 'esito-icona', r.ok ? (r.avviso ? '!' : '✓') : '✕'));
+      e.appendChild(el('h2', null, r.titolo)); if (r.testo) e.appendChild(el('p', null, r.testo));
+      e.appendChild(bottone('OK', 'accent big', chiudiScanner));
+      e.appendChild(bottone('Scansiona un altro QR', '', function () { apriScanner(titolo, onCodice); }));
+      ov.appendChild(e);
+      try { if (navigator.vibrate) navigator.vibrate(r.ok ? 120 : [200, 80, 200]); } catch (x) {}
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { msg.textContent = 'Fotocamera non disponibile: scrivi il codice qui sotto.'; return; }
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }).then(function (st) {
+      if (!sc.attivo) { st.getTracks().forEach(function (t) { t.stop(); }); return; }
+      sc.stream = st; video.srcObject = st; video.play().catch(function () {});
+      var cv = document.createElement('canvas'), cx = cv.getContext('2d', { willReadFrequently: true });
+      (function giro() {
+        if (!sc.attivo || sc.occupato) return;
+        if (video.readyState >= 2 && video.videoWidth) {
+          var k = Math.min(1, 640 / video.videoWidth);
+          cv.width = Math.round(video.videoWidth * k); cv.height = Math.round(video.videoHeight * k);
+          cx.drawImage(video, 0, 0, cv.width, cv.height);
+          var r = window.jsQR && window.jsQR(cx.getImageData(0, 0, cv.width, cv.height).data, cv.width, cv.height, { inversionAttempts: 'dontInvert' });
+          if (r && r.data) { gestisci(r.data); return; }
+        }
+        setTimeout(giro, 200);
+      })();
+    }, function () { msg.textContent = 'Permesso fotocamera negato: scrivi il codice qui sotto.'; });
+  }
+  function chiudiScanner() {
+    if (!scan) return;
+    scan.attivo = false; if (scan.stream) scan.stream.getTracks().forEach(function (t) { t.stop(); });
+    scan.ov.remove(); scan = null;
+  }
+
+  // disegno del QR in SVG (nitido in stampa)
+  function svgQr(testo) {
+    var m = window.QR.encode(testo, 'M'), q = 4, n = m.size + q * 2, d = '';
+    for (var y = 0; y < m.size; y++) for (var x = 0; x < m.size; x++) if (m.get(x, y)) d += 'M' + (x + q) + ' ' + (y + q) + 'h1v1h-1z';
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + n + ' ' + n + '" shape-rendering="crispEdges"><rect width="' + n + '" height="' + n + '" fill="#fff"/><path d="' + d + '" fill="#000"/></svg>';
+  }
+  // ritaglio della cartina attorno all'area, con il cerchio dell'area e il nord in alto
+  function ritaglio(cm, p) {
+    return new Promise(function (ok) {
+      var im = new Image();
+      im.onload = function () {
+        var mpp = cm.mPerPx || 1, lato = Math.min(Math.max(320 / mpp, 260), Math.max(im.naturalWidth, im.naturalHeight));
+        var W = 640, H = 400, sx = lato, sy = lato * H / W;
+        var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+        var x = cv.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+        x.drawImage(im, p.x - sx / 2, p.y - sy / 2, sx, sy, 0, 0, W, H);
+        var k = W / sx, r = Math.max(12, (p.raggio || 30) / mpp * k);
+        x.lineWidth = 5; x.strokeStyle = '#d0021b'; x.beginPath(); x.arc(W / 2, H / 2, r, 0, Math.PI * 2); x.stroke();
+        x.lineWidth = 2; x.beginPath(); x.moveTo(W / 2 - 10, H / 2); x.lineTo(W / 2 + 10, H / 2); x.moveTo(W / 2, H / 2 - 10); x.lineTo(W / 2, H / 2 + 10); x.stroke();
+        x.fillStyle = '#000'; x.font = 'bold 20px sans-serif'; x.textAlign = 'center'; x.fillText('N ↑', W - 30, 28);
+        ok(cv.toDataURL('image/jpeg', 0.85));
+      };
+      im.onerror = function () { ok(''); };
+      im.src = cm.img;
+    });
+  }
+  function foglioQr(cm, p, tok) {
+    var f = el('section', 'qr-foglio');
+    f.appendChild(el('div', 'qr-testa', 'AIRSOFT CONFLICT · ' + cm.nome.toUpperCase()));
+    var corpo = el('div', 'qr-corpo'); f.appendChild(corpo);
+    var sx = el('div', 'qr-sx'); corpo.appendChild(sx);
+    sx.appendChild(el('div', 'qr-tipo', DESCR[p.tipo] + (p.fazione ? ' · fazione ' + p.fazione : '')));
+    sx.appendChild(el('div', 'qr-nome', (SIMB[p.tipo] || '') + ' ' + p.nome.toUpperCase()));
+    if (p.nomi && (p.nomi.blu || p.nomi.rossa)) sx.appendChild(el('div', 'qr-nomi', 'Per i blu: ' + (p.nomi.blu || p.nome) + '  ·  Per i rossi: ' + (p.nomi.rossa || p.nome)));
+    var q = el('div', 'qr-codice'); q.innerHTML = svgQr(urlQr(cm, p, tok)); sx.appendChild(q);
+    sx.appendChild(el('div', 'qr-tok', 'Codice: ' + tok));
+    var dx = el('div', 'qr-dx'); corpo.appendChild(dx);
+    dx.appendChild(el('h4', null, 'Cos\'è'));
+    dx.appendChild(el('p', null, p.tipo === 'mob'
+      ? 'La base principale: qui si rientra. Con l\'app, «Scansiona QR» segna che sei in base.'
+      : 'Un\'area da conquistare o da tenere. Durante la partita, quando sei dentro l\'area, apri l\'app e premi «Scansiona QR» (oppure inquadralo con la fotocamera del telefono): conti come presente qui per 6 minuti, anche se il GPS non ti trova.'));
+    dx.appendChild(el('h4', null, 'Dove va messo'));
+    if (p.notaQr) dx.appendChild(el('p', 'qr-nota', p.notaQr));
+    if (p.lat != null) {
+      var u = window.AC_MAPPE.utmTesto(p.lat, p.lon);
+      dx.appendChild(el('p', 'qr-coo', 'UTM ' + u + '\nLat/Lon ' + p.lat.toFixed(5) + ', ' + p.lon.toFixed(5)));
+    }
+    var im = new Image(); im.className = 'qr-mappa'; im.alt = ''; dx.appendChild(im);
+    ritaglio(cm, p).then(function (d) { if (d) im.src = d; else im.remove(); });
+    f.appendChild(el('div', 'qr-piede', 'Non spostare e non coprire questo foglio · cerchio rosso = area di ' + (p.raggio || 30) + ' m'));
+    return f;
+  }
+  function pagStampaQr(id) {
+    testata('QR da stampare');
+    if (!P('mappe')) { app.appendChild(el('p', 'hint', 'Non hai il permesso per le cartine.')); return; }
+    conCampo(id, app, function (cm) {
+      var box = el('div', 'qr-pagina'); app.appendChild(box);
+      box.appendChild(el('p', 'hint', 'Preparo i codici…'));
+      var formato = 'a4';
+      function disegna(cod) {
+        box.innerHTML = '';
+        var ctr = el('div', 'qr-ctr');
+        ctr.appendChild(el('p', 'hint', cm.nome + ': ' + cm.punti.length + ' fogli, uno per area. Stampali, mettili in una bustina trasparente o plastificali, poi falli posare: chi li posa usa ☰ → «Posa i QR».'));
+        var seg = el('div', 'seg seg-largo');
+        [['a4', 'Un foglio A4 per area'], ['a5', 'Due per foglio (A5)']].forEach(function (o) {
+          var b = bottone(o[1], 'seg-b' + (formato === o[0] ? ' on' : ''), function () { formato = o[0]; fogli.className = 'qr-fogli ' + formato; Array.prototype.forEach.call(seg.children, function (x) { x.classList.remove('on'); }); b.classList.add('on'); });
+          seg.appendChild(b);
+        });
+        ctr.appendChild(seg);
+        var r = el('div', 'riga2');
+        r.appendChild(bottone('Stampa', 'accent', function () { document.body.classList.add('stampa-qr'); window.print(); setTimeout(function () { document.body.classList.remove('stampa-qr'); }, 500); }));
+        r.appendChild(bottone('Nuovi codici', '', function () {
+          if (!confirm('Creare codici nuovi? I fogli già stampati smettono di funzionare e vanno ristampati tutti.')) return;
+          S.preparaQr(cm, true).then(disegna, errore);
+        }));
+        ctr.appendChild(r);
+        box.appendChild(ctr);
+        var fogli = el('div', 'qr-fogli ' + formato); box.appendChild(fogli);
+        cm.punti.slice().sort(function (a, b) { return 'mobfobchiavebasetorre'.indexOf(a.tipo) - 'mobfobchiavebasetorre'.indexOf(b.tipo) || a.nome.localeCompare(b.nome); })
+          .forEach(function (p) { fogli.appendChild(foglioQr(cm, p, cod[p.id])); });
+      }
+      S.preparaQr(cm, false).then(disegna, errore);
+    });
+  }
+
+  // posa dei QR: mappa con la propria posizione, lista delle aree per distanza, scansione di conferma
+  function bussola(da, a) {
+    var R = 6371000, la = (da.lat + a.lat) / 2 * Math.PI / 180;
+    var dx = (a.lon - da.lon) * Math.PI / 180 * Math.cos(la) * R, dy = (a.lat - da.lat) * Math.PI / 180 * R;
+    var ang = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360, dir = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'][Math.round(ang / 45) % 8];
+    return { m: Math.round(Math.hypot(dx, dy)), dir: dir, ang: ang };
+  }
+  function pagPosa(id) {
+    if (!posaConsentita()) { testata('Posa i QR'); app.appendChild(el('p', 'hint', 'Non sei abilitato a posare i QR.')); return; }
+    var conQr = D.campi.filter(function (cm) { return cm.qrHash; });
+    if (!id && conQr.length !== 1) {
+      testata('Posa i QR');
+      if (!conQr.length) { app.appendChild(el('p', 'hint', 'Nessun campo ha ancora i QR: si preparano da Organizza → Cartine → QR.')); return; }
+      app.appendChild(el('p', 'hint', 'In quale campo devi posare i QR?'));
+      conQr.forEach(function (cm) { var r = el('button', 'riga-lista'); r.type = 'button'; r.appendChild(el('b', null, cm.nome)); r.appendChild(el('small', null, (cm.punti || []).length + ' aree')); r.onclick = function () { sostituisci('posa', cm.id); }; app.appendChild(r); });
+      return;
+    }
+    id = id || conQr[0].id;
+    var pg = aPieno(); pg.classList.add('posa');
+    var bar = el('div', 'pieno-bar'); bar.appendChild(bottone('‹', 'icon indietro', function () { if (pila.length > 1) indietro(); else sostituisci('home'); }));
+    var tit = el('b', null, 'Posa i QR'); bar.appendChild(tit); var cont = el('span', 'posa-cont'); bar.appendChild(cont);
+    pg.appendChild(bar);
+    var box = el('div', 'pieno-mappa posa-mappa'); pg.appendChild(box);
+    var pann = el('div', 'posa-pann'); pg.appendChild(pann);
+    conCampo(id, box, function (cm) {
+      tit.textContent = 'Posa i QR · ' + cm.nome;
+      var g0 = { inizio: Date.now() + 864e5, durata: 60, fazioni: [{ team: 'blu', mob: null, partenza: [] }, { team: 'rossa', mob: null, partenza: [] }] };
+      var v = F.vista(box, { g: g0, campo: cm, team: null, colori: COLORI, nomi: {}, ora: Date.now, anteprima: true });
+      var mia = null, posati = {}, soloDaPosare = false;
+      var watch = navigator.geolocation ? navigator.geolocation.watchPosition(function (p) {
+        mia = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy }; v.posizione(mia.lat, mia.lon, mia.acc); lista();
+      }, function () {}, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }) : null;
+      var stopP = S.ascoltaPosa(cm.id, function (m) { posati = m; lista(); });
+      function scansiona() {
+        apriScanner('Scansiona il QR appena messo', function (t) {
+          return S.leggiQr(cm, t).then(function (r) {
+            if (!r.punto) return { ok: false, titolo: 'QR non valido', testo: r.errore };
+            var p = r.punto, b = mia && p.lat != null ? bussola(mia, p) : null, me = S.stato().me;
+            var dati = { nome: me.callsign || me.nome || '', uid: S.stato().user.uid, t: Date.now(), lat: mia ? mia.lat : null, lon: mia ? mia.lon : null, dist: b ? b.m : null };
+            return S.segnaPosa(cm.id, p.id, dati).then(function () {
+              var lontano = b && b.m > Math.max(40, (p.raggio || 30) * 1.5);
+              return { ok: true, avviso: lontano, titolo: (SIMB[p.tipo] || '') + ' ' + p.nome + ' posato',
+                testo: lontano ? 'Attenzione: secondo il GPS sei a ' + b.m + ' m dal punto previsto (verso ' + b.dir + '). Se il foglio è nel posto giusto va bene così.' : 'Segnato come posato. ' + (b ? 'Sei a ' + b.m + ' m dal centro dell\'area.' : '') };
+            });
+          });
+        });
+      }
+      function lista() {
+        pann.innerHTML = '';
+        var n = cm.punti.filter(function (p) { return posati[p.id]; }).length;
+        cont.textContent = n + '/' + cm.punti.length;
+        var top = el('div', 'posa-top');
+        top.appendChild(bottone('📷 Scansiona il QR appena messo', 'accent big', scansiona));
+        var chk = el('label', 'ed-chk'), cb = el('input'); cb.type = 'checkbox'; cb.checked = soloDaPosare; cb.onchange = function () { soloDaPosare = cb.checked; lista(); };
+        chk.appendChild(cb); chk.appendChild(el('span', null, 'Solo quelli da posare')); top.appendChild(chk);
+        pann.appendChild(top);
+        if (!mia) pann.appendChild(el('p', 'hint', 'In attesa del GPS per le distanze…'));
+        var aree = cm.punti.map(function (p) { return { p: p, b: mia && p.lat != null ? bussola(mia, p) : null }; })
+          .filter(function (x) { return !soloDaPosare || !posati[x.p.id]; })
+          .sort(function (a, b) { return (posati[a.p.id] ? 1 : 0) - (posati[b.p.id] ? 1 : 0) || (a.b ? a.b.m : 1e9) - (b.b ? b.b.m : 1e9); });
+        aree.forEach(function (x) {
+          var p = x.p, ps = posati[p.id], r = el('div', 'posa-riga' + (ps ? ' fatto' : ''));
+          r.appendChild(el('span', 'posa-stato', ps ? '✓' : (SIMB[p.tipo] || '●')));
+          var info = el('div', 'posa-info');
+          info.appendChild(el('b', null, p.nome));
+          info.appendChild(el('small', null, p.notaQr || DESCR[p.tipo]));
+          if (ps) info.appendChild(el('small', 'ok', 'Posato da ' + (ps.nome || '—') + ' alle ' + ora(ps.t)));
+          r.appendChild(info);
+          if (x.b) { var d = el('span', 'posa-dist'); var fr = el('i', null, '↑'); fr.style.transform = 'rotate(' + x.b.ang + 'deg)'; d.appendChild(fr); d.appendChild(el('span', null, x.b.m + ' m ' + x.b.dir)); r.appendChild(d); }
+          if (ps && P('mappe')) r.appendChild(bottone('✕', 'icon', function () { if (confirm('Segnare ' + p.nome + ' come da posare?')) S.togliPosa(cm.id, p.id).catch(errore); }));
+          pann.appendChild(r);
+        });
+      }
+      lista();
+      var prima = chiusura; chiusura = function () { stopP(); if (watch != null) navigator.geolocation.clearWatch(watch); v.chiudi(); pg.classList.remove('posa'); if (prima) prima(); };
+      if (qrInSospeso) { var t0 = qrInSospeso; qrInSospeso = null; setTimeout(function () { scansionaTesto(t0); }, 300); }
+      function scansionaTesto(t) { apriScanner('QR', function () { return S.leggiQr(cm, t).then(function (r) { if (!r.punto) return { ok: false, titolo: 'QR non valido', testo: r.errore }; return S.segnaPosa(cm.id, r.punto.id, { nome: (S.stato().me.callsign || S.stato().me.nome || ''), uid: S.stato().user.uid, t: Date.now(), lat: mia ? mia.lat : null, lon: mia ? mia.lon : null, dist: null }).then(function () { return { ok: true, titolo: r.punto.nome + ' posato' }; }); }); }); }
+    });
+  }
+  var qrInSospeso = null;
+
   // ================= EDITOR DELLE CARTINE (da computer)
   function pagMappa(id) {
     var p = aPieno(); p.classList.add('con-editor');
@@ -1131,6 +1381,14 @@
   function aperturaAutomatica() {
     if (aperturaFatta || pila.length > 1) return;
     var st = S.stato();
+    // aperta da un QR: in partita conta come scansione, altrimenti (a chi posa) segna il foglio come posato
+    if (qrInSospeso && D.campi.length) {
+      var cid = decodeURIComponent(qrInSospeso.match(/[?&]qr=([^&#]+)/)[1]).split('.')[0];
+      var live = attivi().filter(function (x) { return fase(x) === 'live' && x.campo === cid && mieFaz(x); })[0];
+      if (live) { aperturaFatta = true; vai('conflitto', live.id); return; }
+      if (posaConsentita()) { aperturaFatta = true; vai('posa', cid); return; }
+      qrInSospeso = null; toast('QR di un\'area: si usa durante la partita');
+    }
     var c = attivi().filter(function (x) {
       var f = fase(x); if (f !== 'giorno' && f !== 'live') return false;
       if (P('conflitti')) return true;
@@ -1167,6 +1425,12 @@
   $('btnLogin').onclick = function () { S.login().catch(function (e) { if (e && e.code !== 'auth/popup-closed-by-user') toast('Accesso non riuscito: ' + (e.message || e)); }); };
   $('btnRiprova').onclick = function () { location.reload(); };
   $('versione').textContent = 'Airsoft Conflict v' + VERSIONE;
+  (function () {
+    var m = location.search.match(/[?&]qr=([^&#]+)/);
+    if (!m) return;
+    qrInSospeso = location.href;
+    history.replaceState({ n: 1 }, '', location.pathname);
+  })();
   history.replaceState({ n: 1 }, '');
   S.avvia();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});

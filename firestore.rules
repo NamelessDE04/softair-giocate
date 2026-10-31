@@ -35,6 +35,9 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/team/$(tid)).data.get('referenteUid', null) == request.auth.uid;
     }
     function ruoloInvariato() { return request.resource.data.get('ruolo', null) == resource.data.get('ruolo', null); }
+    // il ruolo e il permesso temporaneo di posare i QR non se li dà da solo nessuno
+    function permessiInvariati() { return ruoloInvariato() && request.resource.data.get('posaQrFino', null) == resource.data.get('posaQrFino', null); }
+    function posaQr() { return perm('mappe') || (signed() && exists(meRef()) && get(meRef()).data.get('posaQrFino', 0) > request.time.toMillis()); }
 
     // Tabella dei permessi: la leggono tutti, la cambia solo il developer
     match /config/{doc} {
@@ -55,7 +58,7 @@ service cloud.firestore {
         // chi elimina un team toglie i giocatori dal team
         || (perm('team') && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['squadra', 'team', 'codice'])
             && request.resource.data.get('team', null) == null)
-        || (signed() && request.auth.uid == uid && ruoloInvariato() && (
+        || (signed() && request.auth.uid == uid && permessiInvariati() && (
           request.resource.data.get('team', null) == resource.data.get('team', null)
           || request.resource.data.get('team', null) == null
           || (request.resource.data.get('codice', null) is string
@@ -76,6 +79,16 @@ service cloud.firestore {
         allow write: if perm('mappe') && request.resource.data.d.size() < 1000000;
         allow delete: if perm('mappe');
       }
+    }
+
+    // Codici dei QR delle aree (per stamparli): solo chi gestisce le cartine. Nel campo c'è solo l'impronta.
+    match /campiQr/{id} {
+      allow read, write: if perm('mappe');
+    }
+    // Posa dei QR sul campo: chi li ha messi e dove
+    match /campiPosa/{id} {
+      allow read: if signed();
+      allow write: if posaQr();
     }
 
     // Anagrafica dei team (nome, logo, referente, squadre)

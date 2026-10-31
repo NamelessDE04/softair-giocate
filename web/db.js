@@ -264,7 +264,8 @@
       pezzi.forEach(function (p, k) { scritture.push(db.collection('campi/' + id + '/img').doc(String(k)).set({ d: p })); });
       for (var j = pezzi.length; j < vecchi; j++) scritture.push(db.collection('campi/' + id + '/img').doc(String(j)).delete());
     }
-    return Promise.all(scritture).then(function () { return db.collection('campi').doc(id).set(dati); }).then(function () {
+    // merge: così restano i campi scritti altrove (es. le impronte dei QR)
+    return Promise.all(scritture).then(function () { return db.collection('campi').doc(id).set(dati, { merge: true }); }).then(function () {
       var c = normalizza(Object.assign({ id: id }, dati)); c.img = img || (cacheCampi[id] && cacheCampi[id].img) || ''; cacheCampi[id] = c; return c;
     });
   };
@@ -272,6 +273,49 @@
     var p = []; for (var i = 0; i < (parti || 0); i++) p.push(db.collection('campi/' + id + '/img').doc(String(i)).delete());
     return Promise.all(p).then(function () { delete cacheCampi[id]; return db.collection('campi').doc(id).delete(); });
   };
+
+  // ---------- QR delle aree: il codice vero sta in campiQr (solo chi gestisce le cartine), nel campo c'è solo l'impronta
+  api.impronta = function (testo) {
+    return crypto.subtle.digest('SHA-256', new TextEncoder().encode(testo)).then(function (b) {
+      return Array.prototype.map.call(new Uint8Array(b), function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+    });
+  };
+  api.codiciQr = function (cid) { return db.collection('campiQr').doc(cid).get().then(function (s) { return s.exists ? (s.data().aree || {}) : {}; }); };
+  // crea i codici mancanti (o tutti, se nuovi=true) e aggiorna le impronte nella cartina
+  api.preparaQr = function (campo, nuovi) {
+    return api.codiciQr(campo.id).then(function (cod) {
+      var aree = {}, cambia = false;
+      campo.punti.forEach(function (p) {
+        if (!nuovi && cod[p.id]) aree[p.id] = cod[p.id]; else { aree[p.id] = codice(6); cambia = true; }
+      });
+      if (Object.keys(cod).length !== Object.keys(aree).length) cambia = true;
+      var impronte = {};
+      return Promise.all(campo.punti.map(function (p) { return api.impronta(campo.id + ':' + p.id + ':' + aree[p.id]).then(function (h) { impronte[p.id] = h; }); })).then(function () {
+        var uguali = campo.qrHash && campo.punti.every(function (p) { return campo.qrHash[p.id] === impronte[p.id]; });
+        if (!cambia && uguali) return aree;
+        var b = db.batch();
+        b.set(db.collection('campiQr').doc(campo.id), { aree: aree });
+        b.set(db.collection('campi').doc(campo.id), { qrHash: impronte }, { merge: true });
+        return b.commit().then(function () { if (cacheCampi[campo.id]) cacheCampi[campo.id].qrHash = impronte; campo.qrHash = impronte; return aree; });
+      });
+    });
+  };
+  /* testo letto dal QR (indirizzo dell'app o codice di 6 lettere scritto a mano) -> area del campo, se è valido */
+  api.leggiQr = function (campo, testo) {
+    testo = String(testo || '').trim();
+    var m = testo.match(/[?&]qr=([^&#]+)/), cid = null, pid = null, tok;
+    if (m) { var v = decodeURIComponent(m[1]).split('.'); cid = v[0]; pid = v[1]; tok = (v[2] || '').toUpperCase(); }
+    else tok = testo.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    if (cid && cid !== campo.id) return Promise.resolve({ errore: 'Questo QR è di un altro campo.' });
+    var cand = pid ? campo.punti.filter(function (p) { return p.id === pid; }) : campo.punti;
+    var h = campo.qrHash || {};
+    return Promise.all(cand.map(function (p) { return api.impronta(campo.id + ':' + p.id + ':' + tok).then(function (x) { return x === h[p.id] ? p : null; }); }))
+      .then(function (r) { var p = r.filter(Boolean)[0]; return p ? { punto: p } : { errore: 'Codice non valido per questo campo.' }; });
+  };
+  // posa dei QR sul campo: chi ha messo cosa e dove
+  api.ascoltaPosa = function (cid, cb) { return db.collection('campiPosa').doc(cid).onSnapshot(function (s) { cb(s.exists ? (s.data().aree || {}) : {}); }, function () { cb({}); }); };
+  api.segnaPosa = function (cid, pid, dati) { var o = {}; o[pid] = dati; return db.collection('campiPosa').doc(cid).set({ aree: o }, { merge: true }); };
+  api.togliPosa = function (cid, pid) { var o = {}; o['aree.' + pid] = fb.firestore.FieldValue.delete(); return db.collection('campiPosa').doc(cid).update(o); };
 
   // eventi di gioco (posizione nei punti, ordini del comandante)
   api.ascoltaEventi = function (cid, cb) {

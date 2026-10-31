@@ -709,6 +709,9 @@
         nr.oninput = function () { p.nomi.rossa = nr.value; modificato = true; disegna(); };
         var dn = el('div', 'due'); dn.appendChild(campoF('Nome per i blu', nb)); dn.appendChild(campoF('Nome per i rossi', nr));
         f.appendChild(dn);
+        var nq = el('input'); nq.placeholder = 'es. sul palo della recinzione, lato sentiero'; nq.value = p.notaQr || '';
+        nq.oninput = function () { p.notaQr = nq.value; modificato = true; };
+        f.appendChild(campoF('Dove mettere il QR (va sul foglio da stampare)', nq));
         var r = el('input'); r.type = 'number'; r.min = 5; r.max = 200; r.value = p.raggio || 30;
         r.onchange = function () { p.raggio = Math.max(5, Math.min(200, +r.value || 30)); cambiato(); };
         f.appendChild(campoF('Raggio dell\'area (metri)', r));
@@ -823,7 +826,7 @@
         id: c.id, nome: c.nome.trim(), w: c.w, h: c.h, geo: c.geo, mPerPx: c.mPerPx,
         controllo: c.controllo.map(function (p) { return { x: p.x, y: p.y, lat: p.lat, lon: p.lon, testo: p.testo || null }; }),
         punti: c.punti.map(function (p) { return { id: p.id, nome: p.nome.trim() || 'Area', tipo: p.tipo, x: p.x, y: p.y, lat: p.lat == null ? null : p.lat, lon: p.lon == null ? null : p.lon, raggio: p.raggio || 30, fonte: p.fonte || 'mappa',
-          fazione: conFazione(p.tipo) ? (p.fazione || null) : null,
+          fazione: conFazione(p.tipo) ? (p.fazione || null) : null, notaQr: (p.notaQr || '').trim() || null,
           nomi: { blu: (p.nomi && p.nomi.blu || '').trim() || null, rossa: (p.nomi && p.nomi.rossa || '').trim() || null } }; }),
         link: c.link.map(function (l) { return [l[0], l[1]]; }),
         tracce: c.tracce.map(function (tr) { return { id: tr.id, nome: (tr.nome || '').trim() || 'Sentiero', pts: tr.pts.map(function (p) { return { la: p[0], lo: p[1] }; }) }; }),

@@ -321,18 +321,33 @@
     }
 
     // --- GPS reale
-    var mia = null, zonaMia = null, battito = null, watch = null, lock = null;
+    var mia = null, zonaMia = null, battito = null, watch = null, lock = null, qrFino = 0;
     function impostaPos(lat, lon, acc) {
       mia = { lat: lat, lon: lon, acc: acc || 0 };
-      var z = acc > 35 ? zonaMia : zonaDi(g, campo, mia);   // con GPS troppo impreciso non si cambia zona
+      var z = acc > 35 || opts.ora() < qrFino ? zonaMia : zonaDi(g, campo, mia);   // GPS impreciso o QR appena scansionato: la zona non cambia
       if (z !== zonaMia) { zonaMia = z; if (opts.onZona) opts.onZona(z); }
       disegna();
+    }
+    // QR scansionato nell'area: si conta lì per 6 minuti, qualunque cosa dica il GPS
+    function zonaQr(pt, durata) {
+      zonaMia = pt; qrFino = opts.ora() + (durata || 360000);
+      if (opts.onZona) opts.onZona(pt);
+      mostraPop('Registrato con il QR: ' + punto(campo, pt).nome, 'ok', opts.team); vibra(120);
+      aggiorna();
     }
     if (opts.gps && navigator.geolocation) {
       watch = navigator.geolocation.watchPosition(function (p) { impostaPos(p.coords.latitude, p.coords.longitude, p.coords.accuracy); },
         function () { mostraPop('GPS non disponibile: controlla i permessi di posizione', 'ko'); }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
-      battito = setInterval(function () { if (zonaMia && opts.onZona) opts.onZona(zonaMia); }, 45000);
     }
+    if (opts.gps || opts.qr) battito = setInterval(function () {
+      if (qrFino && opts.ora() > qrFino) {
+        // finito il tempo del QR: torna a valere il GPS (o niente, se il GPS non c'è)
+        qrFino = 0;
+        var z = mia && mia.acc <= 35 ? zonaDi(g, campo, mia) : null;
+        if (z !== zonaMia) { zonaMia = z; if (opts.onZona) opts.onZona(z); return; }
+      }
+      if (zonaMia && opts.onZona) opts.onZona(zonaMia);
+    }, 45000);
     function tieniAcceso() {
       if (!('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
       navigator.wakeLock.request('screen').then(function (l) { lock = l; }, function () {});
@@ -479,7 +494,7 @@
       if (now < g.inizio) testoS = 'In attesa dell\'inizio';
       else if (st.finita) { testoS = st.vincitore ? (st.vincitore === opts.team ? 'VITTORIA!' : 'Vince ' + nomeF(st.vincitore)) : 'Pareggio'; cls = st.vincitore === opts.team ? ' ok' : ''; }
       else if (!opts.team) testoS = 'Modalità spettatore';
-      else if (!mia) testoS = opts.gps ? 'In attesa del GPS…' : 'Tocca la mappa per spostarti';
+      else if (!mia && !zonaMia) testoS = opts.gps ? 'In attesa del GPS…' : 'Tocca la mappa per spostarti';
       else if (!zonaMia) testoS = 'Fuori dai punti' + (mia.acc ? ' · GPS ±' + Math.round(mia.acc) + ' m' : '');
       else {
         var p = punto(campo, zonaMia), pr = st.prog[zonaMia], o = st.owner[zonaMia];
@@ -488,6 +503,7 @@
         else if (o === opts.team) testoS = 'Sei a ' + p.nome + ' (nostro)';
         else if (!st.attaccabile(opts.team, zonaMia)) { testoS = p.nome + ' fuori rete: prima un punto collegato'; cls = ' ko'; }
         else testoS = p.nome;
+        if (now < qrFino) testoS += ' · QR ' + mmss(qrFino - now);
       }
       stato_.textContent = testoS; stato_.className = 'fz-stato' + cls;
       // ordine attuale
@@ -554,7 +570,7 @@
     var tic = setInterval(function () { aggiorna(); }, 1000);
     aggiorna();
     return {
-      aggiorna: aggiorna, posizione: impostaPos, centra: adatta,
+      aggiorna: aggiorna, posizione: impostaPos, centra: adatta, zonaQr: zonaQr,
       chiudi: function () {
         clearInterval(tic); clearInterval(battito); window.removeEventListener('resize', adatta);
         if (watch != null) navigator.geolocation.clearWatch(watch);
