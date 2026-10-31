@@ -81,14 +81,25 @@
     });
   }
 
-  // ---------- cartografia dal Geoportale Piemonte (WMS): la porzione scelta arriva già georeferenziata
-  var SORGENTI = [
-    { id: 'colori', nome: 'BDTRE · sfondo a colori', caps: 'https://geomap.reteunitaria.piemonte.it/WEBCAT/CAPABILITIES/wms_regp_sfondo_bdtre.xml', layer: 'regp_sfondo_bdtre', crediti: '© Regione Piemonte – BDTRE' },
-    { id: 'bn', nome: 'BDTRE · sfondo in bianco e nero', caps: 'https://geomap.reteunitaria.piemonte.it/WEBCAT/CAPABILITIES/wms_regp_sfondo_bdtre.xml', layer: 'regp_sfondo_bdtre_bn', crediti: '© Regione Piemonte – BDTRE' },
-    { id: 'topo', nome: 'BDTRE · topografica di dettaglio', caps: 'https://geomap.reteunitaria.piemonte.it/ws/taims/rp-01/taimswms/bdtre_topo?service=WMS&request=GetCapabilities', layer: null, crediti: '© Regione Piemonte – BDTRE' },
-    { id: 'altro', nome: 'Altro servizio WMS (indirizzo)…', caps: '', layer: null, crediti: '' }
+  // ---------- cartografia dal web, già georeferenziata: uno sfondo e, sopra, i livelli che vuoi
+  var TAIMS = 'https://geomap.reteunitaria.piemonte.it/ws/taims/rp-01/taimswms/';
+  var REGIONE = '© Regione Piemonte – BDTRE';
+  var SFONDI = [
+    { id: 'otm', nome: 'OpenTopoMap (sentieri, curve di livello, edifici)', tipo: 'xyz', url: 'https://tile.opentopomap.org/{z}/{x}/{y}.png', maxz: 17, crediti: '© OpenStreetMap contributors, SRTM · © OpenTopoMap (CC-BY-SA)' },
+    { id: 'colori', nome: 'Regione Piemonte · BDTRE a colori', tipo: 'wms', caps: 'https://geomap.reteunitaria.piemonte.it/WEBCAT/CAPABILITIES/wms_regp_sfondo_bdtre.xml', layers: ['regp_sfondo_bdtre'], crediti: REGIONE },
+    { id: 'bn', nome: 'Regione Piemonte · BDTRE in bianco e nero', tipo: 'wms', caps: 'https://geomap.reteunitaria.piemonte.it/WEBCAT/CAPABILITIES/wms_regp_sfondo_bdtre.xml', layers: ['regp_sfondo_bdtre_bn'], crediti: REGIONE },
+    { id: 'bianco', nome: 'Nessuno sfondo (solo i livelli scelti)', tipo: 'vuoto' }
+  ];
+  // servizi da cui scegliere i livelli da sovrapporre (letti dal servizio stesso)
+  var SERVIZI = [
+    { id: 'oro', nome: 'Orografia (curve di livello, forme del terreno)', caps: TAIMS + 'bdtre_oro?service=WMS&request=GetCapabilities', auto: /altimetri|curv|forme/i },
+    { id: 'viab', nome: 'Viabilità (strade, piste, sentieri)', caps: TAIMS + 'bdtre_viab?service=WMS&request=GetCapabilities', auto: /strad|sentier|percors|mulatt|pista|viabil/i },
+    { id: 'topo', nome: 'Topografia (edifici, manufatti)', caps: TAIMS + 'bdtre_topo?service=WMS&request=GetCapabilities', auto: /edific|costru|manufat/i },
+    { id: 'idro', nome: 'Idrografia (torrenti, canali)', caps: TAIMS + 'bdtre_idro?service=WMS&request=GetCapabilities', auto: /corsi|acqua|idro|canal|torrent/i }
   ];
   var CRS_BUONI = ['EPSG:32632', 'EPSG:25832', 'EPSG:3857', 'EPSG:900913', 'EPSG:4326'];
+  var cacheCaps = {};
+  function caps(url) { if (!cacheCaps[url]) cacheCaps[url] = leggiCaps(url).catch(function (e) { delete cacheCaps[url]; throw e; }); return cacheCaps[url]; }
   function leggiCaps(url) {
     return fetch(url, { mode: 'cors' }).then(function (r) { if (!r.ok) throw new Error('il servizio risponde ' + r.status); return r.text(); }, function () {
       throw new Error('CORS');
@@ -108,66 +119,116 @@
       var crs = Array.prototype.map.call(x.getElementsByTagName(ver >= '1.3' ? 'CRS' : 'SRS'), function (e) { return e.textContent.trim().toUpperCase(); });
       return { ver: ver, href: href || url.split('?')[0], formati: formati, layers: layers, crs: crs };
     });
-  }
-  // proiezioni: dalla CRS a lat/lon e viceversa
-  function verso(crs, lat, lon) {
+  }  function verso(crs, lat, lon) {
     if (crs === 'EPSG:32632' || crs === 'EPSG:25832') { var u = U.daLatLon(lat, lon, 32); return [u.E, u.N]; }
     if (crs === 'EPSG:3857' || crs === 'EPSG:900913') { var R = 6378137; return [R * lon * Math.PI / 180, R * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360))]; }
     return [lon, lat];
-  }
-  function daCrs(crs, X, Y) {
+  }  function daCrs(crs, X, Y) {
     if (crs === 'EPSG:32632' || crs === 'EPSG:25832') return U.aLatLon(32, true, X, Y);
     if (crs === 'EPSG:3857' || crs === 'EPSG:900913') { var R = 6378137; return { lon: X / R * 180 / Math.PI, lat: (2 * Math.atan(Math.exp(Y / R)) - Math.PI / 2) * 180 / Math.PI }; }
     return { lon: X, lat: Y };
-  }
-  function urlGetMap(caps, crs, layer, bb, w, h, fmt) {
-    var v13 = caps.ver >= '1.3', b = (v13 && crs === 'EPSG:4326') ? [bb[1], bb[0], bb[3], bb[2]] : bb;
-    var p = { SERVICE: 'WMS', VERSION: caps.ver, REQUEST: 'GetMap', LAYERS: layer, STYLES: '', FORMAT: fmt, TRANSPARENT: 'FALSE', WIDTH: w, HEIGHT: h, BBOX: b.join(',') };
+  }  function caricaImg(url) {
+    return new Promise(function (ok, ko) { var i = new Image(); i.crossOrigin = 'anonymous'; i.onload = function () { ok(i); }; i.onerror = function () { ko(new Error('CORS')); }; i.src = url; });
+  }  function urlGetMap(cp, crs, layers, bb, w, h, trasp) {
+    var v13 = cp.ver >= '1.3', b = (v13 && crs === 'EPSG:4326') ? [bb[1], bb[0], bb[3], bb[2]] : bb;
+    var fmt = cp.formati.indexOf('image/png') >= 0 || !cp.formati.length ? 'image/png' : cp.formati[0];
+    var p = { SERVICE: 'WMS', VERSION: cp.ver, REQUEST: 'GetMap', LAYERS: layers.join(','), STYLES: '', FORMAT: fmt, TRANSPARENT: trasp ? 'TRUE' : 'FALSE', WIDTH: w, HEIGHT: h, BBOX: b.join(',') };
     p[v13 ? 'CRS' : 'SRS'] = crs;
-    var h = caps.href, base = /[?&]$/.test(h) ? h : h + (h.indexOf('?') >= 0 ? '&' : '?');
+    var hh = cp.href, base = /[?&]$/.test(hh) ? hh : hh + (hh.indexOf('?') >= 0 ? '&' : '?');
     return base + Object.keys(p).map(function (k) { return k + '=' + encodeURIComponent(p[k]); }).join('&');
   }
-  function caricaImg(url) {
-    return new Promise(function (ok, ko) { var i = new Image(); i.crossOrigin = 'anonymous'; i.onload = function () { ok(i); }; i.onerror = function () { ko(new Error('CORS')); }; i.src = url; });
-  }
-  /* zona: { lat, lon (centro), larghezza (m), altezza (m) } -> { d, w, h, angoli:[{x,y,lat,lon}] } */
-  function scaricaWms(sorg, urlAltro, layerScelto, zona, avanzamento) {
-    var capsUrl = sorg.id === 'altro' ? urlAltro : sorg.caps;
-    return leggiCaps(capsUrl).then(function (caps) {
-      var crs = CRS_BUONI.filter(function (k) { return caps.crs.indexOf(k) >= 0; })[0];
-      if (!crs) throw new Error('il servizio non offre coordinate UTM 32N, Web Mercator o WGS84');
-      var layer = layerScelto || sorg.layer || (caps.layers[0] && caps.layers[0].nome);
-      if (!layer) throw new Error('nessun livello nel servizio');
-      var fmt = caps.formati.indexOf('image/png') >= 0 || !caps.formati.length ? 'image/png' : caps.formati.indexOf('image/jpeg') >= 0 ? 'image/jpeg' : caps.formati[0];
-      // riquadro nella proiezione del servizio, che contiene la zona richiesta
+  function mercY(lat) { return 6378137 * Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360)); }
+
+  /* Prepara il piano: proiezione comune, riquadro, dimensioni e la lista dei livelli da disegnare.
+     scelta: { sfondo: id, livelli: [{ caps, nome }], wmsAltro: { caps, layer } }  zona: { lat, lon, larghezza, altezza } */
+  function piano(scelta, zona, lato) {
+    var sf = SFONDI.filter(function (x) { return x.id === scelta.sfondo; })[0] || SFONDI[0];
+    var gruppi = {};   // livelli sovrapposti, raggruppati per servizio
+    (scelta.livelli || []).forEach(function (l) { (gruppi[l.caps] = gruppi[l.caps] || []).push(l.nome); });
+    if (scelta.wmsAltro && scelta.wmsAltro.caps) (gruppi[scelta.wmsAltro.caps] = gruppi[scelta.wmsAltro.caps] || []).push(scelta.wmsAltro.layer || '');
+    var urls = Object.keys(gruppi); if (sf.tipo === 'wms') urls.unshift(sf.caps);
+    return Promise.all(urls.map(function (u) { return caps(u).then(function (c) { return { url: u, c: c }; }); })).then(function (lista) {
+      var cp = {}; lista.forEach(function (x) { cp[x.url] = x.c; });
+      // con OpenTopoMap si lavora in Web Mercator (le sue piastrelle), altrimenti in UTM 32N se il servizio lo offre
+      var comuni = CRS_BUONI.filter(function (k) { return lista.every(function (x) { return x.c.crs.indexOf(k) >= 0 || (k === 'EPSG:25832' && x.c.crs.indexOf('EPSG:32632') >= 0); }); });
+      var crs = sf.tipo === 'xyz' ? 'EPSG:3857' : (comuni[0] || 'EPSG:3857');
+      if (lista.some(function (x) { return x.c.crs.indexOf(crs) < 0 && !(crs === 'EPSG:3857' && x.c.crs.indexOf('EPSG:900913') >= 0); }))
+        throw new Error('i livelli scelti non hanno una proiezione in comune con lo sfondo');
       var u = U.daLatLon(zona.lat, zona.lon, 32), hw = zona.larghezza / 2, hh = zona.altezza / 2;
       var ang = [[u.E - hw, u.N + hh], [u.E + hw, u.N + hh], [u.E + hw, u.N - hh], [u.E - hw, u.N - hh]].map(function (q) { var ll = U.aLatLon(32, true, q[0], q[1]); return verso(crs, ll.lat, ll.lon); });
-      var x0 = Math.min.apply(null, ang.map(function (q) { return q[0]; })), x1 = Math.max.apply(null, ang.map(function (q) { return q[0]; }));
-      var y0 = Math.min.apply(null, ang.map(function (q) { return q[1]; })), y1 = Math.max.apply(null, ang.map(function (q) { return q[1]; }));
-      var asp = (x1 - x0) / (y1 - y0), W, H;
-      var lato = Math.min(LATO, Math.max(zona.larghezza, zona.altezza) / 0.35);   // circa 35 cm per pixel, al massimo 3000 px
+      var bb = [Math.min.apply(null, ang.map(function (q) { return q[0]; })), Math.min.apply(null, ang.map(function (q) { return q[1]; })),
+        Math.max.apply(null, ang.map(function (q) { return q[0]; })), Math.max.apply(null, ang.map(function (q) { return q[1]; }))];
+      var asp = (bb[2] - bb[0]) / (bb[3] - bb[1]), W, H;
       if (asp >= 1) { W = Math.round(lato); H = Math.round(lato / asp); } else { H = Math.round(lato); W = Math.round(lato * asp); }
-      var T = 1000, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
-      var cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, W, H);
-      var pezzi = [];
-      for (var py = 0; py < H; py += T) for (var px = 0; px < W; px += T) pezzi.push([px, py, Math.min(T, W - px), Math.min(T, H - py)]);
-      var fatti = 0;
-      return Promise.all(pezzi.map(function (pz) {
-        var bb = [x0 + (x1 - x0) * pz[0] / W, y1 - (y1 - y0) * (pz[1] + pz[3]) / H, x0 + (x1 - x0) * (pz[0] + pz[2]) / W, y1 - (y1 - y0) * pz[1] / H];
-        return caricaImg(urlGetMap(caps, crs, layer, bb, pz[2], pz[3], fmt)).then(function (im) {
-          cx.drawImage(im, pz[0], pz[1], pz[2], pz[3]); fatti++; if (avanzamento) avanzamento(fatti, pezzi.length);
-        });
-      })).then(function () {
-        var cr = sorg.crediti || (layer + ' – ' + (capsUrl.split('/')[2] || ''));
-        cx.font = '600 ' + Math.round(W / 90) + 'px sans-serif'; var tw = cx.measureText(cr).width, pad = W / 200;
-        cx.fillStyle = 'rgba(255,255,255,.85)'; cx.fillRect(W - tw - pad * 3, H - W / 60 - pad * 2, tw + pad * 3, W / 60 + pad * 2);
-        cx.fillStyle = '#222'; cx.textAlign = 'right'; cx.textBaseline = 'bottom'; cx.fillText(cr, W - pad * 1.5, H - pad);
-        var r;
-        try { r = daCanvas(cv); } catch (e) { throw new Error('CORS'); }
-        var angoli = [[0, 0, x0, y1], [W, 0, x1, y1], [W, H, x1, y0], [0, H, x0, y0]].map(function (a) { var ll = daCrs(crs, a[2], a[3]); return { x: a[0], y: a[1], lat: ll.lat, lon: ll.lon }; });
-        r.angoli = angoli; r.crs = crs; r.layer = layer;
-        return r;
+      var strati = [];
+      if (sf.tipo === 'xyz') strati.push({ tipo: 'xyz', sf: sf });
+      if (sf.tipo === 'wms') strati.push({ tipo: 'wms', cp: cp[sf.caps], layers: sf.layers, trasp: false });
+      Object.keys(gruppi).forEach(function (k) {
+        var nomi = gruppi[k].filter(Boolean); if (!nomi.length && cp[k].layers[0]) nomi = [cp[k].layers[0].nome];
+        strati.push({ tipo: 'wms', cp: cp[k], layers: nomi, trasp: true });
       });
+      var crediti = [sf.crediti].concat(Object.keys(gruppi).length ? [REGIONE] : []).filter(Boolean)
+        .filter(function (x, i, a) { return a.indexOf(x) === i; }).join(' · ');
+      return { crs: crs, bb: bb, W: W, H: H, strati: strati, crediti: crediti };
+    });
+  }
+  // piastrelle XYZ (OpenTopoMap) che coprono il riquadro in Web Mercator, con la posizione in pixel
+  function piastrelle(sf, bb, W) {
+    var R = 6378137, giro = 2 * Math.PI * R, mpp = (bb[2] - bb[0]) / W;
+    var z = Math.min(sf.maxz, Math.max(1, Math.round(Math.log2(giro / 256 / mpp))));
+    var n = Math.pow(2, z), dim = giro / n;
+    function tx(X) { return (X + giro / 2) / dim; } function ty(Y) { return (giro / 2 - Y) / dim; }
+    var out = [];
+    for (var x = Math.floor(tx(bb[0])); x <= Math.floor(tx(bb[2])); x++) for (var y = Math.floor(ty(bb[3])); y <= Math.floor(ty(bb[1])); y++) {
+      var X0 = x * dim - giro / 2, Y0 = giro / 2 - y * dim;
+      out.push({ url: sf.url.replace('{z}', z).replace('{x}', x).replace('{y}', y), x: (X0 - bb[0]) / mpp, y: (bb[3] - Y0) / mpp, s: dim / mpp });
+    }
+    return out;
+  }
+  // anteprima veloce: immagini sovrapposte (non serve il permesso del server per salvarle)
+  function anteprima(box, p) {
+    box.innerHTML = '';
+    var bw = box.clientWidth || 800, bh = box.clientHeight || 600, sc0 = Math.min(bw / p.W, bh / p.H);
+    var fr = el('div', 'ed-ante-fr'); fr.style.width = Math.round(p.W * sc0) + 'px'; fr.style.height = Math.round(p.H * sc0) + 'px'; box.appendChild(fr);
+    var w = Math.min(1600, Math.round(p.W * sc0 * (window.devicePixelRatio || 1))), h = Math.round(w * p.H / p.W);
+    p.strati.forEach(function (s) {
+      if (s.tipo === 'xyz') {
+        var lay = el('div', 'ed-ante-l'); fr.appendChild(lay);
+        piastrelle(s.sf, p.bb, w).forEach(function (t) { var i = new Image(); i.src = t.url; i.style.left = (t.x / w * 100) + '%'; i.style.top = (t.y / h * 100) + '%'; i.style.width = (t.s / w * 100) + '%'; lay.appendChild(i); });
+      } else { var i = new Image(); i.className = 'ed-ante-i'; i.src = urlGetMap(s.cp, p.crs, s.layers, p.bb, w, h, s.trasp); fr.appendChild(i); }
+    });
+    var cr = el('span', 'ed-ante-cr', p.crediti); fr.appendChild(cr);
+  }
+  // cartina finale su canvas, pezzo per pezzo
+  function componi(p, avanzamento) {
+    var cv = document.createElement('canvas'); cv.width = p.W; cv.height = p.H;
+    var cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, p.W, p.H);
+    var T = 1000, lavori = [];
+    p.strati.forEach(function (s, si) {
+      if (s.tipo === 'xyz') piastrelle(s.sf, p.bb, p.W).forEach(function (t) { lavori.push({ si: si, url: t.url, x: t.x, y: t.y, w: t.s, h: t.s }); });
+      else for (var py = 0; py < p.H; py += T) for (var px = 0; px < p.W; px += T) {
+        var w = Math.min(T, p.W - px), h = Math.min(T, p.H - py), bb = p.bb;
+        var b = [bb[0] + (bb[2] - bb[0]) * px / p.W, bb[3] - (bb[3] - bb[1]) * (py + h) / p.H, bb[0] + (bb[2] - bb[0]) * (px + w) / p.W, bb[3] - (bb[3] - bb[1]) * py / p.H];
+        lavori.push({ si: si, url: urlGetMap(s.cp, p.crs, s.layers, b, w, h, s.trasp), x: px, y: py, w: w, h: h });
+      }
+    });
+    var fatti = 0, imgs = [];
+    // si scaricano a gruppi di 6 per non sovraccaricare i server
+    function lotto(i) {
+      if (i >= lavori.length) return Promise.resolve();
+      return Promise.all(lavori.slice(i, i + 6).map(function (l, k) {
+        return caricaImg(l.url).then(function (im) { imgs[i + k] = im; fatti++; if (avanzamento) avanzamento(fatti, lavori.length); });
+      })).then(function () { return lotto(i + 6); });
+    }
+    return lotto(0).then(function () {
+      lavori.forEach(function (l, i) { cx.drawImage(imgs[i], l.x, l.y, l.w, l.h); });   // nell'ordine: prima lo sfondo, poi i livelli
+      var W = p.W, H = p.H, cr = p.crediti;
+      cx.font = '600 ' + Math.max(11, Math.round(W / 110)) + 'px sans-serif'; var tw = cx.measureText(cr).width, pad = W / 220, fh = Math.max(11, W / 110);
+      cx.fillStyle = 'rgba(255,255,255,.85)'; cx.fillRect(W - tw - pad * 3, H - fh - pad * 2.4, tw + pad * 3, fh + pad * 2.4);
+      cx.fillStyle = '#222'; cx.textAlign = 'right'; cx.textBaseline = 'bottom'; cx.fillText(cr, W - pad * 1.5, H - pad);
+      var r; try { r = daCanvas(cv); } catch (e) { throw new Error('CORS'); }
+      r.angoli = [[0, 0, p.bb[0], p.bb[3]], [W, 0, p.bb[2], p.bb[3]], [W, H, p.bb[2], p.bb[1]], [0, H, p.bb[0], p.bb[1]]].map(function (a) { var ll = daCrs(p.crs, a[2], a[3]); return { x: a[0], y: a[1], lat: ll.lat, lon: ll.lon }; });
+      return r;
     });
   }
 
@@ -356,19 +417,11 @@
       return b;
     }
     function pCartina(body) {
-      body.appendChild(el('h4', 'ed-tit', 'Dal Geoportale Piemonte'));
-      body.appendChild(el('p', 'ed-txt', 'Scegli il centro e la grandezza della zona: la cartina arriva già georeferenziata, senza punti di controllo.'));
-      var sSel = el('select'); SORGENTI.forEach(function (o) { var x = el('option', null, o.nome); x.value = o.id; sSel.appendChild(x); });
-      sSel.value = geoScelta.sorg; body.appendChild(campoF('Cartografia', sSel));
-      var altro = el('input'); altro.placeholder = 'https://…?service=WMS&request=GetCapabilities'; altro.value = geoScelta.url || '';
-      var altroL = campoF('Indirizzo del servizio WMS', altro); body.appendChild(altroL);
-      var lay = el('input'); lay.placeholder = 'nome del livello (vuoto = il primo)'; lay.value = geoScelta.layer || '';
-      var layL = campoF('Livello', lay); body.appendChild(layL);
-      function mostraAltro() { altroL.hidden = layL.hidden = sSel.value !== 'altro'; }
-      sSel.onchange = function () { geoScelta.sorg = sSel.value; mostraAltro(); }; mostraAltro();
+      body.appendChild(el('h4', 'ed-tit', 'Dal web, già georeferenziata'));
       var centro = el('input'); centro.placeholder = '32T 375000 4983000 oppure 44.99, 7.41';
       if (geoScelta.centro) centro.value = geoScelta.centro;
       else if (c.geo) { var ll0 = U.daPixel(c.geo, c.w / 2, c.h / 2); centro.value = utmTesto(ll0.lat, ll0.lon); }
+      centro.onchange = function () { geoScelta.centro = centro.value; };
       body.appendChild(campoF('Centro della zona', centro));
       var dim = el('div', 'due');
       var lar = el('select'), alt = el('select');
@@ -376,31 +429,90 @@
         [lar, alt].forEach(function (s2) { var o = el('option', null, m >= 1000 ? (m / 1000).toString().replace('.', ',') + ' km' : m + ' m'); o.value = m; s2.appendChild(o); });
       });
       lar.value = geoScelta.lar; alt.value = geoScelta.alt;
+      lar.onchange = function () { geoScelta.lar = +lar.value; }; alt.onchange = function () { geoScelta.alt = +alt.value; };
       dim.appendChild(campoF('Larghezza', lar)); dim.appendChild(campoF('Altezza', alt));
       body.appendChild(dim);
-      var msg = el('p', 'ed-txt muto');
-      var vai = btn(c.img ? 'Sostituisci con questa zona' : 'Prendi questa zona', 'accent', function () {
-        var ll = leggiCoordinate(centro.value, zonaPred);
-        if (!ll) { centro.classList.add('errato'); msg.className = 'ed-txt ko'; msg.textContent = 'Scrivi il centro in UTM (32T 375000 4983000) o lat, lon.'; return; }
-        if (sSel.value === 'altro' && !/^https:\/\//.test(altro.value.trim())) { msg.className = 'ed-txt ko'; msg.textContent = 'Serve un indirizzo https del servizio WMS.'; return; }
-        geoScelta = { sorg: sSel.value, url: altro.value.trim(), layer: lay.value.trim(), centro: centro.value, lar: +lar.value, alt: +alt.value };
-        vai.disabled = true; msg.className = 'ed-txt muto'; msg.textContent = 'Collegamento al servizio…';
-        var sorg = SORGENTI.filter(function (o) { return o.id === sSel.value; })[0];
-        scaricaWms(sorg, geoScelta.url, sSel.value === 'altro' ? geoScelta.layer : null, { lat: ll.lat, lon: ll.lon, larghezza: geoScelta.lar, altezza: geoScelta.alt }, function (n, tot) { msg.textContent = 'Scarico la cartina… ' + n + '/' + tot; })
-          .then(function (r) { applicaGeoportale(r); }, function (e) {
-            vai.disabled = false; msg.className = 'ed-txt ko';
-            msg.textContent = e.message === 'CORS'
-              ? 'Il servizio non permette alle app esterne di scaricare la cartina (blocco del browser). Puoi esportare la zona dal Geoportale come immagine o PDF e caricarla qui sotto.'
-              : 'Non riesco a scaricare la cartina: ' + e.message;
+      var sSel = el('select'); SFONDI.forEach(function (o) { var x = el('option', null, o.nome); x.value = o.id; sSel.appendChild(x); });
+      sSel.value = geoScelta.sfondo; sSel.onchange = function () { geoScelta.sfondo = sSel.value; };
+      body.appendChild(campoF('Sfondo', sSel));
+      body.appendChild(el('span', 'ed-sotto', 'Livelli da sovrapporre (Regione Piemonte)'));
+      SERVIZI.forEach(function (sv) {
+        var d = el('details', 'ed-liv'); var sm = el('summary', null, sv.nome); d.appendChild(sm);
+        var cont = el('div', 'ed-liv-c', 'Caricamento…'); d.appendChild(cont);
+        var scelti = geoScelta.livelli.filter(function (l) { return l.caps === sv.caps; }).length;
+        if (scelti) sm.appendChild(el('b', 'ed-liv-n', ' · ' + scelti));
+        caps(sv.caps).then(function (cp) {
+          cont.innerHTML = '';
+          if (!geoScelta.toccato[sv.id]) {   // la prima volta si propongono i livelli utili (curve, sentieri, edifici, acqua)
+            geoScelta.toccato[sv.id] = true;
+            cp.layers.forEach(function (L, i) { if (i && sv.auto.test(L.titolo + ' ' + L.nome) && !geoScelta.livelli.some(function (x) { return x.caps === sv.caps && x.nome === L.nome; })) geoScelta.livelli.push({ caps: sv.caps, nome: L.nome }); });
+          }
+          cp.layers.forEach(function (L) {
+            var lab = el('label', 'ed-chk'), cb = el('input'); cb.type = 'checkbox';
+            cb.checked = geoScelta.livelli.some(function (x) { return x.caps === sv.caps && x.nome === L.nome; });
+            cb.onchange = function () {
+              geoScelta.livelli = geoScelta.livelli.filter(function (x) { return !(x.caps === sv.caps && x.nome === L.nome); });
+              if (cb.checked) geoScelta.livelli.push({ caps: sv.caps, nome: L.nome });
+              var n = geoScelta.livelli.filter(function (x) { return x.caps === sv.caps; }).length, b0 = sm.querySelector('b');
+              if (b0) b0.remove(); if (n) sm.appendChild(el('b', 'ed-liv-n', ' · ' + n));
+            };
+            lab.appendChild(cb); lab.appendChild(el('span', null, L.titolo)); cont.appendChild(lab);
           });
+          var n = geoScelta.livelli.filter(function (x) { return x.caps === sv.caps; }).length, b0 = sm.querySelector('b');
+          if (b0) b0.remove(); if (n) sm.appendChild(el('b', 'ed-liv-n', ' · ' + n));
+        }, function (e) { cont.textContent = e.message === 'CORS' ? 'Non raggiungibile da qui.' : 'Non disponibile (' + e.message + ').'; d.classList.add('ko'); });
+        body.appendChild(d);
       });
-      body.appendChild(vai); body.appendChild(msg);
+      var dA = el('details', 'ed-liv'); dA.appendChild(el('summary', null, 'Altro servizio WMS (indirizzo)'));
+      var cA = el('div', 'ed-liv-c'); dA.appendChild(cA);
+      var altro = el('input'); altro.placeholder = 'https://…?service=WMS&request=GetCapabilities'; altro.value = geoScelta.wmsAltro.caps || '';
+      var lay = el('input'); lay.placeholder = 'nome del livello (vuoto = il primo)'; lay.value = geoScelta.wmsAltro.layer || '';
+      altro.onchange = lay.onchange = function () { geoScelta.wmsAltro = { caps: altro.value.trim(), layer: lay.value.trim() }; };
+      cA.appendChild(altro); cA.appendChild(lay); body.appendChild(dA);
+      var msg = el('p', 'ed-txt muto');
+      function zona() {
+        var ll = leggiCoordinate(centro.value, zonaPred);
+        if (!ll) { centro.classList.add('errato'); msg.className = 'ed-txt ko'; msg.textContent = 'Scrivi il centro in UTM (32T 375000 4983000) o lat, lon.'; return null; }
+        if (geoScelta.wmsAltro.caps && !/^https:\/\//.test(geoScelta.wmsAltro.caps)) { msg.className = 'ed-txt ko'; msg.textContent = 'L\'indirizzo del servizio WMS deve iniziare con https://'; return null; }
+        geoScelta.centro = centro.value;
+        return { lat: ll.lat, lon: ll.lon, larghezza: geoScelta.lar, altezza: geoScelta.alt };
+      }
+      function errore(e) {
+        msg.className = 'ed-txt ko';
+        msg.textContent = e.message === 'CORS'
+          ? 'Un servizio non permette alle app esterne di scaricare la cartina (blocco del browser). Prova un altro sfondo o togli quel livello, oppure carica un\'immagine o un PDF qui sotto.'
+          : 'Non riesco a preparare la cartina: ' + e.message;
+      }
+      var riga = el('div', 'ed-riga');
+      riga.appendChild(btn('Anteprima', '', function () {
+        var z = zona(); if (!z) return;
+        msg.className = 'ed-txt muto'; msg.textContent = 'Preparo l\'anteprima…';
+        piano(geoScelta, z, LATO).then(function (p) { mostraAnteprima(p); msg.textContent = 'Anteprima sulla cartina: se ti piace premi "Prendi questa zona".'; }, errore);
+      }));
+      var vai = btn(c.img ? 'Sostituisci con questa zona' : 'Prendi questa zona', 'accent', function () {
+        var z = zona(); if (!z) return;
+        vai.disabled = true; msg.className = 'ed-txt muto'; msg.textContent = 'Collegamento ai servizi…';
+        piano(geoScelta, z, LATO).then(function (p) {
+          return componi(p, function (n, tot) { msg.textContent = 'Scarico la cartina… ' + n + '/' + tot; });
+        }).then(function (r) { chiudiAnteprima(); applicaGeoportale(r); }, function (e) { vai.disabled = false; errore(e); });
+      });
+      riga.appendChild(vai);
+      body.appendChild(riga); body.appendChild(msg);
       body.appendChild(el('h4', 'ed-tit', 'Da un file'));
       body.appendChild(el('p', 'ed-txt', 'Un\'immagine (JPG, PNG) oppure il PDF del campo. Meglio se ha la griglia UTM stampata, così la georeferenzi con precisione.'));
       body.appendChild(btn(c.img ? 'Sostituisci con un file…' : 'Carica immagine o PDF…', '', function () { file.click(); }));
       if (c.img) body.appendChild(el('p', 'ed-txt muto', 'Sostituendo la cartina, le aree con coordinate restano al loro posto.'));
     }
-    var geoScelta = { sorg: 'colori', lar: 1200, alt: 1500 };
+    var geoScelta = { sfondo: 'otm', livelli: [], toccato: {}, wmsAltro: {}, lar: 1200, alt: 1500 };
+    var ante = null;
+    function mostraAnteprima(p) {
+      chiudiAnteprima();
+      ante = el('div', 'ed-ante'); mapBox.appendChild(ante);
+      var box2 = el('div', 'ed-ante-box'); ante.appendChild(box2);
+      ante.appendChild(btn('✕ Chiudi anteprima', 'ed-ante-x', chiudiAnteprima));
+      anteprima(box2, p);
+    }
+    function chiudiAnteprima() { if (ante) { ante.remove(); ante = null; } }
     function applicaGeoportale(r) {
       // le aree esistenti restano dove sono nel mondo reale: si ricalcolano dalle loro coordinate
       c.punti.forEach(function (p) { if (p.lat != null) p.fonte = 'coord'; });

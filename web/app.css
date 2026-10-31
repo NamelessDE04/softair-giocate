@@ -321,3 +321,20 @@ input.errato { border-color: var(--ko); }
 .btn.chip.on.s-rossa { background: var(--rossa); border-color: var(--rossa); color: #fff; }
 
 .ed-tit { color: var(--oro); margin: 6px 0 0; font-size: 17px; }
+
+.ed-sotto { color: var(--muto); font-weight: 600; font-size: 15px; margin-top: 4px; }
+.ed-liv { background: var(--pan2); border-radius: 10px; padding: 0 10px; }
+.ed-liv summary { cursor: pointer; padding: 9px 0; font-weight: 600; font-size: 16px; }
+.ed-liv.ko summary { color: var(--muto); }
+.ed-liv-n { color: var(--oro); }
+.ed-liv-c { display: grid; gap: 2px; padding-bottom: 10px; color: var(--muto); font-size: 15px; }
+.ed-liv-c input:not([type=checkbox]) { font-size: 14px; padding: 8px; margin-bottom: 6px; }
+.ed-chk { display: flex; gap: 8px; align-items: center; color: var(--ink); cursor: pointer; padding: 3px 0; }
+.ed-chk input { width: 18px; height: 18px; accent-color: var(--oro); flex: none; }
+.ed-ante { position: absolute; inset: 0; z-index: 6; background: #0b0d09; display: flex; flex-direction: column; padding: 16px; gap: 10px; cursor: default; }
+.ed-ante-box { flex: 1; min-height: 0; display: grid; place-items: center; }
+.ed-ante-fr { position: relative; overflow: hidden; background: #fff; box-shadow: 0 0 0 1px var(--linea); }
+.ed-ante-i, .ed-ante-l { position: absolute; inset: 0; width: 100%; height: 100%; }
+.ed-ante-l img { position: absolute; }
+.ed-ante-cr { position: absolute; right: 4px; bottom: 4px; background: rgba(255,255,255,.85); color: #222; font: 600 11px sans-serif; padding: 2px 6px; }
+.btn.ed-ante-x { align-self: center; }
