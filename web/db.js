@@ -228,13 +228,19 @@
   // ---------- cartine dei campi: campi/{id} con punti e collegamenti, immagine a pezzi in campi/{id}/img/{n}
   var PEZZO = 900000;
   var cacheCampi = {};
-  api.ascoltaCampi = function (cb) { return db.collection('campi').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); }); };
+  // Firestore non accetta liste dentro liste: collegamenti e tracce si salvano come oggetti e qui si riportano a coppie
+  function normalizza(c) {
+    c.link = (c.link || []).map(function (l) { return Array.isArray(l) ? l : [l.a, l.b]; });
+    c.tracce = (c.tracce || []).map(function (tr) { return Object.assign({}, tr, { pts: (tr.pts || []).map(function (p) { return Array.isArray(p) ? p : [p.la, p.lo]; }) }); });
+    return c;
+  }
+  api.ascoltaCampi = function (cb) { return db.collection('campi').onSnapshot(function (qs) { cb(lista(qs).map(normalizza)); }, function () { cb([]); }); };
   api.campoInCache = function (id) { return cacheCampi[id] || null; };
   // campo completo, con l'immagine ricomposta
   api.caricaCampo = function (id) {
     return db.collection('campi').doc(id).get().then(function (s) {
       if (!s.exists) throw new Error('Cartina non trovata');
-      var c = Object.assign({ id: id }, s.data()), vecchio = cacheCampi[id];
+      var c = normalizza(Object.assign({ id: id }, s.data())), vecchio = cacheCampi[id];
       if (vecchio && vecchio.imgVer === c.imgVer && vecchio.img) { c.img = vecchio.img; cacheCampi[id] = c; return c; }
       var n = c.parti || 0, prom = [];
       for (var i = 0; i < n; i++) prom.push(db.collection('campi/' + id + '/img').doc(String(i)).get());
@@ -248,6 +254,8 @@
   // img: dataURL nuovo (o null se l'immagine non è cambiata)
   api.salvaCampo = function (campo, img) {
     var id = campo.id, dati = JSON.parse(JSON.stringify(campo)); delete dati.id; delete dati.img;
+    dati.link = (dati.link || []).map(function (l) { return Array.isArray(l) ? { a: l[0], b: l[1] } : l; });
+    dati.tracce = (dati.tracce || []).map(function (tr) { return Object.assign({}, tr, { pts: (tr.pts || []).map(function (p) { return Array.isArray(p) ? { la: p[0], lo: p[1] } : p; }) }); });
     var scritture = [];
     if (img) {
       var pezzi = []; for (var i = 0; i < img.length; i += PEZZO) pezzi.push(img.slice(i, i + PEZZO));
@@ -257,7 +265,7 @@
       for (var j = pezzi.length; j < vecchi; j++) scritture.push(db.collection('campi/' + id + '/img').doc(String(j)).delete());
     }
     return Promise.all(scritture).then(function () { return db.collection('campi').doc(id).set(dati); }).then(function () {
-      var c = Object.assign({ id: id }, dati); c.img = img || (cacheCampi[id] && cacheCampi[id].img) || ''; cacheCampi[id] = c; return c;
+      var c = normalizza(Object.assign({ id: id }, dati)); c.img = img || (cacheCampi[id] && cacheCampi[id].img) || ''; cacheCampi[id] = c; return c;
     });
   };
   api.eliminaCampo = function (id, parti) {

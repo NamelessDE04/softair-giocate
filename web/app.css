@@ -356,3 +356,5 @@ input.errato { border-color: var(--ko); }
 .ed-tema { display: grid; gap: 4px; padding: 6px; border-radius: 10px; border: 2px solid var(--linea); background: var(--pan2); color: var(--ink); cursor: pointer; font: 600 14px var(--txt); text-align: left; }
 .ed-tema img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; background: #000; }
 .ed-tema.on { border-color: var(--oro); }
+
+.ed-chk.spento { opacity: .45; }

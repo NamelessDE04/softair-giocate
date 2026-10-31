@@ -314,6 +314,11 @@
       if (!st) return;
       var R = st.regole, k = Math.max(.72, Math.min(1, sc / .6)) / sc, s = '';
       var rMin = 24 * k;
+      // sentieri importati dalle tracce GPS
+      tracceD().forEach(function (d) {
+        s += '<path d="' + d + '" fill="none" stroke="#000" stroke-opacity=".4" stroke-width="' + (5 * k) + '" stroke-linejoin="round" stroke-linecap="round"/>';
+        s += '<path d="' + d + '" fill="none" stroke="#e9dcb8" stroke-opacity=".9" stroke-width="' + (2.2 * k) + '" stroke-dasharray="' + (7 * k) + ' ' + (4 * k) + '" stroke-linejoin="round" stroke-linecap="round"/>';
+      });
       // collegamenti: grigi tratteggiati; pieni se entrambi i capi sono della stessa fazione; tratteggio colorato in movimento se ne tiene uno solo
       campo.link.forEach(function (l) {
         var a = punto(campo, l[0]), b = punto(campo, l[1]), pa = pxP(campo, a), pb = pxP(campo, b);
@@ -376,6 +381,14 @@
         s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + (5.5 * k) + '" fill="' + col(b.team) + '" stroke="#fff" stroke-width="' + (1.6 * k) + '"/>';
       });
       svg.innerHTML = s;
+    }
+    var _tracce = null;
+    function tracceD() {
+      if (_tracce) return _tracce;
+      _tracce = !campo.geo ? [] : (campo.tracce || []).map(function (tr) {
+        return tr.pts.map(function (p, i) { var q = px(campo, p[0], p[1]); return (i ? 'L' : 'M') + q.x.toFixed(1) + ' ' + q.y.toFixed(1); }).join('');
+      });
+      return _tracce;
     }
     function torre(x, y, k) {
       var h = 16 * k;

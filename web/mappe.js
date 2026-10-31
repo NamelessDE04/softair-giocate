@@ -235,10 +235,68 @@
     });
   }
 
+  // ---------- file GPS: punti (GPX wpt, WPT OziExplorer, KML Placemark) e tracce (GPX trk/rte, KML LineString)
+  function leggiGps(file) {
+    return file.text().then(function (t) {
+      var punti = [], tracce = [], nome = file.name.replace(/\.[^.]+$/, '');
+      var testa = t.slice(0, 400).toLowerCase();
+      if (testa.indexOf('<gpx') >= 0 || testa.indexOf('<kml') >= 0 || /\.(gpx|kml)$/i.test(file.name)) {
+        var x = new DOMParser().parseFromString(t, 'text/xml');
+        if (x.getElementsByTagName('parsererror').length) throw new Error('file non leggibile');
+        var figlio = function (e, tag) { var f = e.getElementsByTagName(tag)[0]; return f ? f.textContent.trim() : ''; };
+        Array.prototype.forEach.call(x.getElementsByTagName('wpt'), function (w) {
+          punti.push({ nome: figlio(w, 'name') || 'Punto', lat: +w.getAttribute('lat'), lon: +w.getAttribute('lon') });
+        });
+        [['trk', 'trkpt'], ['rte', 'rtept']].forEach(function (tt) {
+          Array.prototype.forEach.call(x.getElementsByTagName(tt[0]), function (tr, i) {
+            var pts = Array.prototype.map.call(tr.getElementsByTagName(tt[1]), function (p) { return [+p.getAttribute('lat'), +p.getAttribute('lon')]; });
+            if (pts.length > 1) tracce.push({ nome: figlio(tr, 'name') || (nome + (i ? ' ' + (i + 1) : '')), pts: pts });
+          });
+        });
+        Array.prototype.forEach.call(x.getElementsByTagName('Placemark'), function (pm) {
+          var n = figlio(pm, 'name');
+          var pt = pm.getElementsByTagName('Point')[0], ls = pm.getElementsByTagName('LineString')[0];
+          function coo(e) { return figlio(e, 'coordinates').split(/\s+/).filter(Boolean).map(function (q) { var v = q.split(','); return [+v[1], +v[0]]; }); }
+          if (pt) { var c0 = coo(pt)[0]; if (c0) punti.push({ nome: n || 'Punto', lat: c0[0], lon: c0[1] }); }
+          if (ls) { var pts = coo(ls); if (pts.length > 1) tracce.push({ nome: n || nome, pts: pts }); }
+        });
+      } else {
+        // WPT di OziExplorer: righe "numero,nome,lat,lon,..."
+        t.split(/\r?\n/).forEach(function (r) {
+          var v = r.split(','); if (v.length < 4) return;
+          var la = parseFloat(v[2]), lo = parseFloat(v[3]);
+          if (isFinite(la) && isFinite(lo) && Math.abs(la) <= 90 && Math.abs(lo) <= 180 && /^\s*-?\d/.test(v[2])) punti.push({ nome: v[1].trim() || 'Punto', lat: la, lon: lo });
+        });
+      }
+      punti = punti.filter(function (p) { return isFinite(p.lat) && isFinite(p.lon); });
+      tracce.forEach(function (tr) { tr.pts = semplifica(tr.pts.filter(function (p) { return isFinite(p[0]) && isFinite(p[1]); }), 1.5); });
+      return { punti: punti, tracce: tracce.filter(function (tr) { return tr.pts.length > 1; }) };
+    });
+  }
+  // Douglas-Peucker in metri: toglie i punti superflui di una traccia (tolleranza tol)
+  function semplifica(pts, tol) {
+    if (pts.length < 3) return pts;
+    var la0 = pts[0][0] * Math.PI / 180, kx = Math.cos(la0) * 111320, ky = 110540;
+    var xy = pts.map(function (p) { return [p[1] * kx, p[0] * ky]; }), tieni = new Uint8Array(pts.length);
+    tieni[0] = tieni[pts.length - 1] = 1;
+    var pila = [[0, pts.length - 1]];
+    while (pila.length) {
+      var seg = pila.pop(), a = seg[0], b = seg[1], dmax = 0, idx = -1;
+      var ax = xy[a][0], ay = xy[a][1], bx = xy[b][0], by = xy[b][1], dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy;
+      for (var i = a + 1; i < b; i++) {
+        var u = L ? ((xy[i][0] - ax) * dx + (xy[i][1] - ay) * dy) / L : 0; u = Math.max(0, Math.min(1, u));
+        var d = Math.hypot(xy[i][0] - ax - u * dx, xy[i][1] - ay - u * dy);
+        if (d > dmax) { dmax = d; idx = i; }
+      }
+      if (dmax > tol) { tieni[idx] = 1; pila.push([a, idx], [idx, b]); }
+    }
+    return pts.filter(function (p, i) { return tieni[i]; }).map(function (p) { return [Math.round(p[0] * 1e6) / 1e6, Math.round(p[1] * 1e6) / 1e6]; });
+  }
+
   /* opts: { campo (completo o null), onSalva(campo, imgNuova) -> Promise<campo>, onElimina(campo) -> Promise, onChiudi() } */
   function apri(box, opts) {
     var c = opts.campo ? JSON.parse(JSON.stringify(opts.campo)) : { id: null, nome: '', w: 0, h: 0, img: '', geo: null, mPerPx: null, controllo: [], punti: [], link: [] };
-    c.controllo = c.controllo || []; c.punti = c.punti || []; c.link = c.link || [];
+    c.controllo = c.controllo || []; c.punti = c.punti || []; c.link = c.link || []; c.tracce = c.tracce || [];
     var imgNuova = null, modificato = false, tab = c.img ? 'aree' : 'cartina', sel = null, selCp = null, linkDa = null, zonaPred = 32;
     box.innerHTML = '';
     var root = el('div', 'ed'); box.appendChild(root);
@@ -255,6 +313,27 @@
     var side = el('aside', 'ed-side');
     root.appendChild(mapBox); root.appendChild(side);
     var file = el('input'); file.type = 'file'; file.accept = 'image/*,application/pdf,.pdf'; file.hidden = true; root.appendChild(file);
+    var fileGps = el('input'); fileGps.type = 'file'; fileGps.accept = '.gpx,.wpt,.kml,application/gpx+xml,application/vnd.google-earth.kml+xml,text/plain'; fileGps.hidden = true; root.appendChild(fileGps);
+    var importa = null;   // file GPS letto e in attesa di conferma: { punti, tracce, scelti, conTracce }
+    fileGps.onchange = function () {
+      var f = fileGps.files[0]; fileGps.value = ''; if (!f) return;
+      leggiGps(f).then(function (r) {
+        if (!r.punti.length && !r.tracce.length) { alert('Nel file non ho trovato punti né tracce.'); return; }
+        r.punti.forEach(function (p) {
+          var q = U.aPixel(c.geo, p.lat, p.lon); p.x = q.x; p.y = q.y;
+          p.fuori = q.x < 0 || q.y < 0 || q.x > c.w || q.y > c.h;
+          p.scelto = !p.fuori; p.tipo = 'base';
+        });
+        importa = r; importa.conTracce = true;
+        if (!r.punti.length) { aggiungiTracce(r.tracce); importa = null; return; }
+        tab = 'aree'; sel = null; disegna(); pannello();
+      }, function (e) { alert('Non riesco a leggere il file: ' + (e.message || e)); });
+    };
+    function aggiungiTracce(trs) {
+      trs.forEach(function (tr) { c.tracce.push({ id: idNuovo(), nome: tr.nome, pts: tr.pts }); });
+      cambiato();
+    }
+    function apriGps() { if (!c.geo) { alert('Prima la cartina deve essere georeferenziata (scheda 2 Coordinate, o presa dal web).'); return; } fileGps.click(); }
 
     // ---------- georeferenziazione e coordinate dei punti
     function ricalcola() {
@@ -353,6 +432,11 @@
     function disegna() {
       if (!c.img) { svg.innerHTML = ''; return; }
       var k = 1 / sc, s = '';
+      if (c.geo) c.tracce.forEach(function (tr) {
+        var d = tr.pts.map(function (p, i) { var q = U.aPixel(c.geo, p[0], p[1]); return (i ? 'L' : 'M') + q.x.toFixed(1) + ' ' + q.y.toFixed(1); }).join('');
+        s += '<path d="' + d + '" fill="none" stroke="#000" stroke-opacity=".45" stroke-width="' + (6 * k) + '" stroke-linejoin="round"/>';
+        s += '<path d="' + d + '" fill="none" stroke="#ff9f1c" stroke-width="' + (3 * k) + '" stroke-dasharray="' + (8 * k) + ' ' + (5 * k) + '" stroke-linejoin="round"/>';
+      });
       c.link.forEach(function (l) {
         var a = c.punti.filter(function (p) { return p.id === l[0]; })[0], b = c.punti.filter(function (p) { return p.id === l[1]; })[0];
         if (!a || !b) return;
@@ -437,6 +521,16 @@
         });
         body.appendChild(temi);
         body.appendChild(el('p', 'ed-txt muto', 'Lo stile cambia solo la mappa che vedono i giocatori nell\'app; qui nell\'editor resta la cartina originale.'));
+      }
+      if (c.img) {
+        body.appendChild(el('h4', 'ed-tit', 'Sentieri da tracce GPS'));
+        body.appendChild(el('p', 'ed-txt', 'Cammina il percorso con il GPS (o un\'app come Gaia, OsmAnd, Wikiloc) e importa la traccia: compare come sentiero sulla mappa di gioco.'));
+        body.appendChild(btn('Importa traccia (GPX, KML)…', '', apriGps));
+        c.tracce.forEach(function (tr, i) {
+          var r0 = el('div', 'ed-riga'), n = el('input'); n.value = tr.nome; n.oninput = function () { tr.nome = n.value; modificato = true; };
+          r0.appendChild(n); r0.appendChild(btn('✕', 'icon', function () { c.tracce.splice(i, 1); cambiato(); }));
+          body.appendChild(r0);
+        });
       }
       body.appendChild(el('h4', 'ed-tit', 'Dal web, già georeferenziata'));
       var centro = el('input'); centro.placeholder = '32T 375000 4983000 oppure 44.99, 7.41';
@@ -586,6 +680,7 @@
       if (c.geo) body.appendChild(el('p', 'ed-txt muto', 'Scala: 1 pixel = ' + c.mPerPx.toFixed(2) + ' m. Muovendo il mouse sulla cartina vedi le coordinate in basso.'));
     }
     function pAree(body) {
+      if (importa) return pImporta(body);
       var p = c.punti.filter(function (x) { return x.id === sel; })[0];
       if (p) {
         var f = el('div', 'ed-form');
@@ -632,7 +727,8 @@
         f.appendChild(az);
         body.appendChild(f);
       } else {
-        body.appendChild(el('p', 'ed-txt', 'Clicca sulla cartina dove vuoi un\'area, oppure creala dalle coordinate.'));
+        body.appendChild(el('p', 'ed-txt', 'Clicca sulla cartina dove vuoi un\'area, oppure creala dalle coordinate o da un file del GPS.'));
+        body.appendChild(btn('Importa punti dal GPS (GPX, WPT, KML)…', '', apriGps));
         var nuovo = el('div', 'ed-riga'), co2 = el('input'); co2.placeholder = c.geo ? '32T 375000 4983000' : 'Serve la georeferenziazione'; co2.disabled = !c.geo;
         nuovo.appendChild(co2);
         nuovo.appendChild(btn('Aggiungi', '', function () {
@@ -656,6 +752,35 @@
         });
       }
       aggiornaLista();
+    }
+    function pImporta(body) {
+      var r = importa;
+      body.appendChild(el('h4', 'ed-tit', 'Punti nel file: ' + r.punti.length));
+      var fuori = r.punti.filter(function (p) { return p.fuori; }).length;
+      if (fuori) body.appendChild(el('p', 'ed-txt muto', fuori + ' sono fuori dalla cartina e non si possono aggiungere.'));
+      var tipo = el('select'); TIPI.filter(function (o) { return !conFazione(o[0]); }).forEach(function (o) { var x = el('option', null, o[1]); x.value = o[0]; tipo.appendChild(x); });
+      tipo.value = 'base'; body.appendChild(campoF('Come tipo di area (lo cambi dopo, area per area)', tipo));
+      var lista = el('div', 'ed-lista');
+      r.punti.forEach(function (p) {
+        var lab = el('label', 'ed-chk' + (p.fuori ? ' spento' : '')), cb = el('input'); cb.type = 'checkbox'; cb.checked = p.scelto; cb.disabled = p.fuori;
+        cb.onchange = function () { p.scelto = cb.checked; disegna(); };
+        lab.appendChild(cb); lab.appendChild(el('span', null, p.nome)); lista.appendChild(lab);
+      });
+      body.appendChild(lista);
+      if (r.tracce.length) {
+        var lt = el('label', 'ed-chk'), ct = el('input'); ct.type = 'checkbox'; ct.checked = r.conTracce; ct.onchange = function () { r.conTracce = ct.checked; };
+        lt.appendChild(ct); lt.appendChild(el('span', null, 'Aggiungi anche ' + r.tracce.length + (r.tracce.length > 1 ? ' tracce' : ' traccia') + ' come sentieri')); body.appendChild(lt);
+      }
+      var az = el('div', 'ed-riga');
+      az.appendChild(btn('Annulla', '', function () { importa = null; disegna(); pannello(); }));
+      az.appendChild(btn('Aggiungi ' + r.punti.filter(function (p) { return p.scelto; }).length + ' aree', 'accent', function () {
+        r.punti.filter(function (p) { return p.scelto && !p.fuori; }).forEach(function (p) {
+          c.punti.push({ id: idNuovo(), nome: p.nome, tipo: tipo.value, x: p.x, y: p.y, lat: p.lat, lon: p.lon, raggio: 30, fonte: 'coord' });
+        });
+        if (r.conTracce && r.tracce.length) r.tracce.forEach(function (tr) { c.tracce.push({ id: idNuovo(), nome: tr.nome, pts: tr.pts }); });
+        importa = null; cambiato();
+      }));
+      body.appendChild(az);
     }
     function pLink(body) {
       body.appendChild(el('p', 'ed-txt', 'Due aree collegate sono nella stessa rete radio: si può conquistare un\'area solo se è collegata a una già tenuta. Clicca un\'area, poi le aree da collegare; cliccando di nuovo un collegamento esistente lo togli.'));
@@ -701,6 +826,7 @@
           fazione: conFazione(p.tipo) ? (p.fazione || null) : null,
           nomi: { blu: (p.nomi && p.nomi.blu || '').trim() || null, rossa: (p.nomi && p.nomi.rossa || '').trim() || null } }; }),
         link: c.link.map(function (l) { return [l[0], l[1]]; }),
+        tracce: c.tracce.map(function (tr) { return { id: tr.id, nome: (tr.nome || '').trim() || 'Sentiero', pts: tr.pts.map(function (p) { return { la: p[0], lo: p[1] }; }) }; }),
         tema: c.tema || 'seppia',
         parti: c.parti || 0, imgVer: c.imgVer || null, aggiornato: Date.now()
       };
