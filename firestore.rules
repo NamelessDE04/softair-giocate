@@ -70,6 +70,11 @@ service cloud.firestore {
       allow delete: if perm('giocatori');
     }
 
+    // Combat a scenari (PCS): li prepara chi organizza
+    match /scenari/{id} {
+      allow read, write: if perm('conflitti');
+    }
+
     // Cartine dei campi (aree e collegamenti) e immagine divisa a pezzi
     match /campi/{id} {
       allow read: if signed();

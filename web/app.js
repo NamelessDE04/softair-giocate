@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.14.1';
+  var VERSIONE = '0.15';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -64,7 +64,7 @@
   function visibile(da, perm) { return P(perm) || da == null || Date.now() >= da; }
 
   // ---------- dati condivisi
-  var D = { team: [], conflitti: [], adesioni: {}, contatti: {}, campi: [] };
+  var D = { team: [], conflitti: [], adesioni: {}, contatti: {}, campi: [], scenari: [] };
   var stopAdesioni = {};
   function teamDi(tid) { return D.team.filter(function (t) { return t.id === tid; })[0]; }
   function miaAdesione(cid) { var u = S.stato().user; return (D.adesioni[cid] || []).filter(function (a) { return a.id === u.uid; })[0]; }
@@ -92,7 +92,7 @@
     app.innerHTML = ''; window.scrollTo(0, 0);
     $('pieno').hidden = true; $('pieno').innerHTML = '';
     document.body.classList.remove('a-pieno');
-    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, radio: pagRadio, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva }[c.v];
+    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva }[c.v];
     (r || home)(c.p);
   }
   function aPieno() { document.body.classList.add('a-pieno'); var p = $('pieno'); p.hidden = false; p.innerHTML = ''; return p; }
@@ -784,6 +784,17 @@
         app.appendChild(r);
       });
     }
+    if (P('conflitti')) {
+      app.appendChild(el('h3', 'sez', 'Combat a scenari (PCS)'));
+      app.appendChild(bottone('+ Nuovo scenario', 'accent', function () { vai('scenario', null); }));
+      D.scenari.slice().sort(function (a, b) { return (b.data || '').localeCompare(a.data || ''); }).forEach(function (sc) {
+        var r = el('button', 'riga-lista'); r.type = 'button';
+        r.appendChild(el('b', null, (sc.gen && sc.gen.operazione) || 'Scenario senza nome'));
+        r.appendChild(el('small', null, (sc.squadra || 'Squadra') + ' · ' + (sc.tappe || []).length + ' tappe' + (sc.data ? ' · ' + sc.data.split('-').reverse().join('/') : '')));
+        r.onclick = function () { vai('scenario', sc.id); };
+        app.appendChild(r);
+      });
+    }
     if (P('mappe')) {
       app.appendChild(el('h3', 'sez', 'Cartine'));
       app.appendChild(bottone('+ Nuova cartina', 'accent', function () { vai('mappa', null); }));
@@ -1368,6 +1379,148 @@
   }
   var qrInSospeso = null;
 
+  // ================= COMBAT A SCENARI (PCS)
+  function pagScenario(id) {
+    var PC = window.AC_PCS, vecchio = D.scenari.filter(function (x) { return x.id === id; })[0];
+    testata(vecchio ? 'Scenario PCS' : 'Nuovo scenario PCS');
+    if (!P('conflitti')) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
+    var nuovaSk = function () { var o = {}; PC.SKILL.forEach(function (k) { o[k[0]] = 30; }); return o; };
+    var sc = vecchio ? JSON.parse(JSON.stringify(vecchio)) : { squadra: '', data: locale(Date.now() + 7 * GIORNO).slice(0, 10), tema: 'auto', campo: '', tappe: [{ settore: 'Settore 1', durata: 45, skill: nuovaSk() }], seme: Math.floor(Math.random() * 1e9) };
+    var form = el('div', 'modulo'); app.appendChild(form);
+    form.appendChild(el('p', 'hint', 'Indica i settori in ordine e, per ogni tappa, quanto deve pesare ogni abilità. Il resto (storia, obiettivi, punteggi, difensori, materiale) lo genera l\'app. Si stampa e si usa anche senza app.'));
+    var sq = el('input'); sq.value = sc.squadra || ''; sq.placeholder = 'es. ASD Tauri – squadra Alfa'; sq.setAttribute('list', 'pcsTeam');
+    var dl = el('datalist'); dl.id = 'pcsTeam'; D.team.forEach(function (t) { var o = el('option'); o.value = t.nome; dl.appendChild(o); }); form.appendChild(dl);
+    var dt = el('input'); dt.type = 'date'; dt.value = sc.data || '';
+    var due = el('div', 'due'); due.appendChild(campoForm('Squadra', sq)); due.appendChild(campoForm('Data', dt)); form.appendChild(due);
+    var tema = select(PC.TEMI, sc.tema || 'auto');
+    var campoS = select([['', 'Nessuna (settori solo a nome)']].concat(D.campi.map(function (x) { return [x.id, x.nome]; })), sc.campo || '');
+    var due2 = el('div', 'due'); due2.appendChild(campoForm('Tema', tema)); due2.appendChild(campoForm('Cartina (facoltativa)', campoS)); form.appendChild(due2);
+    form.appendChild(el('h3', 'sez', 'Tappe'));
+    var tBox = el('div', 'pcs-tappe'); form.appendChild(tBox);
+    function disegnaTappe() {
+      tBox.innerHTML = '';
+      var cm = campoMeta(campoS.value);
+      sc.tappe.forEach(function (t, i) {
+        var k = el('div', 'pcs-tappa');
+        var h = el('div', 'pcs-th'); h.appendChild(el('b', null, 'Tappa ' + (i + 1)));
+        if (i > 0) h.appendChild(bottone('↑', 'icon', function () { var x = sc.tappe.splice(i, 1)[0]; sc.tappe.splice(i - 1, 0, x); disegnaTappe(); }));
+        if (sc.tappe.length > 1) h.appendChild(bottone('✕', 'icon', function () { sc.tappe.splice(i, 1); disegnaTappe(); }));
+        k.appendChild(h);
+        var nome = el('input'); nome.value = t.settore || ''; nome.placeholder = 'es. Settore Baracche'; nome.oninput = function () { t.settore = nome.value; };
+        var dur = select([['30', '30 min'], ['45', '45 min'], ['60', '60 min'], ['90', '90 min']], String(t.durata || 45)); dur.onchange = function () { t.durata = +dur.value; };
+        var r1 = el('div', 'due'); r1.appendChild(campoForm('Settore', nome)); r1.appendChild(campoForm('Durata', dur)); k.appendChild(r1);
+        if (cm) {
+          var ar = select([['', '—']].concat((cm.punti || []).map(function (p) { return [p.id, p.nome]; })), t.area || '');
+          ar.onchange = function () { t.area = ar.value || null; };
+          k.appendChild(campoForm('Area del settore sulla cartina (per le coordinate)', ar));
+        }
+        var bars = el('div', 'pcs-bars');
+        PC.SKILL.forEach(function (s0) {
+          var row = el('label', 'pcs-bar'), v = (t.skill || {})[s0[0]] || 0;
+          var rg = el('input'); rg.type = 'range'; rg.min = 0; rg.max = 100; rg.step = 5; rg.value = v;
+          var val = el('b', null, String(v));
+          rg.oninput = function () { t.skill[s0[0]] = +rg.value; val.textContent = rg.value; row.classList.toggle('zero', +rg.value === 0); };
+          row.appendChild(el('span', null, s0[1])); row.appendChild(rg); row.appendChild(val);
+          if (!v) row.classList.add('zero');
+          bars.appendChild(row);
+        });
+        k.appendChild(bars);
+        tBox.appendChild(k);
+      });
+      tBox.appendChild(bottone('+ Aggiungi tappa', 'link', function () { sc.tappe.push({ settore: 'Settore ' + (sc.tappe.length + 1), durata: 45, skill: nuovaSk() }); disegnaTappe(); }));
+    }
+    campoS.onchange = function () { sc.campo = campoS.value; disegnaTappe(); };
+    disegnaTappe();
+    var out = el('div', 'pcs-out'); app.appendChild(out);
+    function leggi() {
+      sc.squadra = sq.value.trim(); sc.data = dt.value; sc.tema = tema.value; sc.campo = campoS.value;
+      sc.tappe.forEach(function (t, i) { if (!t.settore) t.settore = 'Settore ' + (i + 1); });
+    }
+    function genera(nuovo) { leggi(); if (nuovo) sc.seme = Math.floor(Math.random() * 1e9); sc.gen = PC.genera(sc); mostraDoc(); }
+    function mostraDoc() {
+      out.innerHTML = '';
+      if (!sc.gen) return;
+      var cm = campoMeta(sc.campo);
+      out.appendChild(el('h3', 'sez', sc.gen.operazione));
+      var az = el('div', 'riga2');
+      az.appendChild(bottone('Altra versione', '', function () { genera(true); }));
+      az.appendChild(bottone('Stampa il book della squadra', 'accent', function () { stampa('book'); }));
+      az.appendChild(bottone('Stampa il dossier organizzazione', '', function () { stampa('dossier'); }));
+      out.appendChild(az);
+      out.appendChild(docBook(sc, cm)); out.appendChild(docDossier(sc, cm));
+    }
+    function stampa(q) { document.body.classList.add('stampa-pcs'); document.body.setAttribute('data-stampa', q); window.print(); setTimeout(function () { document.body.classList.remove('stampa-pcs'); document.body.removeAttribute('data-stampa'); }, 500); }
+    var barra = el('div', 'riga2 fisso');
+    var bGen = bottone(sc.gen ? 'Rigenera con queste barre' : 'Genera lo scenario', 'accent big', function () { genera(false); bGen.textContent = 'Rigenera con queste barre'; });
+    barra.appendChild(bGen);
+    barra.appendChild(bottone('Salva', '', function () {
+      leggi(); if (!sc.gen) sc.gen = PC.genera(sc);
+      S.salvaScenario(sc).then(function (nid) { sc.id = nid; toast('Scenario salvato'); if (!vecchio) sostituisci('scenario', nid); }, errore);
+    }));
+    if (vecchio) barra.appendChild(bottone('Elimina', 'pericolo', function () { if (confirm('Eliminare lo scenario?')) S.eliminaScenario(vecchio.id).then(function () { indietro(); }, errore); }));
+    app.appendChild(barra);
+    if (sc.gen) mostraDoc();
+  }
+  function coordArea(cm, id) { var p = cm && (cm.punti || []).filter(function (x) { return x.id === id; })[0]; return p && p.lat != null ? window.AC_MAPPE.utmTesto(p.lat, p.lon) : ''; }
+  function docBook(sc, cm) {
+    var g = sc.gen, d = el('article', 'pcs-doc book');
+    var cop = el('header', 'pcs-cop');
+    cop.appendChild(el('small', null, 'COMBAT A SCENARI · BOOK DELLA SQUADRA'));
+    cop.appendChild(el('h1', null, g.operazione.toUpperCase()));
+    cop.appendChild(el('p', null, (sc.squadra || 'Squadra') + (sc.data ? ' · ' + sc.data.split('-').reverse().join('/') : '') + ' · ' + g.tappe.length + ' tappe · ' + g.totale + ' punti in palio'));
+    d.appendChild(cop);
+    d.appendChild(el('h2', null, 'Prefazione'));
+    d.appendChild(el('p', 'pcs-pref', g.prefazione));
+    d.appendChild(el('h2', null, 'Regole'));
+    var ul = el('ul'); window.AC_PCS.REGOLE.forEach(function (x) { ul.appendChild(el('li', null, x)); }); d.appendChild(ul);
+    g.tappe.forEach(function (t) {
+      var s = el('section', 'pcs-tap');
+      s.appendChild(el('h2', null, 'Tappa ' + t.n + ' · ' + t.settore));
+      var info = t.durata + ' minuti · ' + t.punti + ' punti'; var co = coordArea(cm, t.area); if (co) info += ' · UTM ' + co;
+      s.appendChild(el('p', 'pcs-meta', info));
+      s.appendChild(el('p', null, t.briefing));
+      t.obiettivi.forEach(function (o) {
+        var b = el('div', 'pcs-obj t-' + o.tipo);
+        var h = el('div', 'pcs-obj-h'); h.appendChild(el('span', 'pcs-tipo', o.tipo.toUpperCase())); h.appendChild(el('b', null, o.titolo)); h.appendChild(el('span', 'pcs-pt', o.punti + ' pt'));
+        b.appendChild(h); b.appendChild(el('p', null, o.testo)); s.appendChild(b);
+      });
+      d.appendChild(s);
+    });
+    return d;
+  }
+  function docDossier(sc, cm) {
+    var g = sc.gen, d = el('article', 'pcs-doc dossier');
+    var cop = el('header', 'pcs-cop');
+    cop.appendChild(el('small', null, 'DOSSIER ORGANIZZAZIONE · NON CONSEGNARE ALLA SQUADRA'));
+    cop.appendChild(el('h1', null, g.operazione.toUpperCase()));
+    cop.appendChild(el('p', null, (sc.squadra || 'Squadra') + ' · nemico: ' + g.nemico));
+    d.appendChild(cop);
+    g.tappe.forEach(function (t) {
+      var s = el('section', 'pcs-tap');
+      var co = coordArea(cm, t.area);
+      s.appendChild(el('h2', null, 'Tappa ' + t.n + ' · ' + t.settore + (co ? ' · UTM ' + co : '')));
+      s.appendChild(el('h3', null, 'Difensori (' + t.difensori.length + ')'));
+      var tb = el('table', 'pcs-tab'), h = el('tr'); ['Ruolo', 'Dove', 'Compito'].forEach(function (x) { h.appendChild(el('th', null, x)); }); tb.appendChild(h);
+      t.difensori.forEach(function (x) { var r = el('tr'); [x.ruolo, x.posizione, x.compito].forEach(function (y) { r.appendChild(el('td', null, y)); }); tb.appendChild(r); });
+      s.appendChild(tb);
+      s.appendChild(el('h3', null, 'Obiettivi: come si verificano'));
+      var to = el('table', 'pcs-tab'), h2 = el('tr'); ['Obiettivo', 'Verifica', 'Soluzione', 'Punti', 'Fatto'].forEach(function (x) { h2.appendChild(el('th', null, x)); }); to.appendChild(h2);
+      t.obiettivi.forEach(function (o) {
+        var r = el('tr'); [o.tipo.toUpperCase() + ' · ' + o.titolo + ' (' + o.skillNome + ', liv. ' + o.livello + ')', o.verifica, o.soluzione || '—', String(o.punti), ''].forEach(function (y) { r.appendChild(el('td', null, y)); });
+        to.appendChild(r);
+      });
+      var rt = el('tr', 'pcs-tot'); ['Totale tappa', '', '', String(t.punti), ''].forEach(function (y) { rt.appendChild(el('td', null, y)); }); to.appendChild(rt);
+      s.appendChild(to);
+      if (t.materiale.length) {
+        s.appendChild(el('h3', null, 'Materiale da preparare'));
+        var ul = el('ul', 'pcs-check'); t.materiale.forEach(function (m) { ul.appendChild(el('li', null, '☐ ' + m)); }); s.appendChild(ul);
+      }
+      d.appendChild(s);
+    });
+    d.appendChild(el('p', 'pcs-meta', 'Totale scenario: ' + g.totale + ' punti · tempo previsto: ' + g.tappe.reduce(function (a, t) { return a + t.durata; }, 0) + ' minuti più gli spostamenti.'));
+    return d;
+  }
+
   // ================= MAGLIA RADIO
   var VIETATE = [[433.05, 434.79, 'LPD'], [446.0, 446.2, 'PMR446']];
   var TONI = { ctcss: { blu: '88.5', rossa: '110.9' }, dcs: { blu: 'D125N', rossa: 'D243N' } };
@@ -1478,7 +1631,7 @@
               mr.appendChild(el('span', null, 'Marconista ' + (j + 1))); mr.appendChild(sel);
             });
             b.appendChild(mr);
-          } else b.appendChild(el('small', 'hint', 'Il comandante di fazione e i marconisti n.1 di ogni squadra.'));
+          } else b.appendChild(el('small', 'hint', 'HQ e tutti i marconisti delle squadre. Qui passa solo ciò che deve sapere tutta la fazione.'));
           k.appendChild(b);
         });
         tab.appendChild(k);
@@ -1541,14 +1694,16 @@
         var mia = r.tipo === 'squadra' && r.team === me.team && (!r.squadra || r.squadra === me.squadra);
         var marc = (r.marconisti || []).indexOf(uid);
         var tr = el('tr', mia || marc >= 0 ? 'mia' : '');
-        [r.nome + (mia ? ' ← la tua' : ''), r.nominativo, fmtF(r.p), fmtF(r.a), r.tipo === 'comando' ? 'comandante + marconisti n.1' : (r.nomiMarconisti || []).filter(Boolean).join(', ') || '—']
+        [(r.tipo === 'comando' ? 'HQ' : r.nome) + (mia ? ' ← la tua' : ''), r.nominativo, fmtF(r.p), fmtF(r.a), r.tipo === 'comando' ? 'HQ + tutti i marconisti' : (r.nomiMarconisti || []).filter(Boolean).join(', ') || '—']
           .forEach(function (x) { tr.appendChild(el('td', null, x)); });
         t.appendChild(tr);
-        if (marc >= 0) card.appendChild(el('div', 'radio-tu', 'Sei il marconista n.' + (marc + 1) + ' di ' + r.nome + (marc === 0 ? ': ascolti anche la rete Comando' : ': sei il ricambio, tieni la radio sulla rete della squadra')));
+        if (marc >= 0) card.appendChild(el('div', 'radio-tu', 'Sei il marconista n.' + (marc + 1) + ' di ' + r.nome + (marc === 0
+          ? ': fisso, sempre in ascolto su rete HQ e canale della squadra. Non ti sposti mai.'
+          : ': mobile, stai vicino al team leader e sei tu che vai sul canale di un\'altra squadra quando serve. Se il n.1 cade prendi il suo posto sulla rete HQ.')));
       });
       card.appendChild(t);
     });
-    card.appendChild(el('small', 'radio-nota', 'Se la primaria è disturbata, tutta la rete passa all\'alternativa. Si torna alla primaria solo su ordine del marconista n.1.'));
+    card.appendChild(el('small', 'radio-nota', 'Dentro la squadra: canale della squadra. Per tutta la fazione o per l\'HQ: il marconista sulla rete HQ. Per una sola altra squadra: il marconista n.2 va sul loro canale, chiama con il nominativo, passa il messaggio e torna subito sul suo. Sulla rete HQ parlano solo HQ e marconisti. Se la primaria è disturbata, tutta la rete passa all\'alternativa, su ordine del marconista n.1.'));
     box.appendChild(card);
     box.appendChild(bottone('Stampa la scheda radio', 'piccolo', function () { document.body.classList.add('stampa-radio'); window.print(); setTimeout(function () { document.body.classList.remove('stampa-radio'); }, 500); }));
   }
@@ -1574,7 +1729,7 @@
 
 
   // ================= AVVIO
-  var avviato = false, aperturaFatta = false, stopCampi = null, stopContatti = null, stopTeam = null, stopConf = null, uidPrima = null;
+  var avviato = false, aperturaFatta = false, stopScen = null, stopCampi = null, stopContatti = null, stopTeam = null, stopConf = null, uidPrima = null;
   function ascoltaAdesioniDi(lista) {
     var ids = lista.map(function (c) { return c.id; });
     Object.keys(stopAdesioni).forEach(function (id) { if (ids.indexOf(id) < 0) { stopAdesioni[id](); delete stopAdesioni[id]; delete D.adesioni[id]; } });
@@ -1631,6 +1786,8 @@
       Object.keys(stopAdesioni).forEach(function (id) { stopAdesioni[id](); }); stopAdesioni = {}; D.adesioni = {};
       if (stopContatti) stopContatti();
       stopContatti = S.ascoltaContatti(function (m) { D.contatti = m; ridisegna(); });
+      if (stopScen) stopScen(); stopScen = null;
+      if (P('conflitti')) stopScen = S.ascoltaScenari(function (x) { D.scenari = x; if (corrente().v === 'organizza') ridisegna(); });
       if (stopCampi) stopCampi();
       stopCampi = S.ascoltaCampi(function (cm) { D.campi = cm; if (corrente().v === 'organizza') ridisegna(); });
       stopTeam = S.ascoltaTeam(function (t) { D.team = t; ridisegna(); });

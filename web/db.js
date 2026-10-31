@@ -317,6 +317,11 @@
   api.segnaPosa = function (cid, pid, dati) { var o = {}; o[pid] = dati; return db.collection('campiPosa').doc(cid).set({ aree: o }, { merge: true }); };
   api.togliPosa = function (cid, pid) { var o = {}; o['aree.' + pid] = fb.firestore.FieldValue.delete(); return db.collection('campiPosa').doc(cid).update(o); };
 
+  // ---------- combat a scenari (PCS)
+  api.ascoltaScenari = function (cb) { return db.collection('scenari').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); }); };
+  api.salvaScenario = function (sc) { var d = JSON.parse(JSON.stringify(sc)), id = d.id || db.collection('scenari').doc().id; delete d.id; return db.collection('scenari').doc(id).set(d).then(function () { return id; }); };
+  api.eliminaScenario = function (id) { return db.collection('scenari').doc(id).delete(); };
+
   // ---------- maglia radio: radio/comune (tutti gli invitati), radio/blu e radio/rossa (solo quella fazione)
   api.ascoltaRadio = function (cid, doc, cb) {
     return db.collection('conflitti/' + cid + '/radio').doc(doc).onSnapshot(function (s) { cb(s.exists ? s.data() : null); }, function () { cb(null); });
