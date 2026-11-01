@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.19';
+  var VERSIONE = '0.20';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -1045,7 +1045,8 @@
     var r = el('div', 'carta dmz-regole');
     r.appendChild(el('b', null, 'Come si gioca'));
     var R = Z.regole(x), ul = el('ol');
-    ['Ogni squadra prende un contratto alla volta. Si completa scansionando il QR dell\'area.',
+    ['Ogni squadra prende un contratto alla volta e lo completa scansionando i QR delle aree.',
+      'Ricognizione: più punti da scansionare nell\'ordine giusto. Recupero: la cassa va esfiltrata entro ' + R.cassa + ' minuti o si perde. Intel: i documenti indicano un\'area con un bonus. Sabotaggio: piazzate la carica, tenete la posizione ' + R.tieni + ' minuti e riscansionate. Caccia: eliminate la squadra bersaglio.',
       'Il valore del contratto va nello zaino. Conta solo quando lo esfiltrate.',
       'Per esfiltrare scansionate il QR di un\'estrazione mentre è aperta: si aprono a turno ogni ' + R.ogni + ' minuti e restano aperte ' + R.aperta + ' minuti.',
       'Se la squadra viene eliminata premete «Siamo stati eliminati»: perdete lo zaino non esfiltrato, tornate all\'ingresso e ripartite.',
@@ -1105,7 +1106,14 @@
           var k = el('div', 'dmz-con mio t-' + c.tipo);
           k.appendChild(el('span', 'dmz-tipo', Z.TIPI[c.tipo].nome.toUpperCase() + ' · ' + c.valore));
           k.appendChild(el('b', null, c.titolo));
-          k.appendChild(el('small', null, c.tipo === 'caccia' ? Z.TIPI.caccia.testo : 'Vai a ' + nomeArea(c.area) + ' e scansiona il QR.'));
+          var ist = el('small'); k.appendChild(ist);
+          if (c.tipo === 'caccia') ist.textContent = Z.TIPI.caccia.testo;
+          else if (c.tipo === 'ricognizione') { var tp = Z.tappe(c); ist.textContent = 'Punto ' + (me.prog + 1) + ' di ' + tp.length + ': andate a ' + nomeArea(tp[me.prog]) + ' e scansionate il QR.'; }
+          else if (c.tipo === 'sabotaggio' && me.innesco != null) {
+            var inn = me.innesco; k.classList.add('caldo');
+            tick.push(function () { var rr = inn + Z.regole(x).tieni * 60000 - Date.now(); ist.textContent = rr > 0 ? 'Carica piazzata a ' + nomeArea(c.area) + ': tenete la posizione. Riscansionate tra ' + mmss(rr) + '.' : 'Pronta: riscansionate il QR di ' + nomeArea(c.area) + ' per farla saltare!'; });
+          }
+          else ist.textContent = (c.tipo === 'sabotaggio' ? 'Andate a ' + nomeArea(c.area) + ' e scansionate il QR per piazzare la carica.' : 'Andate a ' + nomeArea(c.area) + ' e scansionate il QR.');
           k.appendChild(bottone('Lascia il contratto', 'link', function () { if (confirm('Lasciare il contratto? Torna libero per tutti.')) scrivi({ tipo: 'lascia', contratto: c.id }).catch(errore); }));
           pan.appendChild(k);
         } else {
@@ -1125,6 +1133,12 @@
           });
           bS.disabled = !liberi.length; pan.appendChild(bS);
         }
+        // casse del recupero da esfiltrare in tempo e bonus dell'intel
+        me.casse.forEach(function (cs) {
+          var a = el('div', 'dmz-avviso'); pan.appendChild(a);
+          tick.push(function () { var rr = cs.scade - Date.now(); a.textContent = 'Cassa da ' + cs.valore + ': esfiltratela entro ' + mmss(rr); a.classList.toggle('urgente', rr < 5 * 60000); });
+        });
+        if (me.bonus) pan.appendChild(el('div', 'dmz-avviso bonus', 'Intel: bonus di ' + me.bonus.valore + ' a ' + nomeArea(me.bonus.area) + '. Scansionate il QR.'));
         var due = el('div', 'riga2 dmz-tasti');
         due.appendChild(bottone('SCANSIONA QR', 'accent big', scansiona));
         due.appendChild(bottone('SIAMO STATI ELIMINATI', 'pericolo big', eliminati));
@@ -1144,24 +1158,35 @@
         pan.appendChild(cl);
       }
       tick.forEach(function (fn) { fn(); });
-      if (v && me) v.evidenzia(me.contratto && con(me.contratto) ? con(me.contratto).area : null);
+      if (v && me) v.evidenzia(Z.obiettivo(x, me));
     }
     function scansiona() {
       if (!cm) { toast('Cartina in caricamento'); return; }
       apriScanner('Scansiona il QR', function (t) {
         return S.leggiQr(cm, t).then(function (r) {
           if (!r.punto) return { ok: false, titolo: 'QR non valido', testo: r.errore };
-          var s = Z.stato(x, ultimi, Date.now()), me = s.squadre[mia], i = (x.estrazioni || []).indexOf(r.punto.id);
-          if (i >= 0) {
-            var w = Z.finestra(x, i, Date.now());
-            if (!w.aperta) return { ok: false, avviso: true, titolo: 'Estrazione chiusa', testo: 'Si apre tra ' + mmss(w.tra) + '. Restate nei paraggi.' };
-            if (!me.zaino) return { ok: false, avviso: true, titolo: 'Zaino vuoto', testo: 'Non avete niente da esfiltrare.' };
-            return scrivi({ tipo: 'esfil', punto: r.punto.id }).then(function () { return { ok: true, titolo: 'Esfiltrati ' + me.zaino, testo: 'Al sicuro. Potete tornare in gioco.' }; });
-          }
-          var c = me.contratto && con(me.contratto);
-          if (!c) return { ok: false, avviso: true, titolo: r.punto.nome, testo: 'Prima prendete un contratto.' };
-          if (c.area !== r.punto.id) return { ok: false, avviso: true, titolo: r.punto.nome, testo: 'Non è l\'area del vostro contratto: andate a ' + nomeArea(c.area) + '.' };
-          return scrivi({ tipo: 'fatto', contratto: c.id }).then(function () { return { ok: true, titolo: 'Contratto completato', testo: '+' + c.valore + ' nello zaino. Ora portatelo a un\'estrazione aperta.' }; });
+          // si registra la scansione; cosa vale lo decide il motore (stesso calcolo per tutti)
+          var e = { tipo: 'qr', punto: r.punto.id, squadra: mia, uid: st.user.uid, t: Date.now() };
+          var es = Z.stato(x, ultimi.concat([e]), e.t).squadre[mia].esito || { k: 'nessuno' }, P = r.punto.nome;
+          var M = {
+            esfil: { ok: true, titolo: 'Esfiltrati ' + es.valore, testo: 'Al sicuro. Potete tornare in gioco.' },
+            chiusa: { avviso: true, titolo: 'Estrazione chiusa', testo: 'Si apre tra ' + mmss(es.tra) + '. Restate nei paraggi.' },
+            vuoto: { avviso: true, titolo: 'Zaino vuoto', testo: 'Non avete niente da esfiltrare.' },
+            bonus: { ok: true, titolo: 'Bonus trovato', testo: '+' + es.valore + ' nello zaino.' },
+            nessuno: { avviso: true, titolo: P, testo: 'Qui non c\'è niente per voi: prendete un contratto.' },
+            altrove: { avviso: true, titolo: P, testo: 'Non è l\'area giusta: andate a ' + nomeArea(es.area) + '.' },
+            ordine: { avviso: true, titolo: P, testo: 'Ordine sbagliato: prima andate a ' + nomeArea(es.area) + '.' },
+            tappa: { ok: true, titolo: 'Punto ' + es.n + ' di ' + es.tot, testo: 'Ora andate a ' + nomeArea(es.prossima) + '.' },
+            fatto: { ok: true, titolo: 'Contratto completato', testo: '+' + es.valore + ' nello zaino. Portatelo a un\'estrazione aperta.' },
+            innesco: { ok: true, titolo: 'Carica piazzata', testo: 'Tenete la posizione: riscansionate questo QR tra ' + mmss(es.resta) + '.' },
+            attendi: { avviso: true, titolo: 'Non ancora', testo: 'Tenete la posizione ancora ' + mmss(es.resta) + ', poi riscansionate.' },
+            cassa: { ok: true, titolo: 'Cassa recuperata', testo: '+' + es.valore + ' nello zaino. Esfiltratela entro ' + Math.round(es.scade / 60000) + ' minuti o va persa.' },
+            intel: { ok: true, titolo: 'Documenti recuperati', testo: '+' + es.valore + ' nello zaino. Indicano un bonus di ' + es.bonus + ' a ' + nomeArea(es.area) + '.' }
+          }[es.k] || { titolo: P };
+          var ok = Object.assign({ ok: false }, M);
+          // le scansioni che non cambiano nulla non si registrano
+          if (['nessuno', 'altrove', 'ordine', 'vuoto', 'chiusa', 'attendi'].indexOf(es.k) >= 0) return ok;
+          return scrivi({ tipo: 'qr', punto: r.punto.id }).then(function () { return ok; });
         });
       });
     }
@@ -1841,7 +1866,7 @@
       function etichetta(p) { return riservato ? numeroQr(cm, p) : (SIMB[p.tipo] || '') + ' ' + p.nome; }
       // chi posa e basta vede solo i numeri: niente nomi, tipi, fazioni né collegamenti
       var cmVista = !riservato ? cm : Object.assign({}, cm, { link: [], punti: cm.punti.map(function (p) { return Object.assign({}, p, { nome: numeroQr(cm, p), tipo: 'base', fazione: null, nomi: null }); }) });
-      var v = F.vista(box, { g: g0, campo: cmVista, team: null, colori: COLORI, nomi: {}, ora: Date.now, anteprima: true });
+      var v = F.vista(box, { g: g0, campo: cmVista, team: null, colori: COLORI, nomi: {}, ora: Date.now, anteprima: true, mobile: true });
       var mia = null, posati = {}, soloDaPosare = false;
       var watch = navigator.geolocation ? navigator.geolocation.watchPosition(function (p) {
         mia = { lat: p.coords.latitude, lon: p.coords.longitude, acc: p.coords.accuracy }; v.posizione(mia.lat, mia.lon, mia.acc); lista();

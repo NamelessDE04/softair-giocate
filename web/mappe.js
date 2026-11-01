@@ -543,7 +543,89 @@
       if (geoScelta.centro) centro.value = geoScelta.centro;
       else if (c.geo) { var ll0 = U.daPixel(c.geo, c.w / 2, c.h / 2); centro.value = utmTesto(ll0.lat, ll0.lon); }
       centro.onchange = function () { geoScelta.centro = centro.value; };
-      body.appendChild(campoF('Centro della zona', centro));
+      // ricerca del posto per nome (OpenStreetMap) e scelta del centro cliccando sulla mappa
+      var cerca = el('form', 'ed-cerca'), qIn = el('input'); qIn.placeholder = 'Cerca un posto (es. Giaveno, Colle del Lys)';
+      var bC = el('button', 'btn', 'Cerca'); bC.type = 'submit'; cerca.appendChild(qIn); cerca.appendChild(bC);
+      var risultati = el('div', 'ed-risultati');
+      cerca.onsubmit = function (e) {
+        e.preventDefault(); var q = qIn.value.trim(); if (!q) return;
+        risultati.innerHTML = ''; risultati.appendChild(el('small', 'ed-txt muto', 'Cerco…'));
+        fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&accept-language=it&countrycodes=it&q=' + encodeURIComponent(q))
+          .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(function (lista) {
+            risultati.innerHTML = '';
+            if (!lista.length) { risultati.appendChild(el('small', 'ed-txt ko', 'Nessun posto trovato con questo nome.')); return; }
+            lista.forEach(function (x) {
+              var b = btn(x.display_name, 'ed-ris', function () {
+                var la = +x.lat, lo = +x.lon;
+                centro.value = utmTesto(la, lo); geoScelta.centro = centro.value; centro.classList.remove('errato');
+                risultati.innerHTML = '';
+                sceltaSuMappa(la, lo, 15);
+              });
+              risultati.appendChild(b);
+            });
+          }, function () { risultati.innerHTML = ''; risultati.appendChild(el('small', 'ed-txt ko', 'Ricerca non disponibile in questo momento.')); });
+      };
+      body.appendChild(campoF('Cerca il posto', cerca)); body.appendChild(risultati);
+      var rC = el('div', 'ed-riga ed-centro'); rC.appendChild(centro);
+      rC.appendChild(btn('⌖ Scegli sulla mappa', '', function () {
+        var ll = leggiCoordinate(centro.value, zonaPred);
+        if (ll) sceltaSuMappa(ll.lat, ll.lon, 15); else sceltaSuMappa(45.04, 7.35, 12);
+      }));
+      body.appendChild(campoF('Centro della zona', rC));
+      // mappa da trascinare: un clic fissa il centro, il riquadro mostra la zona che verrà presa
+      function sceltaSuMappa(lat0, lon0, z0) {
+        chiudiAnteprima();
+        ante = el('div', 'ed-ante ed-pick'); mapBox.appendChild(ante);
+        var testa = el('div', 'ed-riga'); testa.appendChild(el('b', null, 'Clicca sul punto centrale della zona')); ante.appendChild(testa);
+        var vp = el('div', 'ed-pick-vp'), lt = el('div', 'ed-pick-t'), rq = el('div', 'ed-pick-rq'), mk = el('div', 'ed-pick-mk');
+        vp.appendChild(lt); vp.appendChild(rq); vp.appendChild(mk); ante.appendChild(vp);
+        var zm = el('div', 'ed-pick-zoom'); zm.appendChild(btn('+', '', function () { zoom(1); })); zm.appendChild(btn('−', '', function () { zoom(-1); })); vp.appendChild(zm);
+        vp.appendChild(el('span', 'ed-ante-cr', SFONDI[0].crediti));
+        var piede = el('div', 'ed-riga'), info = el('span', 'ed-txt muto', 'Trascina per muoverti, rotellina o +/− per lo zoom.');
+        var usa = btn('Usa questo centro', 'accent', function () {
+          centro.value = utmTesto(sel0.lat, sel0.lon); geoScelta.centro = centro.value; centro.classList.remove('errato'); chiudiAnteprima();
+          msg.className = 'ed-txt muto'; msg.textContent = 'Centro scelto. Ora "Anteprima" o "Prendi questa zona".';
+        });
+        piede.appendChild(info); piede.appendChild(usa); piede.appendChild(btn('Annulla', '', chiudiAnteprima)); ante.appendChild(piede);
+        var z = z0, sel0 = { lat: lat0, lon: lon0 };
+        function mondo(la, lo, zz) { var n = 256 * Math.pow(2, zz), s0 = Math.sin(la * Math.PI / 180); return { x: (lo + 180) / 360 * n, y: (0.5 - Math.log((1 + s0) / (1 - s0)) / (4 * Math.PI)) * n }; }
+        function geo(x, y, zz) { var n = 256 * Math.pow(2, zz), lo = x / n * 360 - 180, m = Math.PI * (1 - 2 * y / n); return { lat: 180 / Math.PI * Math.atan(Math.sinh(m)), lon: lo }; }
+        var c0 = mondo(lat0, lon0, z), cx = c0.x, cy = c0.y;
+        function disegna() {
+          var W = vp.clientWidth, H = vp.clientHeight, x0 = cx - W / 2, y0 = cy - H / 2, n = Math.pow(2, z);
+          lt.innerHTML = '';
+          for (var ty = Math.floor(y0 / 256); ty <= Math.floor((y0 + H) / 256); ty++) for (var tx = Math.floor(x0 / 256); tx <= Math.floor((x0 + W) / 256); tx++) {
+            if (ty < 0 || ty >= n) continue;
+            var i = new Image(); i.src = SFONDI[0].url.replace('{z}', z).replace('{x}', ((tx % n) + n) % n).replace('{y}', ty);
+            i.style.left = (tx * 256 - x0) + 'px'; i.style.top = (ty * 256 - y0) + 'px'; i.draggable = false; lt.appendChild(i);
+          }
+          var p = mondo(sel0.lat, sel0.lon, z), mpp = 156543.03392 * Math.cos(sel0.lat * Math.PI / 180) / n;
+          var w = geoScelta.lar / mpp, h = geoScelta.alt / mpp, X = p.x - x0, Y = p.y - y0;
+          mk.style.left = X + 'px'; mk.style.top = Y + 'px';
+          rq.style.left = (X - w / 2) + 'px'; rq.style.top = (Y - h / 2) + 'px'; rq.style.width = w + 'px'; rq.style.height = h + 'px';
+          info.textContent = utmTesto(sel0.lat, sel0.lon) + ' · zona ' + (geoScelta.lar >= 1000 ? geoScelta.lar / 1000 + ' km' : geoScelta.lar + ' m') + ' × ' + (geoScelta.alt >= 1000 ? geoScelta.alt / 1000 + ' km' : geoScelta.alt + ' m');
+        }
+        function zoom(d, px, py) {
+          var nz = Math.max(5, Math.min(SFONDI[0].maxz, z + d)); if (nz === z) return;
+          var W = vp.clientWidth, H = vp.clientHeight; px = px == null ? W / 2 : px; py = py == null ? H / 2 : py;
+          var g0 = geo(cx - W / 2 + px, cy - H / 2 + py, z); z = nz;
+          var q = mondo(g0.lat, g0.lon, z); cx = q.x - px + W / 2; cy = q.y - py + H / 2; disegna();
+        }
+        var giu = null, mosso = false;
+        vp.addEventListener('pointerdown', function (e) { if (e.target.closest('button')) return; vp.setPointerCapture(e.pointerId); giu = { x: e.clientX, y: e.clientY }; mosso = false; });
+        vp.addEventListener('pointermove', function (e) {
+          if (!giu) return; var dx = e.clientX - giu.x, dy = e.clientY - giu.y;
+          if (!mosso && Math.hypot(dx, dy) < 5) return; mosso = true;
+          cx -= dx; cy -= dy; giu = { x: e.clientX, y: e.clientY }; disegna();
+        });
+        vp.addEventListener('pointerup', function (e) {
+          if (giu && !mosso) { var r0 = vp.getBoundingClientRect(); sel0 = geo(cx - vp.clientWidth / 2 + e.clientX - r0.left, cy - vp.clientHeight / 2 + e.clientY - r0.top, z); disegna(); }
+          giu = null;
+        });
+        vp.addEventListener('wheel', function (e) { e.preventDefault(); var r0 = vp.getBoundingClientRect(); zoom(e.deltaY < 0 ? 1 : -1, e.clientX - r0.left, e.clientY - r0.top); }, { passive: false });
+        requestAnimationFrame(disegna);
+      }
       var dim = el('div', 'due');
       var lar = el('select'), alt = el('select');
       [400, 600, 800, 1000, 1200, 1500, 2000, 2500, 3000].forEach(function (m) {

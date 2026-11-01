@@ -246,8 +246,10 @@
   }
   function vista(box, opts) {
     var campo = localizza(opts.campo, opts.team), g = opts.g, ante = !!opts.anteprima;
+    // anteprima: cartina fissa e centrata (niente trascinamento né zoom), salvo chi deve muoversi sul campo (posa dei QR)
+    var fissa = ante && !opts.mobile;
     box.innerHTML = '';
-    box.classList.add('fz');
+    box.classList.add('fz'); if (fissa) box.classList.add('fz-fissa');
     var mapBox = el('div', 'fz-map'), inner = el('div', 'fz-inner'), img = new Image();
     var tema = temaDi(campo);
     img.className = 'fz-img'; img.draggable = false;
@@ -268,7 +270,7 @@
     else box.appendChild(pop);
     var btnCentra = el('button', 'fz-centra', '◎'); btnCentra.type = 'button'; btnCentra.setAttribute('aria-label', 'Centra la mappa');
     btnCentra.onclick = function () { if (mia && campo.geo) centraSu(mia); else adatta(); };
-    box.appendChild(btnCentra);
+    if (!fissa) box.appendChild(btnCentra);
 
     // --- pan e zoom
     var vw = 0, vh = 0, sc = 1, tx = 0, ty = 0, minSc = 0.2;
@@ -298,6 +300,7 @@
     mapBox.addEventListener('pointermove', function (e) {
       if (!ptr[e.pointerId]) return;
       var ids = Object.keys(ptr), p = ptr[e.pointerId];
+      if (fissa) { if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) mosso = true; return; }
       if (ids.length === 1) { tx += e.clientX - p.x; ty += e.clientY - p.y; applica(); }
       else if (ids.length === 2) {
         var o = ptr[ids[0] === String(e.pointerId) ? ids[1] : ids[0]];
@@ -312,7 +315,7 @@
       if (era && !mosso && !Object.keys(ptr).length) tocco(e);
     }
     mapBox.addEventListener('pointerup', su); mapBox.addEventListener('pointercancel', function (e) { delete ptr[e.pointerId]; });
-    mapBox.addEventListener('wheel', function (e) { e.preventDefault(); var r = mapBox.getBoundingClientRect(); zoomA(e.deltaY < 0 ? 1.2 : 1 / 1.2, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+    mapBox.addEventListener('wheel', function (e) { if (fissa) return; e.preventDefault(); var r = mapBox.getBoundingClientRect(); zoomA(e.deltaY < 0 ? 1.2 : 1 / 1.2, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
     function tocco(e) {
       var r = mapBox.getBoundingClientRect(), x = (e.clientX - r.left - tx) / sc, y = (e.clientY - r.top - ty) / sc;
       if (opts.onTocco && campo.geo) { var ll = latlon(campo, x, y); opts.onTocco(ll.lat, ll.lon); return; }
@@ -362,7 +365,7 @@
     function evidenzia(id) {
       evid = id || null;
       var p = id && punto(campo, id);
-      if (p) { var q = pxP(campo, p); tx = vw / 2 - q.x * sc; ty = vh / 2 - q.y * sc; applica(); } else disegna();
+      if (p && !fissa) { var q = pxP(campo, p); tx = vw / 2 - q.x * sc; ty = vh / 2 - q.y * sc; applica(); } else disegna();
     }
     function nomeF(team) { return team ? (opts.nomi[team] || 'Fazione') : 'Neutrale'; }
     function esc(t) { return String(t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }

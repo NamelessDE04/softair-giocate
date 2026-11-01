@@ -102,7 +102,7 @@ service cloud.firestore {
           && request.resource.data.uid == request.auth.uid
           && request.resource.data.squadra == d().squadraDi[request.auth.uid]
           && request.resource.data.t is number
-          && request.resource.data.tipo in ['prendi', 'lascia', 'fatto', 'esfil', 'eliminata']
+          && request.resource.data.tipo in ['prendi', 'lascia', 'qr', 'eliminata']
           && request.time.toMillis() >= d().inizio - 600000
           && request.time.toMillis() <= d().fine + 600000;
         allow delete: if isDev();
