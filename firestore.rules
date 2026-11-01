@@ -90,6 +90,25 @@ service cloud.firestore {
       allow read, write: if perm('conflitti');
     }
 
+    // DMZ: la prepara il developer; la vedono solo i giocatori messi nelle squadre
+    match /dmz/{id} {
+      allow read: if isDev() || (signed() && request.auth.uid in resource.data.giocatori);
+      allow write: if isDev();
+      // partita: contratti, estrazioni, eliminazioni, solo per la propria squadra e nell'orario
+      match /eventi/{eid} {
+        function d() { return get(/databases/$(database)/documents/dmz/$(id)).data; }
+        allow read: if isDev() || (signed() && request.auth.uid in d().giocatori);
+        allow create: if signed() && request.auth.uid in d().giocatori
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.squadra == d().squadraDi[request.auth.uid]
+          && request.resource.data.t is number
+          && request.resource.data.tipo in ['prendi', 'lascia', 'fatto', 'esfil', 'eliminata']
+          && request.time.toMillis() >= d().inizio - 600000
+          && request.time.toMillis() <= d().fine + 600000;
+        allow delete: if isDev();
+      }
+    }
+
     // Cartine dei campi (aree e collegamenti) e immagine divisa a pezzi
     match /campi/{id} {
       allow read: if signed();

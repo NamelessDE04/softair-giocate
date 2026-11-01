@@ -340,6 +340,19 @@
   api.salvaScenario = function (sc) { var d = JSON.parse(JSON.stringify(sc)), id = d.id || db.collection('scenari').doc().id; delete d.id; return db.collection('scenari').doc(id).set(d).then(function () { return id; }); };
   api.eliminaScenario = function (id) { return db.collection('scenari').doc(id).delete(); };
 
+  // ---------- DMZ: la prepara il developer, la vedono solo i giocatori scelti
+  api.ascoltaDmz = function (cb) {
+    var q = db.collection('dmz');
+    if (!stato.dev) { if (!stato.user) { cb([]); return function () {}; } q = q.where('giocatori', 'array-contains', stato.user.uid); }
+    return q.onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); });
+  };
+  api.salvaDmz = function (x) { var d = JSON.parse(JSON.stringify(x)), id = d.id || db.collection('dmz').doc().id; delete d.id; return db.collection('dmz').doc(id).set(d).then(function () { return id; }); };
+  api.eliminaDmz = function (id) { return db.collection('dmz').doc(id).delete(); };
+  api.ascoltaEventiDmz = function (id, cb) {
+    return db.collection('dmz/' + id + '/eventi').onSnapshot(function (qs) { cb(qs.docs.map(function (d) { return d.data(); })); }, function () { cb([]); });
+  };
+  api.scriviEventoDmz = function (id, e) { return db.collection('dmz/' + id + '/eventi').doc().set(e); };
+
   // ---------- maglia radio: radio/comune (tutti gli invitati), radio/blu e radio/rossa (solo quella fazione)
   api.ascoltaRadio = function (cid, doc, cb) {
     return db.collection('conflitti/' + cid + '/radio').doc(doc).onSnapshot(function (s) { cb(s.exists ? s.data() : null); }, function () { cb(null); });

@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.18';
+  var VERSIONE = '0.19';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -65,7 +65,7 @@
   function visibile(da, perm) { return P(perm) || da == null || Date.now() >= da; }
 
   // ---------- dati condivisi
-  var D = { team: [], conflitti: [], adesioni: {}, contatti: {}, campi: [], scenari: [], allenamenti: [] };
+  var D = { team: [], conflitti: [], adesioni: {}, contatti: {}, campi: [], scenari: [], allenamenti: [], dmz: [] };
   var stopAdesioni = {};
   function teamDi(tid) { return D.team.filter(function (t) { return t.id === tid; })[0]; }
   function miaAdesione(cid) { var u = S.stato().user; return (D.adesioni[cid] || []).filter(function (a) { return a.id === u.uid; })[0]; }
@@ -93,7 +93,7 @@
     app.innerHTML = ''; window.scrollTo(0, 0);
     $('pieno').hidden = true; $('pieno').innerHTML = '';
     document.body.classList.remove('a-pieno');
-    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva }[c.v];
+    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva, dmz: pagDmz, dmzModifica: pagDmzModifica, dmzLive: pagDmzLive }[c.v];
     (r || home)(c.p);
   }
   function aPieno() { document.body.classList.add('a-pieno'); var p = $('pieno'); p.hidden = false; p.innerHTML = ''; return p; }
@@ -153,10 +153,12 @@
       if (!a || a.dopo) inviti.push(c); else if (a.si) promemoria.push(c);
     });
     var all = allenamentiAttivi().filter(function (a) { var r = miaAdesione('a:' + a.id); return P('allenamenti') || !r || r.si || r.dopo; });
-    if (!inviti.length && !promemoria.length && !all.length) { schermataInvito(); return; }
+    var dz = D.dmz.filter(function (x) { return x.fine > Date.now() - 6 * 3600000 && (x.giocatori || []).indexOf(st.user.uid) >= 0; });
+    if (!inviti.length && !promemoria.length && !all.length && !dz.length) { schermataInvito(); return; }
     inviti.forEach(function (c) { app.appendChild(cartaInvito(c)); });
     // conflict e allenamenti in ordine di data
     promemoria.map(function (c) { return { t: c.inizio, el: cartaPromemoria(c) }; }).concat(all.map(function (a) { return { t: a.inizio || 0, el: cartaAllenamento(a) }; }))
+      .concat(dz.map(function (x) { return { t: x.inizio, el: cartaDmz(x) }; }))
       .sort(function (x, y) { return x.t - y.t; }).forEach(function (x) { app.appendChild(x.el); });
   }
 
@@ -790,6 +792,7 @@
       ['giocatori', '☺', 'Giocatori', P('giocatori')],
       ['cartine', '⌖', 'Cartine', P('mappe')],
       ['pcs', '★', 'Scenari PCS', dev],
+      ['dmz', '⇪', 'DMZ', dev],
       ['ruoli', '⚙', 'Ruoli e permessi', dev]
     ].filter(function (x) { return x[3]; });
     if (!sez) {
@@ -828,6 +831,13 @@
       D.scenari.slice().sort(function (a, b) { return (b.data || '').localeCompare(a.data || ''); }).forEach(function (sc) {
         riga((sc.gen && sc.gen.operazione) || 'Scenario senza nome', (sc.squadra || 'Squadra') + ' · ' + (sc.tappe || []).length + ' tappe' + (sc.data ? ' · ' + sc.data.split('-').reverse().join('/') : ''), function () { vai('scenario', sc.id); });
       });
+    } else if (sez === 'dmz') {
+      testata('DMZ');
+      app.appendChild(bottone('+ Nuova DMZ', 'accent big', function () { vai('dmzModifica', null); }));
+      app.appendChild(el('p', 'hint', 'Squadre contro squadre, contratti ed estrazioni. Per ora la vedi solo tu e i giocatori che metti nelle squadre.'));
+      D.dmz.slice().sort(function (a, b) { return b.inizio - a.inizio; }).forEach(function (x) {
+        riga(x.titolo || 'DMZ', dataBreve(x.inizio) + ' · ' + (x.squadre || []).length + ' squadre · ' + (x.contratti || []).length + ' contratti', function () { vai('dmz', x.id); });
+      });
     } else if (sez === 'cartine') {
       testata('Cartine');
       app.appendChild(bottone('+ Nuova cartina', 'accent big', function () { vai('mappa', null); }));
@@ -852,6 +862,341 @@
         riga(t.nome, t.referente && t.referente.nome ? 'Ref. ' + t.referente.nome : 'Referente da indicare', function () { vai('team', t.id); }, t);
       });
     }
+  }
+
+  // ================= DMZ (stile Warzone): squadre contro squadre, contratti, zaino ed estrazioni. Per ora la prepara solo il developer.
+  function mmss(ms) { var s = Math.max(0, Math.round(ms / 1000)); return Math.floor(s / 60) + ':' + ('0' + s % 60).slice(-2); }
+  function hmmss(ms) { var m = Math.max(0, Math.round(ms / 1000)); return m >= 3600 ? Math.floor(m / 3600) + ':' + ('0' + Math.floor(m % 3600 / 60)).slice(-2) + ':' + ('0' + m % 60).slice(-2) : mmss(ms); }
+  function dmzDi(id) { return D.dmz.filter(function (x) { return x.id === id; })[0]; }
+  function nomeGioc(u) { return u.callsign || u.nome || u.email || 'Giocatore'; }
+  function pagDmzModifica(id) {
+    var vecchio = dmzDi(id), Z = window.AC_DMZ;
+    testata(vecchio ? 'Modifica DMZ' : 'Nuova DMZ');
+    if (!S.stato().dev) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
+    var g7 = mezzanotte(Date.now() + 7 * GIORNO);
+    var x = vecchio ? JSON.parse(JSON.stringify(vecchio)) : { titolo: 'DMZ', luogo: '', inizio: g7 + 9.5 * 3600000, fine: g7 + 11.5 * 3600000, campo: D.campi.length === 1 ? D.campi[0].id : '', estrazioni: [], regole: {}, squadre: [], contratti: [], formato: 4, perTeam: true, scelti: [] };
+    x.scelti = x.scelti || x.giocatori || [];
+    var utenti = [], R = Z.regole(x);
+    var f = el('div', 'modulo'); app.appendChild(f);
+    var tit = el('input'); tit.value = x.titolo || ''; f.appendChild(campoForm('Nome', tit));
+    var dt = el('input'); dt.type = 'date'; dt.value = locale(x.inizio).slice(0, 10);
+    var hI = el('input'); hI.type = 'time'; hI.value = ora(x.inizio);
+    var dur = select([[60, '1 ora'], [90, '1 ora e mezza'], [120, '2 ore'], [180, '3 ore'], [240, '4 ore']], String(Math.round((x.fine - x.inizio) / 60000)));
+    var tre = el('div', 'tre'); tre.appendChild(campoForm('Data', dt)); tre.appendChild(campoForm('Inizio', hI)); tre.appendChild(campoForm('Durata', dur)); f.appendChild(tre);
+    var lg = el('input'); lg.value = x.luogo || ''; lg.placeholder = 'es. Campo Tauri, Giaveno'; f.appendChild(campoForm('Luogo', lg));
+
+    f.appendChild(el('h3', 'sez', 'Cartina ed estrazioni'));
+    var cSel = select([['', '— scegli —']].concat(D.campi.map(function (c) { return [c.id, c.nome]; })), x.campo || '');
+    f.appendChild(campoForm('Cartina', cSel));
+    var eBox = el('div', 'chips'); f.appendChild(eBox);
+    var ogni = select([[10, 'ogni 10 min'], [15, 'ogni 15 min'], [20, 'ogni 20 min'], [30, 'ogni 30 min']], String(R.ogni));
+    var aperta = select([[3, 'per 3 min'], [4, 'per 4 min'], [5, 'per 5 min'], [8, 'per 8 min']], String(R.aperta));
+    var due = el('div', 'tre'); due.appendChild(campoForm('Ogni estrazione si apre', ogni)); due.appendChild(campoForm('Resta aperta', aperta)); f.appendChild(due);
+    function aree() { var cm = campoMeta(cSel.value); return cm ? perCategoria(cm, 'dmz').punti : []; }
+    function disegnaEstr() {
+      eBox.innerHTML = '';
+      var pp = aree();
+      x.estrazioni = x.estrazioni.filter(function (e) { return pp.some(function (p) { return p.id === e; }); });
+      if (!cSel.value) { eBox.appendChild(el('small', 'hint', 'Scegli la cartina, poi tocca le aree che fanno da estrazione.')); return; }
+      eBox.appendChild(el('span', 'chips-tit', 'Tocca le aree di estrazione (le altre diventano contratti)'));
+      pp.forEach(function (p) {
+        var on = x.estrazioni.indexOf(p.id) >= 0;
+        eBox.appendChild(bottone((on ? '⇪ ' : '') + p.nome, 'chip' + (on ? ' on arancio' : ''), function () {
+          var i = x.estrazioni.indexOf(p.id); if (i >= 0) x.estrazioni.splice(i, 1); else x.estrazioni.push(p.id); disegnaEstr();
+        }));
+      });
+      if (!pp.length) eBox.appendChild(el('small', 'hint avviso', 'Nessuna area di questa cartina è segnata per la DMZ (editor → area → «Usata in»).'));
+    }
+    cSel.onchange = function () { disegnaEstr(); disegnaCon(); };
+
+    // giocatori e squadre
+    f.appendChild(el('h3', 'sez', 'Giocatori e squadre'));
+    var gBox = el('div', 'modulo'); f.appendChild(gBox);
+    var fmt = select(Z.FORMATI.map(function (o) { return [o[0], o[1]]; }), String(x.formato || 4));
+    var pt = el('label', 'spunta'), ptI = el('input'); ptI.type = 'checkbox'; ptI.checked = x.perTeam !== false; pt.appendChild(ptI); pt.appendChild(el('span', null, 'Tieni insieme i compagni dello stesso team'));
+    var sBox = el('div', 'dmz-sq-ed');
+    function nomeU(uid) { var u = utenti.filter(function (y) { return y.id === uid; })[0]; return u ? nomeGioc(u) : (x.nomi || {})[uid] || '?'; }
+    function disegnaGioc() {
+      gBox.innerHTML = '';
+      var perT = {};
+      utenti.forEach(function (u) { var k = u.team || ''; (perT[k] = perT[k] || []).push(u); });
+      Object.keys(perT).sort(function (a, b) { return ((teamDi(a) || {}).nome || 'zz').localeCompare((teamDi(b) || {}).nome || 'zz'); }).forEach(function (tid) {
+        var c = el('div', 'chips'), lista = perT[tid].sort(function (a, b) { return nomeGioc(a).localeCompare(nomeGioc(b)); });
+        var tutti = lista.every(function (u) { return x.scelti.indexOf(u.id) >= 0; });
+        c.appendChild(bottone((teamDi(tid) || {}).nome || 'Senza team', 'link chips-tit', function () {
+          lista.forEach(function (u) { var i = x.scelti.indexOf(u.id); if (tutti && i >= 0) x.scelti.splice(i, 1); else if (!tutti && i < 0) x.scelti.push(u.id); }); disegnaGioc();
+        }));
+        lista.forEach(function (u) {
+          var on = x.scelti.indexOf(u.id) >= 0;
+          c.appendChild(bottone(nomeGioc(u), 'chip' + (on ? ' on arancio' : ''), function () { var i = x.scelti.indexOf(u.id); if (i >= 0) x.scelti.splice(i, 1); else x.scelti.push(u.id); disegnaGioc(); }));
+        });
+        gBox.appendChild(c);
+      });
+      if (!utenti.length) gBox.appendChild(el('p', 'hint', 'Caricamento dei giocatori…'));
+      gBox.appendChild(el('small', 'hint', x.scelti.length + ' giocatori scelti'));
+      var r = el('div', 'tre'); r.appendChild(campoForm('Squadre da', fmt)); gBox.appendChild(r); gBox.appendChild(pt);
+      gBox.appendChild(bottone(x.squadre.length ? 'Rifai le squadre' : 'Forma le squadre', 'accent', forma));
+      gBox.appendChild(sBox); disegnaSq();
+    }
+    function forma() {
+      var n = +fmt.value, sc = x.scelti.slice();
+      if (sc.length < 2) { toast('Scegli almeno 2 giocatori'); return; }
+      var sq = [];
+      if (ptI.checked) {
+        var perT = {}; sc.forEach(function (uid) { var u = utenti.filter(function (y) { return y.id === uid; })[0]; var k = (u && u.team) || '-'; (perT[k] = perT[k] || []).push(uid); });
+        Object.keys(perT).forEach(function (k) {
+          var g = perT[k], parti = Math.ceil(g.length / n);
+          for (var i = 0; i < parti; i++) sq.push(g.filter(function (_, j) { return j % parti === i; }));
+        });
+      } else sq = Z.componi(sc, n).map(function (s) { return s.membri; });
+      x.squadre = sq.map(function (m, i) { return { id: 's' + (i + 1), nome: Z.NOMI[i % Z.NOMI.length], membri: m }; });
+      x.contratti = x.contratti.filter(function (c) { return c.tipo !== 'caccia'; });
+      disegnaSq(); disegnaCon();
+    }
+    function disegnaSq() {
+      sBox.innerHTML = '';
+      x.squadre.forEach(function (s, i) {
+        var k = el('div', 'dmz-sq-card');
+        var h = el('div', 'ed-riga'), nm = el('input'); nm.value = s.nome; nm.oninput = function () { s.nome = nm.value; };
+        h.appendChild(nm); h.appendChild(el('small', s.membri.length > 6 || s.membri.length < 1 ? 'avviso' : 'hint', s.membri.length + ' gioc.')); k.appendChild(h);
+        var c = el('div', 'chips');
+        s.membri.forEach(function (uid) {
+          // tocca un giocatore per spostarlo nella squadra dopo
+          c.appendChild(bottone(nomeU(uid) + ' ›', 'chip', function () {
+            if (x.squadre.length < 2) return;
+            s.membri.splice(s.membri.indexOf(uid), 1); x.squadre[(i + 1) % x.squadre.length].membri.push(uid);
+            x.squadre = x.squadre.filter(function (q) { return q.membri.length; }); disegnaSq();
+          }));
+        });
+        k.appendChild(c); sBox.appendChild(k);
+      });
+      if (x.squadre.length) sBox.appendChild(el('small', 'hint', 'Tocca un giocatore per spostarlo nella squadra dopo. Massimo 6 per squadra.'));
+    }
+    // contratti
+    f.appendChild(el('h3', 'sez', 'Contratti'));
+    var kBox = el('div', 'modulo'); f.appendChild(kBox);
+    function disegnaCon() {
+      kBox.innerHTML = '';
+      x.contratti.forEach(function (c, i) {
+        var r = el('div', 'dmz-con-ed t-' + c.tipo);
+        r.appendChild(el('span', 'dmz-tipo', Z.TIPI[c.tipo].nome.toUpperCase()));
+        var t = el('input'); t.value = c.titolo; t.oninput = function () { c.titolo = t.value; }; r.appendChild(t);
+        var v = el('input'); v.type = 'number'; v.step = 50; v.min = 0; v.value = c.valore; v.className = 'dmz-val'; v.oninput = function () { c.valore = +v.value || 0; }; r.appendChild(v);
+        r.appendChild(bottone('✕', 'icon', function () { x.contratti.splice(i, 1); disegnaCon(); }));
+        kBox.appendChild(r);
+      });
+      kBox.appendChild(bottone(x.contratti.length ? 'Rigenera i contratti' : 'Genera i contratti', '', function () {
+        if (!cSel.value) { toast('Prima scegli la cartina'); return; }
+        x.contratti = Z.generaContratti(x, aree()); disegnaCon();
+      }));
+      kBox.appendChild(el('small', 'hint', 'Uno per area (estrazioni escluse) più qualche «caccia» a una squadra. Il valore è quanto finisce nello zaino.'));
+    }
+    disegnaEstr(); disegnaGioc(); disegnaCon();
+    var stopU = S.ascoltaUtenti(function (u) { utenti = u; if (!document.activeElement.matches('input')) disegnaGioc(); });
+    var prima = chiusura; chiusura = function () { stopU(); if (prima) prima(); };
+
+    var az = el('div', 'riga2 fisso');
+    az.appendChild(bottone('Salva', 'accent big', function () {
+      if (!dt.value || !hI.value) { toast('Servono data e ora'); return; }
+      if (!cSel.value) { toast('Scegli la cartina'); return; }
+      if (!x.estrazioni.length) { toast('Scegli almeno un\'estrazione'); return; }
+      if (x.squadre.length < 2) { toast('Servono almeno 2 squadre'); return; }
+      if (x.squadre.some(function (s) { return s.membri.length > 6; })) { toast('Massimo 6 giocatori per squadra'); return; }
+      var ini = new Date(dt.value + 'T' + hI.value).getTime(), sqDi = {}, nomi = {}, gioc = [];
+      x.squadre.forEach(function (s) { s.membri.forEach(function (u) { sqDi[u] = s.id; nomi[u] = nomeU(u); gioc.push(u); }); });
+      var out = { id: x.id, titolo: tit.value.trim() || 'DMZ', luogo: lg.value.trim(), inizio: ini, fine: ini + (+dur.value) * 60000, campo: cSel.value,
+        estrazioni: x.estrazioni, regole: { ogni: +ogni.value, aperta: +aperta.value, taglia: R.taglia }, formato: +fmt.value, perTeam: ptI.checked,
+        squadre: x.squadre.map(function (s) { return { id: s.id, nome: (s.nome || '').trim() || 'Squadra', membri: s.membri }; }), giocatori: gioc, squadraDi: sqDi, nomi: nomi,
+        contratti: x.contratti.filter(function (c) { return c.tipo !== 'caccia' || x.squadre.some(function (s) { return s.id === c.bersaglio; }); }) };
+      S.salvaDmz(out).then(function (nid) { toast('DMZ salvata'); if (vecchio) indietro(); else sostituisci('dmz', nid); }, errore);
+    }));
+    if (vecchio) az.appendChild(bottone('Elimina', 'pericolo', function () { if (confirm('Eliminare la DMZ?')) S.eliminaDmz(vecchio.id).then(function () { tornaIndietro(2); }, errore); }));
+    app.appendChild(az);
+  }
+
+  function pagDmz(id) {
+    var x = dmzDi(id), Z = window.AC_DMZ, st = S.stato();
+    if (!x) { testata('DMZ'); app.appendChild(el('p', 'hint', 'DMZ non trovata.')); return; }
+    var mia = (x.squadraDi || {})[st.user.uid] || null;
+    if (Date.now() >= x.inizio - 10 * 60000 && Date.now() < x.fine && mia) return schermoDmz(x, mia);
+    testata(x.titolo || 'DMZ');
+    if (st.dev) {
+      var adm = el('div', 'riga2');
+      adm.appendChild(bottone('⚙ Modifica', '', function () { vai('dmzModifica', x.id); }));
+      adm.appendChild(bottone('Segui la partita', '', function () { vai('dmzLive', x.id); }));
+      app.appendChild(adm);
+    }
+    var hero = el('div', 'conf-hero');
+    hero.appendChild(el('div', 'conf-tipo dmz', 'DMZ · CONTRATTI'));
+    hero.appendChild(el('div', 'pm-data', dataLunga(x.inizio).toUpperCase()));
+    var orari = el('div', 'pm-orari');
+    [['INIZIO', x.inizio], ['FINE', x.fine]].forEach(function (o) { var d = el('div'); d.appendChild(el('small', null, o[0])); d.appendChild(el('b', null, ora(o[1]))); orari.appendChild(d); });
+    hero.appendChild(orari);
+    if (x.luogo) hero.appendChild(el('div', 'conf-luogo', '⌖ ' + x.luogo));
+    if (Date.now() >= x.fine) hero.appendChild(el('div', 'conf-fine', 'DMZ CONCLUSA'));
+    app.appendChild(hero);
+    if (mia) {
+      var s = (x.squadre || []).filter(function (q) { return q.id === mia; })[0];
+      var k = el('div', 'carta'); k.appendChild(el('small', 'hint', 'LA TUA SQUADRA'));
+      k.appendChild(el('h3', null, s.nome));
+      k.appendChild(el('p', 'testo', s.membri.map(function (u) { return (x.nomi || {})[u] || '?'; }).join(' · ')));
+      app.appendChild(k);
+    }
+    var r = el('div', 'carta dmz-regole');
+    r.appendChild(el('b', null, 'Come si gioca'));
+    var R = Z.regole(x), ul = el('ol');
+    ['Ogni squadra prende un contratto alla volta. Si completa scansionando il QR dell\'area.',
+      'Il valore del contratto va nello zaino. Conta solo quando lo esfiltrate.',
+      'Per esfiltrare scansionate il QR di un\'estrazione mentre è aperta: si aprono a turno ogni ' + R.ogni + ' minuti e restano aperte ' + R.aperta + ' minuti.',
+      'Se la squadra viene eliminata premete «Siamo stati eliminati»: perdete lo zaino non esfiltrato, tornate all\'ingresso e ripartite.',
+      'Chi elimina una squadra guadagna ' + R.taglia + '. Alla fine vince chi ha esfiltrato di più: lo zaino non esfiltrato si perde.'
+    ].forEach(function (t) { ul.appendChild(el('li', null, t)); });
+    r.appendChild(ul); app.appendChild(r);
+    if (Date.now() >= x.inizio) {
+      var cl = el('div', 'carta'); app.appendChild(cl);
+      var stopE = S.ascoltaEventiDmz(x.id, function (ev) { cl.innerHTML = ''; cl.appendChild(el('b', null, 'Classifica')); cl.appendChild(tabClassifica(Z.stato(x, ev, Date.now()), mia)); });
+      var prima = chiusura; chiusura = function () { stopE(); if (prima) prima(); };
+    }
+  }
+  function tabClassifica(s, mia) {
+    var t = el('table', 'dmz-class'), h = el('tr');
+    ['', 'Squadra', 'Esfiltrato', 'Zaino', 'Elim.'].forEach(function (c) { h.appendChild(el('th', null, c)); }); t.appendChild(h);
+    s.classifica.forEach(function (q, i) {
+      var r = el('tr', q.id === mia ? 'mia' : '');
+      [String(i + 1), q.nome, String(q.salvato), s.finita ? '—' : String(q.zaino), String(q.uccisioni)].forEach(function (c) { r.appendChild(el('td', null, c)); });
+      t.appendChild(r);
+    });
+    return t;
+  }
+
+  // schermo di gioco: mappa, contratto, zaino, estrazioni; due tasti grandi (QR ed eliminati)
+  function schermoDmz(x, mia) {
+    var Z = window.AC_DMZ, st = S.stato(), pieno = aPieno();
+    var box = el('div', 'dmz-gioco'); pieno.appendChild(box);
+    var testa = el('div', 'dmz-testa'); box.appendChild(testa);
+    var mapBox = el('div', 'dmz-mappa'); box.appendChild(mapBox);
+    var pan = el('div', 'dmz-pan'); box.appendChild(pan);
+    var ultimi = [], cm = null, v = null, sq = mia && (x.squadre || []).filter(function (q) { return q.id === mia; })[0];
+    function esci() { if (pila.length > 1) indietro(); else sostituisci('home'); }
+    function nomeArea(id) { var p = cm && (cm.punti || []).filter(function (q) { return q.id === id; })[0]; return p ? p.nome : '…'; }
+    function con(id) { return (x.contratti || []).filter(function (c) { return c.id === id; })[0]; }
+    function scrivi(e) { e.squadra = mia; e.uid = st.user.uid; e.t = Date.now(); return S.scriviEventoDmz(x.id, e); }
+    var tick = [];
+    function disegna() {
+      var s = Z.stato(x, ultimi, Date.now()), me = mia && s.squadre[mia];
+      tick = [];
+      testa.innerHTML = '';
+      testa.appendChild(bottone('‹', 'icon', esci));
+      var tm = el('div', 'dmz-tempo'); testa.appendChild(tm);
+      tick.push(function () { var r = x.fine - Date.now(); tm.textContent = Date.now() < x.inizio ? 'INIZIA TRA ' + hmmss(x.inizio - Date.now()) : r > 0 ? hmmss(r) : 'FINITA'; tm.classList.toggle('ultimi', r > 0 && r < 5 * 60000); });
+      if (me) {
+        var z = el('div', 'dmz-zaino'); z.appendChild(el('small', null, 'ZAINO')); z.appendChild(el('b', null, String(me.zaino))); testa.appendChild(z);
+        var sv = el('div', 'dmz-zaino salvo'); sv.appendChild(el('small', null, 'ESFILTRATO')); sv.appendChild(el('b', null, String(me.salvato))); testa.appendChild(sv);
+      }
+      pan.innerHTML = '';
+      if (s.finita) {
+        pan.appendChild(el('h2', 'dmz-fine', 'DMZ CONCLUSA'));
+        pan.appendChild(tabClassifica(s, mia));
+        pan.appendChild(bottone('Esci', 'big', esci));
+      } else if (me) {
+        // contratto in corso o scelta di un contratto
+        var c = me.contratto && con(me.contratto);
+        if (c) {
+          var k = el('div', 'dmz-con mio t-' + c.tipo);
+          k.appendChild(el('span', 'dmz-tipo', Z.TIPI[c.tipo].nome.toUpperCase() + ' · ' + c.valore));
+          k.appendChild(el('b', null, c.titolo));
+          k.appendChild(el('small', null, c.tipo === 'caccia' ? Z.TIPI.caccia.testo : 'Vai a ' + nomeArea(c.area) + ' e scansiona il QR.'));
+          k.appendChild(bottone('Lascia il contratto', 'link', function () { if (confirm('Lasciare il contratto? Torna libero per tutti.')) scrivi({ tipo: 'lascia', contratto: c.id }).catch(errore); }));
+          pan.appendChild(k);
+        } else {
+          var liberi = (x.contratti || []).filter(function (q) { return s.contratti[q.id].stato === 'libero' && !(q.tipo === 'caccia' && q.bersaglio === mia); });
+          var bS = bottone(liberi.length ? 'Scegli un contratto (' + liberi.length + ')' : 'Nessun contratto libero', 'big' + (liberi.length ? ' accent' : ''), function () {
+            apriFoglio(function (f) {
+              f.appendChild(el('h3', null, 'Contratti liberi'));
+              liberi.forEach(function (q) {
+                var r = el('button', 'dmz-con t-' + q.tipo); r.type = 'button';
+                r.appendChild(el('span', 'dmz-tipo', Z.TIPI[q.tipo].nome.toUpperCase() + ' · ' + q.valore));
+                r.appendChild(el('b', null, q.titolo));
+                r.appendChild(el('small', null, Z.TIPI[q.tipo].testo));
+                r.onclick = function () { chiudiFoglio(); scrivi({ tipo: 'prendi', contratto: q.id }).then(function () { if (q.area && v) v.evidenzia(q.area); toast('Contratto preso'); }, errore); };
+                f.appendChild(r);
+              });
+            });
+          });
+          bS.disabled = !liberi.length; pan.appendChild(bS);
+        }
+        var due = el('div', 'riga2 dmz-tasti');
+        due.appendChild(bottone('SCANSIONA QR', 'accent big', scansiona));
+        due.appendChild(bottone('SIAMO STATI ELIMINATI', 'pericolo big', eliminati));
+        pan.appendChild(due);
+      }
+      // estrazioni con il conto alla rovescia
+      var eb = el('div', 'dmz-estr'); pan.appendChild(eb);
+      (x.estrazioni || []).forEach(function (e, i) {
+        var r = el('div', 'dmz-e'); r.appendChild(el('b', null, '⇪ ' + nomeArea(e)));
+        var t = el('span'); r.appendChild(t); eb.appendChild(r);
+        tick.push(function () { var w = Z.finestra(x, i, Date.now()); r.classList.toggle('aperta', w.aperta); t.textContent = w.aperta ? 'APERTA · chiude tra ' + mmss(w.chiude) : 'apre tra ' + mmss(w.tra); });
+      });
+      if (!s.finita) {
+        var piu = bottone('Classifica ▾', 'link', function () { cl.hidden = !cl.hidden; }); pan.appendChild(piu);
+        var cl = el('div', 'dmz-cl'); cl.hidden = !!me; cl.appendChild(tabClassifica(s, mia));
+        if (s.log.length) { var lg = el('ul', 'dmz-log'); s.log.slice(0, 8).forEach(function (l) { lg.appendChild(el('li', null, ora(l.t) + ' ' + l.testo)); }); cl.appendChild(lg); }
+        pan.appendChild(cl);
+      }
+      tick.forEach(function (fn) { fn(); });
+      if (v && me) v.evidenzia(me.contratto && con(me.contratto) ? con(me.contratto).area : null);
+    }
+    function scansiona() {
+      if (!cm) { toast('Cartina in caricamento'); return; }
+      apriScanner('Scansiona il QR', function (t) {
+        return S.leggiQr(cm, t).then(function (r) {
+          if (!r.punto) return { ok: false, titolo: 'QR non valido', testo: r.errore };
+          var s = Z.stato(x, ultimi, Date.now()), me = s.squadre[mia], i = (x.estrazioni || []).indexOf(r.punto.id);
+          if (i >= 0) {
+            var w = Z.finestra(x, i, Date.now());
+            if (!w.aperta) return { ok: false, avviso: true, titolo: 'Estrazione chiusa', testo: 'Si apre tra ' + mmss(w.tra) + '. Restate nei paraggi.' };
+            if (!me.zaino) return { ok: false, avviso: true, titolo: 'Zaino vuoto', testo: 'Non avete niente da esfiltrare.' };
+            return scrivi({ tipo: 'esfil', punto: r.punto.id }).then(function () { return { ok: true, titolo: 'Esfiltrati ' + me.zaino, testo: 'Al sicuro. Potete tornare in gioco.' }; });
+          }
+          var c = me.contratto && con(me.contratto);
+          if (!c) return { ok: false, avviso: true, titolo: r.punto.nome, testo: 'Prima prendete un contratto.' };
+          if (c.area !== r.punto.id) return { ok: false, avviso: true, titolo: r.punto.nome, testo: 'Non è l\'area del vostro contratto: andate a ' + nomeArea(c.area) + '.' };
+          return scrivi({ tipo: 'fatto', contratto: c.id }).then(function () { return { ok: true, titolo: 'Contratto completato', testo: '+' + c.valore + ' nello zaino. Ora portatelo a un\'estrazione aperta.' }; });
+        });
+      });
+    }
+    function eliminati() {
+      apriFoglio(function (f) {
+        f.appendChild(el('h3', null, 'Squadra eliminata'));
+        f.appendChild(el('p', 'hint', 'Perdete lo zaino non esfiltrato. Chi vi ha eliminato?'));
+        (x.squadre || []).filter(function (q) { return q.id !== mia; }).forEach(function (q) {
+          f.appendChild(bottone(q.nome, 'big', function () { conferma(q.id); }));
+        });
+        f.appendChild(bottone('Non lo sappiamo', 'big', function () { conferma(null); }));
+        function conferma(da) { chiudiFoglio(); scrivi({ tipo: 'eliminata', da: da }).then(function () { toast('Zaino perso. Tornate all\'ingresso e ripartite.'); }, errore); }
+      });
+    }
+    conCampo(x.campo, mapBox, function (c0) {
+      cm = c0;
+      var g0 = { inizio: Date.now() + 864e5, durata: 60, fazioni: [{ team: 'blu', mob: null, partenza: [] }, { team: 'rossa', mob: null, partenza: [] }] };
+      v = F.vista(mapBox, { g: g0, campo: cm, team: null, colori: COLORI, nomi: {}, ora: Date.now, anteprima: true, allenamento: true });
+      disegna();
+    }, 'dmz');
+    disegna();
+    var stopE = S.ascoltaEventiDmz(x.id, function (ev) { ultimi = ev; if ($('foglio').hidden) disegna(); });
+    var giro = setInterval(function () { tick.forEach(function (fn) { fn(); }); if (Date.now() >= x.fine && !pan.querySelector('.dmz-fine')) disegna(); }, 1000);
+    var prima = chiusura; chiusura = function () { stopE(); clearInterval(giro); if (v) v.chiudi(); if (prima) prima(); };
+  }
+  function pagDmzLive(id) { var x = dmzDi(id); if (!x) return pagDmz(id); schermoDmz(x, (x.squadraDi || {})[S.stato().user.uid] || null); }
+  function cartaDmz(x) {
+    var k = el('button', 'carta promemoria dmz'); k.type = 'button';
+    var testa = el('div', 'pm-testa'); testa.appendChild(el('span', 'pm-eti', 'DMZ')); testa.appendChild(el('span', 'pm-tra', Date.now() >= x.inizio ? 'IN CORSO' : traQuanto(x.inizio))); k.appendChild(testa);
+    k.appendChild(el('h3', null, x.titolo || 'DMZ'));
+    k.appendChild(el('div', 'pm-data', dataBreve(x.inizio) + ' · ' + ora(x.inizio) + '–' + ora(x.fine)));
+    if (x.luogo) k.appendChild(el('div', 'pm-luogo', '⌖ ' + x.luogo));
+    k.appendChild(el('span', 'pm-apri', 'Tocca per squadra e regole ›'));
+    k.onclick = function () { vai('dmz', x.id); };
+    return k;
   }
 
   // ================= ALLENAMENTI A PORTE CHIUSE
@@ -1900,7 +2245,7 @@
 
 
   // ================= AVVIO
-  var avviato = false, aperturaFatta = false, stopAll = null, stopScen = null, stopCampi = null, stopContatti = null, stopTeam = null, stopConf = null, uidPrima = null;
+  var avviato = false, aperturaFatta = false, stopDmz = null, stopAll = null, stopScen = null, stopCampi = null, stopContatti = null, stopTeam = null, stopConf = null, uidPrima = null;
   // risposte: conflict attivi (chiave = id) e allenamenti in arrivo (chiave = 'a:' + id)
   function allenamentiAttivi() { return D.allenamenti.filter(function (a) { return (a.fine || a.inizio || 0) > Date.now() - 12 * 3600000; }).sort(function (a, b) { return (a.inizio || 0) - (b.inizio || 0); }); }
   function ascoltaAdesioniDi() {
@@ -1995,6 +2340,8 @@
       stopContatti = S.ascoltaContatti(function (m) { D.contatti = m; ridisegna(); });
       if (stopAll) stopAll();
       stopAll = S.ascoltaAllenamenti(function (x) { D.allenamenti = x; ascoltaAdesioniDi(); ridisegna(); });
+      if (stopDmz) stopDmz();
+      stopDmz = S.ascoltaDmz(function (x) { D.dmz = x; var v = corrente().v; if (v === 'home' || v === 'organizza' || (v === 'dmz' && !app.querySelector('.conf-hero'))) ridisegna(); });
       if (stopScen) stopScen(); stopScen = null;
       if (S.stato().dev) stopScen = S.ascoltaScenari(function (x) { D.scenari = x; if (corrente().v === 'organizza') ridisegna(); });
       if (stopCampi) stopCampi();
