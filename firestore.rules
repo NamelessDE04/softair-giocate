@@ -19,15 +19,17 @@ service cloud.firestore {
     // permessi predefiniti se il developer non ha ancora salvato la tabella
     function predefiniti() {
       return {
-        'organizzatore': { 'conflitti': true, 'mappe': true, 'team': true, 'giocatori': true, 'risposte': true, 'telefoni': true, 'rosa': true, 'ordini': true },
+        'organizzatore': { 'conflitti': true, 'allenamenti': true, 'mappe': true, 'team': true, 'giocatori': true, 'risposte': true, 'telefoni': true, 'rosa': true, 'ordini': true },
         'comandante': { 'risposte': true, 'telefoni': true, 'rosa': true, 'ordini': true },
         'caposquadra': { 'telefoni': true, 'rosa': true },
         'truppa': { 'telefoni': true, 'rosa': true }
       };
     }
+    function ruoloT() { return ruolo() == null ? 'truppa' : ruolo(); }
+    // permesso dalla tabella del developer; se nella tabella manca (permesso nuovo) vale quello predefinito
     function perm(p) {
       return isDev() || (signed()
-        && (exists(permRef()) ? get(permRef()).data : predefiniti()).get(ruolo() == null ? 'truppa' : ruolo(), {}).get(p, false) == true);
+        && (exists(permRef()) ? get(permRef()).data : predefiniti()).get(ruoloT(), {}).get(p, predefiniti().get(ruoloT(), {}).get(p, false)) == true);
     }
     function invito(cod) { return /databases/$(database)/documents/inviti/$(cod); }
     function isRef(tid) {
@@ -68,6 +70,12 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['squadra', 'team', 'codice'])
           && (request.resource.data.get('team', null) == resource.data.get('team', null) || request.resource.data.get('team', null) == null));
       allow delete: if perm('giocatori');
+    }
+
+    // Allenamenti a porte chiuse: li vedono solo i team invitati
+    match /allenamenti/{id} {
+      allow read: if perm('allenamenti') || (signed() && myTeam() != null && myTeam() in resource.data.team);
+      allow write: if perm('allenamenti');
     }
 
     // Combat a scenari (PCS): li prepara chi organizza

@@ -518,3 +518,32 @@ input.errato { border-color: var(--ko); }
   body.stampa-pcs .pcs-tap { break-before: page; }
   body.stampa-pcs .pcs-obj, body.stampa-pcs .pcs-tab tr { break-inside: avoid; }
 }
+
+.ed-usi { display: flex; gap: 6px; flex-wrap: wrap; }
+.ed-usi .btn.chip.on { background: var(--oro); color: #16160f; border-color: var(--oro); }
+
+.fz-evid { animation: lampo .9s ease-in-out infinite; }
+
+/* organizza a tasti grandi */
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.tile { display: grid; justify-items: center; gap: 6px; padding: 22px 10px; border-radius: 16px; border: 1px solid var(--linea); background: var(--pan); color: var(--ink); cursor: pointer; font: 700 19px var(--txt); }
+.tile-ic { font-size: 34px; color: var(--oro); line-height: 1; }
+.tile:active { transform: translateY(1px); }
+main > .btn.big { margin-bottom: 6px; }
+/* allenamenti */
+.carta.promemoria.verde { --faz: #3fae5a; }
+.conf-tipo.verde { background: #3fae5a; color: #0d1a10; }
+.all-hero { margin-bottom: 12px; }
+.all-park { margin: 0 0 12px; }
+.all-mappa { position: relative; height: 52vh; min-height: 300px; border-radius: 14px; overflow: hidden; border: 1px solid var(--linea); display: flex; flex-direction: column; scroll-margin-top: 70px; }
+.all-arg { display: grid; gap: 8px; }
+.all-riga { display: flex; gap: 12px; align-items: center; text-align: left; width: 100%; background: var(--pan); border: 2px solid var(--linea); border-radius: 12px; padding: 12px; color: var(--ink); cursor: pointer; }
+.all-riga.on { border-color: #5fe07a; background: color-mix(in srgb, #3fae5a 18%, var(--pan)); }
+.all-riga div { display: grid; flex: 1; min-width: 0; }
+.all-riga b { font-size: 19px; }
+.all-riga small { color: var(--muto); }
+.all-zona { color: #5fe07a !important; font-weight: 600; }
+.all-n { width: 34px; height: 34px; border-radius: 50%; background: #3fae5a; color: #0d1a10; display: grid; place-items: center; font-weight: 700; flex: none; }
+.all-ed { display: grid; gap: 6px; background: var(--pan); border-radius: 12px; padding: 10px; }
+.btn.chip.on.verde { background: #3fae5a; border-color: #3fae5a; color: #0d1a10; }
+.all-ed .ed-riga input { font-family: var(--txt); font-size: 17px; letter-spacing: 0; }

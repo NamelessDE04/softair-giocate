@@ -702,6 +702,14 @@
           });
           f.appendChild(campoF('Di quale fazione è', fz));
         }
+        // in quali tipi di giocata compare l'area (la stessa cartina serve per tutti)
+        p.usi = p.usi || { conflict: true, allenamento: true, pcs: true };
+        var us = el('div', 'ed-usi');
+        [['conflict', 'Conflict'], ['allenamento', 'Allenamento'], ['pcs', 'PCS']].forEach(function (o) {
+          var b = btn((p.usi[o[0]] ? '✓ ' : '') + o[1], 'chip' + (p.usi[o[0]] ? ' on' : ''), function () { p.usi[o[0]] = !p.usi[o[0]]; modificato = true; pannello(); });
+          us.appendChild(b);
+        });
+        f.appendChild(campoF('Usata in', us));
         var nb = el('input'), nr = el('input'); p.nomi = p.nomi || {};
         nb.placeholder = nr.placeholder = 'come sopra';
         nb.value = p.nomi.blu || ''; nr.value = p.nomi.rossa || '';
@@ -827,6 +835,7 @@
         controllo: c.controllo.map(function (p) { return { x: p.x, y: p.y, lat: p.lat, lon: p.lon, testo: p.testo || null }; }),
         punti: c.punti.map(function (p) { return { id: p.id, nome: p.nome.trim() || 'Area', tipo: p.tipo, x: p.x, y: p.y, lat: p.lat == null ? null : p.lat, lon: p.lon == null ? null : p.lon, raggio: p.raggio || 30, fonte: p.fonte || 'mappa',
           fazione: conFazione(p.tipo) ? (p.fazione || null) : null, notaQr: (p.notaQr || '').trim() || null,
+          usi: p.usi || { conflict: true, allenamento: true, pcs: true },
           nomi: { blu: (p.nomi && p.nomi.blu || '').trim() || null, rossa: (p.nomi && p.nomi.rossa || '').trim() || null } }; }),
         link: c.link.map(function (l) { return [l[0], l[1]]; }),
         tracce: c.tracce.map(function (tr) { return { id: tr.id, nome: (tr.nome || '').trim() || 'Sentiero', pts: tr.pts.map(function (p) { return { la: p[0], lo: p[1] }; }) }; }),

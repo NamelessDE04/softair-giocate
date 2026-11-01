@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.15';
+  var VERSIONE = '0.16';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -29,9 +29,10 @@
   function waLink(t) { var n = String(t || '').replace(/[^\d]/g, ''); if (n.length === 10) n = '39' + n; return 'https://wa.me/' + n; }
   function mapsLink(c) { return c.mapsUrl || ('https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(c.luogo || '')); }
   function link(testo, href, cls) { var a = el('a', cls || 'btn', testo); a.href = href; if (/^http/.test(href)) { a.target = '_blank'; a.rel = 'noopener'; } return a; }
-  function campoMeta(id) { return D.campi.filter(function (x) { return x.id === id; })[0] || null; }
+  function campoMeta(id, cat) { var c = D.campi.filter(function (x) { return x.id === id; })[0] || null; return c && cat ? perCategoria(c, cat) : c; }
   // carica la cartina completa (con l'immagine) e poi chiama fn; se nel frattempo si cambia schermata non fa nulla
-  function conCampo(id, box, fn) {
+  function conCampo(id, box, fn0, cat) {
+    var fn = function (cm) { fn0(cat ? perCategoria(cm, cat) : cm); };
     var cc = id && S.campoInCache(id);
     if (cc) { fn(cc); return; }
     var w = el('p', 'hint centro', id ? 'Caricamento della cartina…' : 'Per questo conflict non è stata scelta una cartina.');
@@ -64,7 +65,7 @@
   function visibile(da, perm) { return P(perm) || da == null || Date.now() >= da; }
 
   // ---------- dati condivisi
-  var D = { team: [], conflitti: [], adesioni: {}, contatti: {}, campi: [], scenari: [] };
+  var D = { team: [], conflitti: [], adesioni: {}, contatti: {}, campi: [], scenari: [], allenamenti: [] };
   var stopAdesioni = {};
   function teamDi(tid) { return D.team.filter(function (t) { return t.id === tid; })[0]; }
   function miaAdesione(cid) { var u = S.stato().user; return (D.adesioni[cid] || []).filter(function (a) { return a.id === u.uid; })[0]; }
@@ -92,7 +93,7 @@
     app.innerHTML = ''; window.scrollTo(0, 0);
     $('pieno').hidden = true; $('pieno').innerHTML = '';
     document.body.classList.remove('a-pieno');
-    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva }[c.v];
+    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva }[c.v];
     (r || home)(c.p);
   }
   function aPieno() { document.body.classList.add('a-pieno'); var p = $('pieno'); p.hidden = false; p.innerHTML = ''; return p; }
@@ -151,9 +152,12 @@
       var a = miaAdesione(c.id);
       if (!a) inviti.push(c); else if (a.si) promemoria.push(c);
     });
-    if (!inviti.length && !promemoria.length) { schermataInvito(); return; }
+    var all = D.allenamenti.filter(function (a) { return (a.fine || a.inizio || 0) > Date.now() - 12 * 3600000; }).sort(function (a, b) { return (a.inizio || 0) - (b.inizio || 0); });
+    if (!inviti.length && !promemoria.length && !all.length) { schermataInvito(); return; }
     inviti.forEach(function (c) { app.appendChild(cartaInvito(c)); });
-    promemoria.forEach(function (c) { app.appendChild(cartaPromemoria(c)); });
+    // conflict e allenamenti in ordine di data
+    promemoria.map(function (c) { return { t: c.inizio, el: cartaPromemoria(c) }; }).concat(all.map(function (a) { return { t: a.inizio || 0, el: cartaAllenamento(a) }; }))
+      .sort(function (x, y) { return x.t - y.t; }).forEach(function (x) { app.appendChild(x.el); });
   }
 
   function schermataInvito() {
@@ -260,10 +264,11 @@
       box.appendChild(r);
     }
     if (P('conflitti')) {
-      var adm = el('div', 'riga2');
+      var adm = el('div', 'riga2'); adm.hidden = true;
       adm.appendChild(bottone('Modifica conflict', '', function () { vai('conflittoModifica', c.id); }));
-      adm.appendChild(bottone('+ Nuovo post', 'accent', function () { editorPost(c, null); }));
+      adm.appendChild(bottone('+ Nuovo post', '', function () { editorPost(c, null); }));
       adm.appendChild(bottone('📻 Maglia radio', '', function () { vai('radio', c.id); }));
+      box.appendChild(bottone('⚙ Gestisci', 'link', function () { adm.hidden = !adm.hidden; }));
       box.appendChild(adm);
     }
 
@@ -340,7 +345,7 @@
 
     // maglia radio: il canale comune e quella della propria fazione (l'organizzatore le vede tutte)
     var rBox = el('div', 'radio-box'); box.appendChild(rBox);
-    var piano = {}, docs = P('conflitti') ? ['comune', 'blu', 'rossa'] : ['comune'].concat(mieFaz(c) ? [mieFaz(c)] : []);
+    var piano = {}, docs = P('conflitti') ? ['comune', 'blu', 'rossa'] : ['comune'].concat(mieFaz(c) && P('radio') ? [mieFaz(c)] : []);
     var stopR = docs.map(function (d) { return S.ascoltaRadio(c.id, d, function (x) { piano[d] = x; disegnaRadio(rBox, c, piano); }); });
     var primaR = chiusura; chiusura = function () { stopR.forEach(function (f) { f(); }); if (primaR) primaR(); };
 
@@ -399,7 +404,7 @@
     var tt = el('b', null, (campoMeta(c.campo) || {}).nome || 'Cartina'); bar.appendChild(tt);
     p.appendChild(bar);
     var box = el('div', 'pieno-mappa'); p.appendChild(box);
-    conCampo(c.campo, box, function (cm) {
+    conCampo(c.campo, box, function (cm) { cm = perCategoria(cm, 'conflict');
       var v = F.vista(box, { g: motore(c), campo: cm, team: mieFaz(c), colori: COLORI, nomi: nomiFaz(c), ora: Date.now, anteprima: true });
       var prima = chiusura; chiusura = function () { v.chiudi(); if (prima) prima(); };
     });
@@ -432,7 +437,7 @@
     function tic() { var r = c.inizio - Date.now(); num.textContent = F.hms(r); if (r <= 0) mostra(); }
     tic(); var t = setInterval(tic, 1000);
     var prima = chiusura; chiusura = function () { clearInterval(t); if (v) v.chiudi(); if (prima) prima(); };
-    conCampo(c.campo, box, function (cm) { v = F.vista(box, { g: motore(c), campo: cm, team: f, colori: COLORI, nomi: nomiFaz(c), ora: Date.now, anteprima: true }); });
+    conCampo(c.campo, box, function (cm) { cm = perCategoria(cm, 'conflict'); v = F.vista(box, { g: motore(c), campo: cm, team: f, colori: COLORI, nomi: nomiFaz(c), ora: Date.now, anteprima: true }); });
   }
 
   // partita in corso: mappa a tutto schermo, tempi in alto, punti chiave in basso
@@ -451,7 +456,7 @@
       var p = F.postiDifesa(motore(c), cl, st2, 'rossa', dif, now)[st.user.uid];
       return p ? [p] : [];
     } : null;
-    conCampo(c.campo, box, function (cm) {
+    conCampo(c.campo, box, function (cm) { cm = perCategoria(cm, 'conflict');
     var v = F.vista(box, {
       g: motore(c), campo: cm, team: f, ordiniPersonali: personali, colori: COLORI, nomi: nomiFaz(c), ora: Date.now,
       gps: !!f, qr: !!f, comandante: comandante, presenze: P('presenze'),
@@ -768,68 +773,211 @@
   }
 
   // ================= ORGANIZZA (solo organizzatore)
-  function pagOrganizza() {
-    testata('Organizza');
-    if (S.stato().dev) {
-      app.appendChild(el('h3', 'sez', 'Ruoli e permessi'));
-      app.appendChild(bottone('Cosa può vedere e fare ogni ruolo', 'accent', function () { vai('permessi'); }));
+  // Organizza: pochi tasti grandi, ogni sezione ha la sua pagina
+  function pagOrganizza(sez) {
+    var dev = S.stato().dev;
+    var SEZ = [
+      ['conflitti', '⚔', 'Conflict', P('conflitti')],
+      ['allenamenti', '◎', 'Allenamenti', P('allenamenti')],
+      ['team', '⚑', 'Team', P('team')],
+      ['giocatori', '☺', 'Giocatori', P('giocatori')],
+      ['cartine', '⌖', 'Cartine', P('mappe')],
+      ['pcs', '★', 'Scenari PCS', dev],
+      ['ruoli', '⚙', 'Ruoli e permessi', dev]
+    ].filter(function (x) { return x[3]; });
+    if (!sez) {
+      testata('Organizza');
+      var g = el('div', 'tiles');
+      SEZ.forEach(function (x) {
+        var b = el('button', 'tile'); b.type = 'button';
+        b.appendChild(el('span', 'tile-ic', x[1])); b.appendChild(el('b', null, x[2]));
+        b.onclick = function () { if (x[0] === 'giocatori') vai('giocatori'); else if (x[0] === 'ruoli') vai('permessi'); else vai('organizza', x[0]); };
+        g.appendChild(b);
+      });
+      app.appendChild(g);
+      return;
     }
-    if (P('conflitti')) {
-      app.appendChild(el('h3', 'sez', 'Conflict'));
-      app.appendChild(bottone('+ Nuovo conflict', 'accent', function () { vai('conflittoModifica', null); }));
+    function riga(titolo, sotto, fn, logoT) {
+      var r = el('button', 'riga-lista' + (logoT ? ' con-logo' : '')); r.type = 'button';
+      if (logoT) { r.appendChild(logo(logoT, 36)); var i = el('div'); i.appendChild(el('b', null, titolo)); i.appendChild(el('small', null, sotto)); r.appendChild(i); }
+      else { r.appendChild(el('b', null, titolo)); r.appendChild(el('small', null, sotto)); }
+      r.onclick = fn; app.appendChild(r); return r;
+    }
+    if (sez === 'conflitti') {
+      testata('Conflict');
+      app.appendChild(bottone('+ Nuovo conflict', 'accent big', function () { vai('conflittoModifica', null); }));
       D.conflitti.slice().sort(function (a, b) { return b.inizio - a.inizio; }).forEach(function (c) {
-        var r = el('button', 'riga-lista'); r.type = 'button';
-        r.appendChild(el('b', null, c.titolo)); r.appendChild(el('small', null, dataBreve(c.inizio) + ' · ' + (c.team || []).length + ' team'));
-        r.onclick = function () { vai('conflitto', c.id); };
-        app.appendChild(r);
+        riga(c.titolo, dataBreve(c.inizio) + ' · ' + (addestramento(c) ? 'addestramento' : (c.team || []).length + ' team'), function () { vai('conflitto', c.id); });
       });
-    }
-    if (P('conflitti')) {
-      app.appendChild(el('h3', 'sez', 'Combat a scenari (PCS)'));
-      app.appendChild(bottone('+ Nuovo scenario', 'accent', function () { vai('scenario', null); }));
+    } else if (sez === 'allenamenti') {
+      testata('Allenamenti a porte chiuse');
+      app.appendChild(bottone('+ Nuovo allenamento', 'accent big', function () { vai('allenamentoModifica', null); }));
+      D.allenamenti.slice().sort(function (a, b) { return (b.inizio || 0) - (a.inizio || 0); }).forEach(function (x) {
+        riga(x.titolo || 'Allenamento', (x.inizio ? dataBreve(x.inizio) : '') + ' · ' + (x.argomenti || []).length + ' argomenti · ' + (x.team || []).map(function (t) { return (teamDi(t) || {}).nome; }).filter(Boolean).join(', '), function () { vai('allenamento', x.id); });
+      });
+    } else if (sez === 'pcs') {
+      testata('Scenari PCS');
+      app.appendChild(bottone('+ Nuovo scenario', 'accent big', function () { vai('scenario', null); }));
       D.scenari.slice().sort(function (a, b) { return (b.data || '').localeCompare(a.data || ''); }).forEach(function (sc) {
-        var r = el('button', 'riga-lista'); r.type = 'button';
-        r.appendChild(el('b', null, (sc.gen && sc.gen.operazione) || 'Scenario senza nome'));
-        r.appendChild(el('small', null, (sc.squadra || 'Squadra') + ' · ' + (sc.tappe || []).length + ' tappe' + (sc.data ? ' · ' + sc.data.split('-').reverse().join('/') : '')));
-        r.onclick = function () { vai('scenario', sc.id); };
-        app.appendChild(r);
+        riga((sc.gen && sc.gen.operazione) || 'Scenario senza nome', (sc.squadra || 'Squadra') + ' · ' + (sc.tappe || []).length + ' tappe' + (sc.data ? ' · ' + sc.data.split('-').reverse().join('/') : ''), function () { vai('scenario', sc.id); });
       });
-    }
-    if (P('mappe')) {
-      app.appendChild(el('h3', 'sez', 'Cartine'));
-      app.appendChild(bottone('+ Nuova cartina', 'accent', function () { vai('mappa', null); }));
-      if (window.innerWidth < 900) app.appendChild(el('p', 'hint', 'L\'editor delle cartine è pensato per il computer.'));
+    } else if (sez === 'cartine') {
+      testata('Cartine');
+      app.appendChild(bottone('+ Nuova cartina', 'accent big', function () { vai('mappa', null); }));
+      if (window.innerWidth < 900) app.appendChild(el('p', 'hint', 'Le cartine si disegnano meglio dal computer.'));
       D.campi.slice().sort(function (a, b) { return a.nome.localeCompare(b.nome); }).forEach(function (cm) {
-        var r = el('button', 'riga-lista'); r.type = 'button';
-        var n = (cm.punti || []).length;
-        r.appendChild(el('b', null, cm.nome)); r.appendChild(el('small', null, n + ' aree · ' + (cm.link || []).length + ' collegamenti · ' + (cm.geo ? 'georeferenziata' : 'senza coordinate')));
-        r.onclick = function () { vai('mappa', cm.id); };
-        app.appendChild(r);
-        var az = el('div', 'riga-az');
+        var r = riga(cm.nome, (cm.punti || []).length + ' aree' + (cm.geo ? '' : ' · senza coordinate'), function () { vai('mappa', cm.id); });
+        // QR: dietro un tasto discreto
+        var piu = bottone('QR ▾', 'link', function () { az.hidden = !az.hidden; });
+        app.appendChild(piu);
+        var az = el('div', 'riga-az'); az.hidden = true;
         az.appendChild(bottone('Stampa i QR', 'piccolo', function () { vai('stampaQr', cm.id); }));
         az.appendChild(bottone('Posa i QR', 'piccolo', function () { vai('posa', cm.id); }));
         app.appendChild(az);
       });
-    }
-    if (P('giocatori')) {
-      app.appendChild(el('h3', 'sez', 'Giocatori'));
-      app.appendChild(bottone(S.stato().dev ? 'Tutti i giocatori e i loro ruoli' : 'Tutti i giocatori iscritti', '', function () { vai('giocatori'); }));
-    }
-    if (P('team')) {
-      app.appendChild(el('h3', 'sez', 'Team'));
-      app.appendChild(bottone('+ Nuovo team', 'accent', function () {
+    } else if (sez === 'team') {
+      testata('Team');
+      app.appendChild(bottone('+ Nuovo team', 'accent big', function () {
         var n = prompt('Nome del nuovo team'); if (!n || !n.trim()) return;
         S.creaTeam(n.trim()).then(function (tid) { vai('team', tid); }, errore);
       }));
       D.team.slice().sort(function (a, b) { return a.nome.localeCompare(b.nome); }).forEach(function (t) {
-        var r = el('button', 'riga-lista con-logo'); r.type = 'button';
-        r.appendChild(logo(t, 36));
-        var i = el('div'); i.appendChild(el('b', null, t.nome)); i.appendChild(el('small', null, t.referente && t.referente.nome ? 'Ref. ' + t.referente.nome : 'Referente da indicare')); r.appendChild(i);
-        r.onclick = function () { vai('team', t.id); };
-        app.appendChild(r);
+        riga(t.nome, t.referente && t.referente.nome ? 'Ref. ' + t.referente.nome : 'Referente da indicare', function () { vai('team', t.id); }, t);
       });
     }
   }
+
+  // ================= ALLENAMENTI A PORTE CHIUSE
+  // aree della cartina per un tipo di giocata (conflict, allenamento, pcs): senza "usi" valgono per tutti
+  function perCategoria(cm, cat) {
+    var punti = (cm.punti || []).filter(function (p) { return !p.usi || p.usi[cat] !== false; }), ids = {};
+    punti.forEach(function (p) { ids[p.id] = 1; });
+    return Object.assign({}, cm, { punti: punti, link: (cm.link || []).filter(function (l) { return ids[l[0]] && ids[l[1]]; }) });
+  }
+  function pagAllenamento(id) {
+    var a = D.allenamenti.filter(function (x) { return x.id === id; })[0];
+    testata(a ? a.titolo || 'Allenamento' : 'Allenamento');
+    if (!a) { app.appendChild(el('p', 'hint', 'Allenamento non trovato.')); return; }
+    if (P('allenamenti')) app.appendChild(bottone('⚙ Modifica', 'link', function () { vai('allenamentoModifica', a.id); }));
+    var hero = el('div', 'conf-hero all-hero');
+    hero.appendChild(el('div', 'conf-tipo verde', 'ALLENAMENTO · PORTE CHIUSE'));
+    if (a.inizio) hero.appendChild(el('div', 'pm-data', dataLunga(a.inizio).toUpperCase()));
+    var orari = el('div', 'pm-orari');
+    [['RITROVO', a.ritrovo], ['INIZIO', a.inizio], ['FINE', a.fine]].forEach(function (o) { if (!o[1]) return; var d = el('div'); d.appendChild(el('small', null, o[0])); d.appendChild(el('b', null, ora(o[1]))); orari.appendChild(d); });
+    hero.appendChild(orari);
+    var lg = el('div', 'conf-luogo'); lg.appendChild(el('span', null, '⌖ ' + (a.luogo || 'Luogo da definire')));
+    if (a.luogo || a.mapsUrl) lg.appendChild(link('Apri in Maps', mapsLink(a), 'btn piccolo'));
+    hero.appendChild(lg);
+    app.appendChild(hero);
+    var pk = a.parcheggio || {};
+    if (pk.testo || pk.mapsUrl) {
+      var k = el('div', 'carta all-park'); k.appendChild(el('b', null, '🅿 Parcheggio'));
+      if (pk.testo) k.appendChild(el('p', 'testo', pk.testo));
+      if (pk.mapsUrl) k.appendChild(link('Portami al parcheggio', pk.mapsUrl, 'btn'));
+      app.appendChild(k);
+    }
+    // mappa con le zone di allenamento e argomenti: toccando un argomento lampeggia la sua zona
+    var mapBox = el('div', 'all-mappa'); app.appendChild(mapBox);
+    var lista = el('div', 'all-arg'); app.appendChild(el('h3', 'sez', 'Argomenti')); app.appendChild(lista);
+    var v = null, scelto = null;
+    function disegnaArg(cm) {
+      lista.innerHTML = '';
+      (a.argomenti || []).forEach(function (g, i) {
+        var p = cm && (cm.punti || []).filter(function (x) { return x.id === g.area; })[0];
+        var r = el('button', 'all-riga' + (scelto === i ? ' on' : '')); r.type = 'button';
+        r.appendChild(el('span', 'all-n', String(i + 1)));
+        var t = el('div'); t.appendChild(el('b', null, g.titolo || 'Argomento')); if (g.descrizione) t.appendChild(el('small', null, g.descrizione));
+        if (p) t.appendChild(el('small', 'all-zona', '◎ ' + p.nome));
+        r.appendChild(t);
+        r.onclick = function () { scelto = scelto === i ? null : i; if (v) v.evidenzia(scelto == null ? null : g.area); disegnaArg(cm); mapBox.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+        lista.appendChild(r);
+      });
+      if (!(a.argomenti || []).length) lista.appendChild(el('p', 'hint', 'Argomenti in arrivo.'));
+    }
+    disegnaArg(null);
+    if (a.campo) conCampo(a.campo, mapBox, function (cm0) {
+      var cm = perCategoria(cm0, 'allenamento');
+      var g0 = { inizio: Date.now() + 864e5, durata: 60, fazioni: [{ team: 'blu', mob: null, partenza: [] }, { team: 'rossa', mob: null, partenza: [] }] };
+      v = F.vista(mapBox, { g: g0, campo: cm, team: null, colori: COLORI, nomi: {}, ora: Date.now, anteprima: true, allenamento: true });
+      disegnaArg(cm);
+      var prima = chiusura; chiusura = function () { v.chiudi(); if (prima) prima(); };
+    });
+    else mapBox.appendChild(el('p', 'hint centro', 'Cartina non ancora scelta.'));
+  }
+  function pagAllenamentoModifica(id) {
+    var vecchio = D.allenamenti.filter(function (x) { return x.id === id; })[0];
+    testata(vecchio ? 'Modifica allenamento' : 'Nuovo allenamento');
+    if (!P('allenamenti')) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
+    var g7 = mezzanotte(Date.now() + 7 * GIORNO);
+    var a = vecchio ? JSON.parse(JSON.stringify(vecchio)) : { titolo: 'Allenamento', luogo: '', mapsUrl: '', ritrovo: g7 + 8.5 * 3600000, inizio: g7 + 9 * 3600000, fine: g7 + 12.5 * 3600000, parcheggio: { testo: '', mapsUrl: '' }, campo: D.campi.length === 1 ? D.campi[0].id : '', team: [], argomenti: [] };
+    var f = el('div', 'modulo'); app.appendChild(f);
+    var tit = el('input'); tit.value = a.titolo || ''; f.appendChild(campoForm('Titolo', tit));
+    var dt = el('input'); dt.type = 'date'; dt.value = locale(a.inizio || Date.now()).slice(0, 10); f.appendChild(campoForm('Data', dt));
+    function oraI(ms) { var i = el('input'); i.type = 'time'; i.value = ms ? ora(ms) : ''; return i; }
+    var hR = oraI(a.ritrovo), hI = oraI(a.inizio), hF = oraI(a.fine), tre = el('div', 'tre');
+    tre.appendChild(campoForm('Ritrovo', hR)); tre.appendChild(campoForm('Inizio', hI)); tre.appendChild(campoForm('Fine', hF)); f.appendChild(tre);
+    var lg = el('input'); lg.value = a.luogo || ''; f.appendChild(campoForm('Luogo', lg));
+    var mu = el('input'); mu.value = a.mapsUrl || ''; mu.placeholder = 'Link Google Maps (facoltativo)'; f.appendChild(campoForm('Link del luogo', mu));
+    var pT = el('textarea'); pT.rows = 2; pT.value = (a.parcheggio || {}).testo || ''; f.appendChild(campoForm('Parcheggio', pT));
+    var pU = el('input'); pU.value = (a.parcheggio || {}).mapsUrl || ''; pU.placeholder = 'Link Google Maps del parcheggio'; f.appendChild(campoForm('Link del parcheggio', pU));
+    f.appendChild(el('h3', 'sez', 'Chi lo vede'));
+    var tl = el('div', 'chips');
+    D.team.forEach(function (t) {
+      var b = bottone(t.nome, 'chip' + (a.team.indexOf(t.id) >= 0 ? ' on verde' : ''), function () {
+        var i = a.team.indexOf(t.id); if (i >= 0) a.team.splice(i, 1); else a.team.push(t.id);
+        b.className = 'btn chip' + (a.team.indexOf(t.id) >= 0 ? ' on verde' : '');
+      });
+      tl.appendChild(b);
+    });
+    f.appendChild(tl);
+    f.appendChild(el('h3', 'sez', 'Cartina e argomenti'));
+    var cSel = select([['', '— nessuna —']].concat(D.campi.map(function (x) { return [x.id, x.nome]; })), a.campo || '');
+    f.appendChild(campoForm('Cartina', cSel));
+    var aBox = el('div', 'modulo'); f.appendChild(aBox);
+    function disegnaArg() {
+      aBox.innerHTML = '';
+      var cm = campoMeta(cSel.value), zone = cm ? perCategoria(cm, 'allenamento').punti : [];
+      if (cm && !zone.length) aBox.appendChild(el('p', 'hint avviso', 'Nella cartina nessuna area è segnata per l\'allenamento (editor → area → «Usata in»).'));
+      a.argomenti.forEach(function (g, i) {
+        var k = el('div', 'all-ed');
+        var t = el('input'); t.value = g.titolo || ''; t.placeholder = 'es. Bonifica di un edificio'; t.oninput = function () { g.titolo = t.value; };
+        var z = select([['', 'Zona: —']].concat(zone.map(function (p) { return [p.id, p.nome]; })), g.area || ''); z.onchange = function () { g.area = z.value || null; };
+        var d = el('input'); d.value = g.descrizione || ''; d.placeholder = 'Nota (facoltativa)'; d.oninput = function () { g.descrizione = d.value; };
+        var h = el('div', 'ed-riga'); h.appendChild(el('b', 'all-n', String(i + 1))); h.appendChild(t);
+        h.appendChild(bottone('✕', 'icon', function () { a.argomenti.splice(i, 1); disegnaArg(); }));
+        k.appendChild(h); k.appendChild(z); k.appendChild(d); aBox.appendChild(k);
+      });
+      aBox.appendChild(bottone('+ Aggiungi argomento', 'link', function () { a.argomenti.push({ titolo: '', area: null, descrizione: '' }); disegnaArg(); }));
+    }
+    cSel.onchange = disegnaArg; disegnaArg();
+    var az = el('div', 'riga2 fisso');
+    az.appendChild(bottone('Salva', 'accent big', function () {
+      if (!dt.value || !hI.value) { toast('Servono data e ora di inizio'); return; }
+      if (!a.team.length) { toast('Scegli almeno un team'); return; }
+      function ms(h) { return h ? new Date(dt.value + 'T' + h).getTime() : null; }
+      var out = { id: a.id, titolo: tit.value.trim() || 'Allenamento', luogo: lg.value.trim(), mapsUrl: mu.value.trim(),
+        ritrovo: ms(hR.value), inizio: ms(hI.value), fine: ms(hF.value) || ms(hI.value) + 3 * 3600000,
+        parcheggio: { testo: pT.value.trim(), mapsUrl: pU.value.trim() }, campo: cSel.value, team: a.team,
+        argomenti: a.argomenti.filter(function (g) { return (g.titolo || '').trim(); }).map(function (g) { return { titolo: g.titolo.trim(), area: g.area || null, descrizione: (g.descrizione || '').trim() }; }) };
+      S.salvaAllenamento(out).then(function (nid) { toast('Allenamento salvato'); if (vecchio) indietro(); else sostituisci('allenamento', nid); }, errore);
+    }));
+    if (vecchio) az.appendChild(bottone('Elimina', 'pericolo', function () { if (confirm('Eliminare l\'allenamento?')) S.eliminaAllenamento(vecchio.id).then(function () { tornaIndietro(2); }, errore); }));
+    app.appendChild(az);
+  }
+  function cartaAllenamento(a) {
+    var k = el('button', 'carta promemoria verde'); k.type = 'button';
+    var testa = el('div', 'pm-testa'); testa.appendChild(el('span', 'pm-eti', 'ALLENAMENTO')); if (a.inizio) testa.appendChild(el('span', 'pm-tra', traQuanto(a.inizio))); k.appendChild(testa);
+    k.appendChild(el('h3', null, a.titolo || 'Allenamento'));
+    if (a.inizio) k.appendChild(el('div', 'pm-data', dataBreve(a.inizio)));
+    var orari = el('div', 'pm-orari');
+    [['RITROVO', a.ritrovo], ['INIZIO', a.inizio], ['FINE', a.fine]].forEach(function (o) { if (!o[1]) return; var d = el('div'); d.appendChild(el('small', null, o[0])); d.appendChild(el('b', null, ora(o[1]))); orari.appendChild(d); });
+    k.appendChild(orari);
+    k.appendChild(el('div', 'pm-luogo', '⌖ ' + (a.luogo || 'Luogo da definire')));
+    k.appendChild(el('span', 'pm-apri', 'Tocca per mappa e argomenti ›'));
+    k.onclick = function () { vai('allenamento', a.id); };
+    return k;
+  }
+
 
   // ================= RUOLI E PERMESSI (solo developer)
   function pagPermessi() {
@@ -911,7 +1059,7 @@
     var base = { blu: c.fazioni[0].mob, rossa: c.fazioni[1].mob }, partenza = { blu: (c.fazioni[0].partenza || []).slice(), rossa: (c.fazioni[1].partenza || []).slice() };
     function disegnaBasi() {
       mobBox.innerHTML = '';
-      var cm = campoMeta(cSel.value);
+      var cm = campoMeta(cSel.value, 'conflict');
       if (!cm) { mobBox.appendChild(el('p', 'hint', D.campi.length ? 'Scegli la cartina del campo.' : 'Nessuna cartina: creala da Organizza → Cartine (da computer).')); return; }
       if (!cm.geo) mobBox.appendChild(el('p', 'hint avviso', 'Questa cartina non è georeferenziata: il GPS non potrà riconoscere le aree.'));
       var mobs = (cm.punti || []).filter(function (p) { return p.tipo === 'mob'; }), altri = (cm.punti || []).filter(function (p) { return p.tipo !== 'mob' && p.tipo !== 'fob'; });
@@ -954,7 +1102,7 @@
       });
     }
     function nomeArea(p, f) { return (p.nomi && p.nomi[f]) || p.nome; }
-    function difesaTutto() { var cm0 = campoMeta(cSel.value); return ((cm0 && cm0.punti) || []).filter(function (p) { return p.tipo !== 'mob' && p.tipo !== 'fob'; }).map(function (p) { return p.id; }); }
+    function difesaTutto() { var cm0 = campoMeta(cSel.value, 'conflict'); return ((cm0 && cm0.punti) || []).filter(function (p) { return p.tipo !== 'mob' && p.tipo !== 'fob'; }).map(function (p) { return p.id; }); }
     cSel.onchange = function () { partenza = { blu: [], rossa: modo === 'addestramento' ? difesaTutto() : [] }; disegnaBasi(); };
     disegnaBasi();
     // fazioni e team
@@ -1070,7 +1218,7 @@
         dif.forEach(function (u) { fazioneUtente[u.id] = 'rossa'; });
         mm.forEach(function (u) { nomiGioc[u.id] = nomeG(u); });
       } else Object.keys(scelta).forEach(function (t) { if (scelta[t]) { team.push(t); fazioneDi[t] = scelta[t]; } });
-      var cmS = campoMeta(cSel.value);
+      var cmS = campoMeta(cSel.value, 'conflict');
       function fobDi(f) { return ((cmS && cmS.punti) || []).filter(function (p) { return p.tipo === 'fob' && p.fazione === f; }).map(function (p) { return p.id; }); }
       if (!cmS) { toast('Scegli la cartina del campo'); return; }
       if ((cmS.punti || []).filter(function (p) { return p.tipo === 'mob'; }).length < 2 || base.blu === base.rossa) { toast('Servono due basi di partenza diverse'); return; }
@@ -1120,6 +1268,7 @@
     var p = aPieno();
     var box = el('div', 'pieno-mappa tutta'); p.appendChild(box);
     conCampo(id, box, function (cm) {
+      cm = perCategoria(cm, 'conflict');
       var vel = el('div', 'prova-vel'); vel.appendChild(el('b', null, 'PROVA'));
       var pr = F.prova(box, function () { indietro(); }, { presenze: P('presenze'), comandante: P('ordini'), addestramento: tipoProva !== 'conflict', lato: tipoProva === 'difesa' ? 'difesa' : 'attacco' }, cm);
       [1, 10, 30].forEach(function (x) {
@@ -1383,7 +1532,7 @@
   function pagScenario(id) {
     var PC = window.AC_PCS, vecchio = D.scenari.filter(function (x) { return x.id === id; })[0];
     testata(vecchio ? 'Scenario PCS' : 'Nuovo scenario PCS');
-    if (!P('conflitti')) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
+    if (!S.stato().dev) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
     var nuovaSk = function () { var o = {}; PC.SKILL.forEach(function (k) { o[k[0]] = 30; }); return o; };
     var sc = vecchio ? JSON.parse(JSON.stringify(vecchio)) : { squadra: '', data: locale(Date.now() + 7 * GIORNO).slice(0, 10), tema: 'auto', campo: '', tappe: [{ settore: 'Settore 1', durata: 45, skill: nuovaSk() }], seme: Math.floor(Math.random() * 1e9) };
     var form = el('div', 'modulo'); app.appendChild(form);
@@ -1399,7 +1548,7 @@
     var tBox = el('div', 'pcs-tappe'); form.appendChild(tBox);
     function disegnaTappe() {
       tBox.innerHTML = '';
-      var cm = campoMeta(campoS.value);
+      var cm = campoMeta(campoS.value, 'pcs');
       sc.tappe.forEach(function (t, i) {
         var k = el('div', 'pcs-tappa');
         var h = el('div', 'pcs-th'); h.appendChild(el('b', null, 'Tappa ' + (i + 1)));
@@ -1729,7 +1878,7 @@
 
 
   // ================= AVVIO
-  var avviato = false, aperturaFatta = false, stopScen = null, stopCampi = null, stopContatti = null, stopTeam = null, stopConf = null, uidPrima = null;
+  var avviato = false, aperturaFatta = false, stopAll = null, stopScen = null, stopCampi = null, stopContatti = null, stopTeam = null, stopConf = null, uidPrima = null;
   function ascoltaAdesioniDi(lista) {
     var ids = lista.map(function (c) { return c.id; });
     Object.keys(stopAdesioni).forEach(function (id) { if (ids.indexOf(id) < 0) { stopAdesioni[id](); delete stopAdesioni[id]; delete D.adesioni[id]; } });
@@ -1742,6 +1891,7 @@
   function ridisegna() {
     var v = corrente().v;
     if (v === 'home' || v === 'organizza' || (v === 'team' && !document.activeElement.matches('input,textarea,select'))) mostra();
+    else if (v === 'allenamento' && !app.querySelector('.all-mappa')) mostra();   // appena creato: arriva un attimo dopo
     else if (v === 'conflitto') {
       var c = D.conflitti.filter(function (x) { return x.id === corrente().p; })[0];
       if (!c || (fase(c) !== 'live' && fase(c) !== 'giorno' && !$('pieno').querySelector('.fz'))) mostra();
@@ -1786,8 +1936,10 @@
       Object.keys(stopAdesioni).forEach(function (id) { stopAdesioni[id](); }); stopAdesioni = {}; D.adesioni = {};
       if (stopContatti) stopContatti();
       stopContatti = S.ascoltaContatti(function (m) { D.contatti = m; ridisegna(); });
+      if (stopAll) stopAll();
+      stopAll = S.ascoltaAllenamenti(function (x) { D.allenamenti = x; ridisegna(); });
       if (stopScen) stopScen(); stopScen = null;
-      if (P('conflitti')) stopScen = S.ascoltaScenari(function (x) { D.scenari = x; if (corrente().v === 'organizza') ridisegna(); });
+      if (S.stato().dev) stopScen = S.ascoltaScenari(function (x) { D.scenari = x; if (corrente().v === 'organizza') ridisegna(); });
       if (stopCampi) stopCampi();
       stopCampi = S.ascoltaCampi(function (cm) { D.campi = cm; if (corrente().v === 'organizza') ridisegna(); });
       stopTeam = S.ascoltaTeam(function (t) { D.team = t; ridisegna(); });

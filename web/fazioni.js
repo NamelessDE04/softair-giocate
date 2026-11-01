@@ -357,7 +357,13 @@
     // --- disegno
     var st = null, eventi = [], visti = 0, ultimoOrdine = '', primo = true, posto = null;
     var NEUTRO = '#9a9a8c';
-    function col(team) { return team ? (opts.colori[team] || '#888') : NEUTRO; }
+    function col(team) { return team ? (opts.colori[team] || '#888') : opts.allenamento ? '#3fae5a' : NEUTRO; }
+    var evid = null;   // area evidenziata (allenamento: argomento scelto)
+    function evidenzia(id) {
+      evid = id || null;
+      var p = id && punto(campo, id);
+      if (p) { var q = pxP(campo, p); tx = vw / 2 - q.x * sc; ty = vh / 2 - q.y * sc; applica(); } else disegna();
+    }
     function nomeF(team) { return team ? (opts.nomi[team] || 'Fazione') : 'Neutrale'; }
     function esc(t) { return String(t).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
     function testo(s, x, y, size, cls, fill) {
@@ -373,8 +379,9 @@
         s += '<path d="' + d + '" fill="none" stroke="#e9dcb8" stroke-opacity=".9" stroke-width="' + (2.2 * k) + '" stroke-dasharray="' + (7 * k) + ' ' + (4 * k) + '" stroke-linejoin="round" stroke-linecap="round"/>';
       });
       // collegamenti: grigi tratteggiati; pieni se entrambi i capi sono della stessa fazione; tratteggio colorato in movimento se ne tiene uno solo
-      campo.link.forEach(function (l) {
-        var a = punto(campo, l[0]), b = punto(campo, l[1]), pa = pxP(campo, a), pb = pxP(campo, b);
+      (opts.allenamento ? [] : campo.link).forEach(function (l) {
+        var a = punto(campo, l[0]), b = punto(campo, l[1]); if (!a || !b) return;
+        var pa = pxP(campo, a), pb = pxP(campo, b);
         var oa = st.owner[a.id], ob = st.owner[b.id], c2 = 'rgba(230,226,210,.5)', dash = (9 * k) + ' ' + (8 * k), w = 2.6 * k, cls = '';
         if (oa && oa === ob) { c2 = col(oa); dash = ''; w = 3.6 * k; }
         else if (oa || ob) { c2 = col(oa || ob); dash = (11 * k) + ' ' + (7 * k); w = 3.6 * k; cls = ' class="lk-run" style="--d:' + (18 * k) + 'px"'; }
@@ -391,6 +398,7 @@
           s += '<circle cx="' + q.x + '" cy="' + q.y + '" r="' + rr + '" fill="none" stroke="#000" stroke-opacity=".5" stroke-width="' + (6 * k) + '"/>';
           s += '<circle cx="' + q.x + '" cy="' + q.y + '" r="' + rr + '" fill="none" stroke="' + col(pr.team) + '" stroke-width="' + (5 * k) + '" stroke-dasharray="' + (giro * frac) + ' ' + giro + '" transform="rotate(-90 ' + q.x + ' ' + q.y + ')"/>';
         }
+        if (evid === p.id) s += '<circle class="fz-evid" cx="' + q.x + '" cy="' + q.y + '" r="' + (r + 16 * k) + '" fill="#3fae5a" fill-opacity=".18" stroke="#5fe07a" stroke-width="' + (4 * k) + '" stroke-dasharray="' + (10 * k) + ' ' + (7 * k) + '"/>';
         if (posto === p.id) s += '<circle class="fz-posto" cx="' + q.x + '" cy="' + q.y + '" r="' + (r + 20 * k) + '" fill="none" stroke="#e8c96a" stroke-width="' + (3 * k) + '" stroke-dasharray="' + (4 * k) + ' ' + (6 * k) + '"/>';
         if (cont) s += '<circle class="fz-cont" cx="' + q.x + '" cy="' + q.y + '" r="' + (r + 13 * k) + '" fill="none" stroke="#ffd23f" stroke-width="' + (4 * k) + '" stroke-dasharray="' + (10 * k) + ' ' + (7 * k) + '"/>';
         // simbolo al centro
@@ -570,7 +578,7 @@
     var tic = setInterval(function () { aggiorna(); }, 1000);
     aggiorna();
     return {
-      aggiorna: aggiorna, posizione: impostaPos, centra: adatta, zonaQr: zonaQr,
+      aggiorna: aggiorna, posizione: impostaPos, centra: adatta, zonaQr: zonaQr, evidenzia: evidenzia,
       chiudi: function () {
         clearInterval(tic); clearInterval(battito); window.removeEventListener('resize', adatta);
         if (watch != null) navigator.geolocation.clearWatch(watch);

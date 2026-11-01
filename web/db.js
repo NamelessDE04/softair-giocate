@@ -22,7 +22,8 @@
   var RUOLI = [['organizzatore', 'Organizzatore'], ['comandante', 'Comandante di fazione'], ['caposquadra', 'Caposquadra'], ['truppa', 'Truppa']];
   var PERMESSI = [
     ['Organizzazione', [
-      ['conflitti', 'Creare e modificare conflict e bacheca (vede tutti i conflict)'],
+      ['conflitti', 'Creare e modificare conflict, bacheca e maglia radio (vede tutti i conflict)'],
+      ['allenamenti', 'Creare e modificare gli allenamenti a porte chiuse'],
       ['mappe', 'Caricare e disegnare le cartine dei campi'],
       ['team', 'Creare, modificare ed eliminare team e codici'],
       ['giocatori', 'Modificare, spostare ed eliminare giocatori'],
@@ -34,15 +35,16 @@
       ['telefoni', 'Vedere il numero di cellulare dei referenti'],
       ['rosa', 'Vedere i giocatori del proprio team']]],
     ['In partita', [
+      ['radio', 'Vedere la maglia radio della propria fazione'],
       ['ordini', 'Dare ordini alla propria fazione'],
       ['presenze', 'Vedere i compagni presenti in tutti i punti'],
       ['prova', 'Usare la mappa di prova']]]
   ];
   var DEFAULT = {
-    organizzatore: { conflitti: true, mappe: true, team: true, giocatori: true, risposte: true, bachecaPrima: true, cartinaPrima: true, parcheggioPrima: true, telefoni: true, rosa: true, ordini: true, presenze: true, prova: true },
-    comandante: { risposte: true, cartinaPrima: true, parcheggioPrima: true, telefoni: true, rosa: true, ordini: true, presenze: true, prova: true },
-    caposquadra: { parcheggioPrima: true, telefoni: true, rosa: true, presenze: true, prova: true },
-    truppa: { telefoni: true, rosa: true, prova: true }
+    organizzatore: { conflitti: true, allenamenti: true, radio: true, mappe: true, team: true, giocatori: true, risposte: true, bachecaPrima: true, cartinaPrima: true, parcheggioPrima: true, telefoni: true, rosa: true, ordini: true, presenze: true, prova: true },
+    comandante: { radio: true, risposte: true, cartinaPrima: true, parcheggioPrima: true, telefoni: true, rosa: true, ordini: true, presenze: true, prova: true },
+    caposquadra: { radio: true, parcheggioPrima: true, telefoni: true, rosa: true, presenze: true, prova: true },
+    truppa: { radio: true, telefoni: true, rosa: true, prova: true }
   };
   api.RUOLI = RUOLI; api.PERMESSI = PERMESSI; api.DEFAULT = DEFAULT;
   api.nomeRuolo = function (r) { if (r === 'developer') return 'Developer'; var x = RUOLI.filter(function (q) { return q[0] === r; })[0]; return x ? x[1] : 'Truppa'; };
@@ -50,6 +52,8 @@
   api.puo = function (p) {
     if (stato.dev) return true;
     var tab = stato.permessi || DEFAULT, r = tab[stato.ruolo] || {};
+    // permessi aggiunti dopo che la tabella è stata salvata: valgono quelli predefiniti
+    if (!(p in r)) return !!(DEFAULT[stato.ruolo] || {})[p];
     return r[p] === true;
   };
   api.permessi = function () { return JSON.parse(JSON.stringify(stato.permessi || DEFAULT)); };
@@ -316,6 +320,18 @@
   api.ascoltaPosa = function (cid, cb) { return db.collection('campiPosa').doc(cid).onSnapshot(function (s) { cb(s.exists ? (s.data().aree || {}) : {}); }, function () { cb({}); }); };
   api.segnaPosa = function (cid, pid, dati) { var o = {}; o[pid] = dati; return db.collection('campiPosa').doc(cid).set({ aree: o }, { merge: true }); };
   api.togliPosa = function (cid, pid) { var o = {}; o['aree.' + pid] = fb.firestore.FieldValue.delete(); return db.collection('campiPosa').doc(cid).update(o); };
+
+  // ---------- allenamenti a porte chiuse: li vedono solo i team invitati
+  api.ascoltaAllenamenti = function (cb) {
+    var q = db.collection('allenamenti');
+    if (!api.puo('allenamenti')) {
+      if (!stato.me || !stato.me.team) { cb([]); return function () {}; }
+      q = q.where('team', 'array-contains', stato.me.team);
+    }
+    return q.onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); });
+  };
+  api.salvaAllenamento = function (a) { var d = JSON.parse(JSON.stringify(a)), id = d.id || db.collection('allenamenti').doc().id; delete d.id; return db.collection('allenamenti').doc(id).set(d).then(function () { return id; }); };
+  api.eliminaAllenamento = function (id) { return db.collection('allenamenti').doc(id).delete(); };
 
   // ---------- combat a scenari (PCS)
   api.ascoltaScenari = function (cb) { return db.collection('scenari').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); }); };
