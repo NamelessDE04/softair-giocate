@@ -93,6 +93,8 @@
     { id: 'bn', nome: 'Regione Piemonte · BDTRE in bianco e nero', tipo: 'wms', caps: 'https://geomap.reteunitaria.piemonte.it/WEBCAT/CAPABILITIES/wms_regp_sfondo_bdtre.xml', layers: ['regp_sfondo_bdtre_bn'], crediti: REGIONE },
     { id: 'bianco', nome: 'Nessuno sfondo (solo i livelli scelti)', tipo: 'vuoto' }
   ];
+  // foto satellitare da sovrapporre in trasparenza (piastrelle in Web Mercator)
+  var SATELLITE = { id: 'sat', nome: 'Foto satellitare', tipo: 'xyz', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', maxz: 18, crediti: 'Foto: Esri, Maxar, Earthstar Geographics' };
   // servizi da cui scegliere i livelli da sovrapporre (letti dal servizio stesso)
   var SERVIZI = [
     { id: 'oro', nome: 'Orografia (curve di livello, forme del terreno)', caps: TAIMS + 'bdtre_oro?service=WMS&request=GetCapabilities', auto: /altimetri|curv|forme/i },
@@ -154,7 +156,8 @@
       var cp = {}; lista.forEach(function (x) { cp[x.url] = x.c; });
       // con OpenTopoMap si lavora in Web Mercator (le sue piastrelle), altrimenti in UTM 32N se il servizio lo offre
       var comuni = CRS_BUONI.filter(function (k) { return lista.every(function (x) { return x.c.crs.indexOf(k) >= 0 || (k === 'EPSG:25832' && x.c.crs.indexOf('EPSG:32632') >= 0); }); });
-      var crs = sf.tipo === 'xyz' ? 'EPSG:3857' : (comuni[0] || 'EPSG:3857');
+      var sat = (scelta.satellite || 0) > 0;
+      var crs = sf.tipo === 'xyz' || sat ? 'EPSG:3857' : (comuni[0] || 'EPSG:3857');
       if (lista.some(function (x) { return x.c.crs.indexOf(crs) < 0 && !(crs === 'EPSG:3857' && x.c.crs.indexOf('EPSG:900913') >= 0); }))
         throw new Error('i livelli scelti non hanno una proiezione in comune con lo sfondo');
       var u = U.daLatLon(zona.lat, zona.lon, 32), hw = zona.larghezza / 2, hh = zona.altezza / 2;
@@ -165,12 +168,13 @@
       if (asp >= 1) { W = Math.round(lato); H = Math.round(lato / asp); } else { H = Math.round(lato); W = Math.round(lato * asp); }
       var strati = [];
       if (sf.tipo === 'xyz') strati.push({ tipo: 'xyz', sf: sf });
+      if (sat) strati.push({ tipo: 'xyz', sf: SATELLITE, alpha: Math.min(1, scelta.satellite / 100) });
       if (sf.tipo === 'wms') strati.push({ tipo: 'wms', cp: cp[sf.caps], layers: sf.layers, trasp: false });
       Object.keys(gruppi).forEach(function (k) {
         var nomi = gruppi[k].filter(Boolean); if (!nomi.length && cp[k].layers[0]) nomi = [cp[k].layers[0].nome];
         strati.push({ tipo: 'wms', cp: cp[k], layers: nomi, trasp: true });
       });
-      var crediti = [sf.crediti].concat(Object.keys(gruppi).length ? [REGIONE] : []).filter(Boolean)
+      var crediti = [sf.crediti].concat(sat ? [SATELLITE.crediti] : []).concat(Object.keys(gruppi).length ? [REGIONE] : []).filter(Boolean)
         .filter(function (x, i, a) { return a.indexOf(x) === i; }).join(' · ');
       return { crs: crs, bb: bb, W: W, H: H, strati: strati, crediti: crediti };
     });
@@ -196,7 +200,7 @@
     var w = Math.min(1600, Math.round(p.W * sc0 * (window.devicePixelRatio || 1))), h = Math.round(w * p.H / p.W);
     p.strati.forEach(function (s) {
       if (s.tipo === 'xyz') {
-        var lay = el('div', 'ed-ante-l'); fr.appendChild(lay);
+        var lay = el('div', 'ed-ante-l'); fr.appendChild(lay); if (s.alpha != null) lay.style.opacity = s.alpha;
         piastrelle(s.sf, p.bb, w).forEach(function (t) { var i = new Image(); i.src = t.url; i.style.left = (t.x / w * 100) + '%'; i.style.top = (t.y / h * 100) + '%'; i.style.width = (t.s / w * 100) + '%'; lay.appendChild(i); });
       } else { var i = new Image(); i.className = 'ed-ante-i'; i.src = urlGetMap(s.cp, p.crs, s.layers, p.bb, w, h, s.trasp); fr.appendChild(i); }
     });
@@ -208,7 +212,7 @@
     var cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, p.W, p.H);
     var T = 1000, lavori = [];
     p.strati.forEach(function (s, si) {
-      if (s.tipo === 'xyz') piastrelle(s.sf, p.bb, p.W).forEach(function (t) { lavori.push({ si: si, url: t.url, x: t.x, y: t.y, w: t.s, h: t.s }); });
+      if (s.tipo === 'xyz') piastrelle(s.sf, p.bb, p.W).forEach(function (t) { lavori.push({ si: si, url: t.url, x: t.x, y: t.y, w: t.s, h: t.s, alpha: s.alpha }); });
       else for (var py = 0; py < p.H; py += T) for (var px = 0; px < p.W; px += T) {
         var w = Math.min(T, p.W - px), h = Math.min(T, p.H - py), bb = p.bb;
         var b = [bb[0] + (bb[2] - bb[0]) * px / p.W, bb[3] - (bb[3] - bb[1]) * (py + h) / p.H, bb[0] + (bb[2] - bb[0]) * (px + w) / p.W, bb[3] - (bb[3] - bb[1]) * py / p.H];
@@ -224,7 +228,9 @@
       })).then(function () { return lotto(i + 6); });
     }
     return lotto(0).then(function () {
-      lavori.forEach(function (l, i) { cx.drawImage(imgs[i], l.x, l.y, l.w, l.h); });   // nell'ordine: prima lo sfondo, poi i livelli
+      // nell'ordine: prima lo sfondo, poi la foto satellitare in trasparenza, poi i livelli
+      lavori.forEach(function (l, i) { cx.globalAlpha = l.alpha != null ? l.alpha : 1; cx.drawImage(imgs[i], l.x, l.y, l.w, l.h); });
+      cx.globalAlpha = 1;
       var W = p.W, H = p.H, cr = p.crediti;
       cx.font = '600 ' + Math.max(11, Math.round(W / 110)) + 'px sans-serif'; var tw = cx.measureText(cr).width, pad = W / 220, fh = Math.max(11, W / 110);
       cx.fillStyle = 'rgba(255,255,255,.85)'; cx.fillRect(W - tw - pad * 3, H - fh - pad * 2.4, tw + pad * 3, fh + pad * 2.4);
@@ -550,6 +556,13 @@
       var sSel = el('select'); SFONDI.forEach(function (o) { var x = el('option', null, o.nome); x.value = o.id; sSel.appendChild(x); });
       sSel.value = geoScelta.sfondo; sSel.onchange = function () { geoScelta.sfondo = sSel.value; };
       body.appendChild(campoF('Sfondo', sSel));
+      // foto satellitare sopra lo sfondo: 0 = niente, 100 = solo foto
+      var sr = el('label', 'pcs-bar ed-sat'), rg = el('input'); rg.type = 'range'; rg.min = 0; rg.max = 100; rg.step = 5; rg.value = geoScelta.satellite || 0;
+      var vv = el('b', null, (geoScelta.satellite || 0) + '%');
+      rg.oninput = function () { geoScelta.satellite = +rg.value; vv.textContent = rg.value + '%'; };
+      sr.appendChild(el('span', null, 'Foto satellitare')); sr.appendChild(rg); sr.appendChild(vv);
+      body.appendChild(sr);
+      body.appendChild(el('small', 'ed-txt muto', '0% = nessuna foto · 50% = foto in trasparenza sulla cartina · 100% = solo foto'));
       body.appendChild(el('span', 'ed-sotto', 'Livelli da sovrapporre (Regione Piemonte)'));
       SERVIZI.forEach(function (sv) {
         var d = el('details', 'ed-liv'); var sm = el('summary', null, sv.nome); d.appendChild(sm);
@@ -634,7 +647,7 @@
       });
       return miniProm;
     }
-    var geoScelta = { sfondo: 'otm', livelli: [], toccato: {}, wmsAltro: {}, lar: 1200, alt: 1500 };
+    var geoScelta = { sfondo: 'otm', satellite: 0, livelli: [], toccato: {}, wmsAltro: {}, lar: 1200, alt: 1500 };
     var ante = null;
     function mostraAnteprima(p) {
       chiudiAnteprima();
