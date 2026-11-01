@@ -217,17 +217,19 @@
     return db.collection('conflitti/' + cid + '/bacheca').doc(id).set(dati);
   };
   api.eliminaPost = function (cid, id) { return db.collection('conflitti/' + cid + '/bacheca').doc(id).delete(); };
-  api.ascoltaAdesioni = function (cid, cb) {
+  // risposte agli inviti di conflict (coll 'conflitti') e allenamenti (coll 'allenamenti')
+  api.ascoltaAdesioni = function (cid, cb, coll) {
+    coll = coll || 'conflitti';
+    var tutte = coll === 'allenamenti' ? api.puo('allenamenti') : (api.puo('risposte') || api.puo('conflitti'));
     // senza il permesso si legge solo la propria risposta
-    if (!api.puo('risposte') && !api.puo('conflitti')) {
-      return db.collection('conflitti/' + cid + '/adesioni').doc(stato.user.uid).onSnapshot(function (s) { cb(s.exists ? [Object.assign({ id: s.id }, s.data())] : []); }, function () { cb([]); });
-    }
-    return db.collection('conflitti/' + cid + '/adesioni').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); });
+    if (!tutte) return db.collection(coll + '/' + cid + '/adesioni').doc(stato.user.uid).onSnapshot(function (s) { cb(s.exists ? [Object.assign({ id: s.id }, s.data())] : []); }, function () { cb([]); });
+    return db.collection(coll + '/' + cid + '/adesioni').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); });
   };
-  api.rispondiInvito = function (cid, si) {
-    var me = stato.me;
-    return db.collection('conflitti/' + cid + '/adesioni').doc(stato.user.uid)
-      .set({ team: me.team, nome: me.callsign || me.nome || '', si: !!si, t: Date.now() });
+  // valore: true/'si' = partecipo, false/'no' = non partecipo, 'dopo' = ricordamelo più tardi
+  api.rispondiInvito = function (cid, valore, coll) {
+    var me = stato.me, v = valore === true ? 'si' : valore === false ? 'no' : valore;
+    return db.collection((coll || 'conflitti') + '/' + cid + '/adesioni').doc(stato.user.uid)
+      .set({ team: me.team, nome: me.callsign || me.nome || '', si: v === 'si', dopo: v === 'dopo', t: Date.now() });
   };
   // ---------- cartine dei campi: campi/{id} con punti e collegamenti, immagine a pezzi in campi/{id}/img/{n}
   var PEZZO = 900000;

@@ -547,3 +547,10 @@ main > .btn.big { margin-bottom: 6px; }
 .all-ed { display: grid; gap: 6px; background: var(--pan); border-radius: 12px; padding: 10px; }
 .btn.chip.on.verde { background: #3fae5a; border-color: #3fae5a; color: #0d1a10; }
 .all-ed .ed-riga input { font-family: var(--txt); font-size: 17px; letter-spacing: 0; }
+
+.tre-risp { display: grid; gap: 8px; margin-top: 10px; }
+.tre-risp .btn { width: 100%; min-height: 50px; }
+.tre-risp .btn.link { min-height: 40px; justify-content: center; }
+.inv-data { font-family: var(--tit); color: var(--ink) !important; font-size: 20px; margin: 4px 0 !important; }
+.inv-cosa { color: var(--ink) !important; }
+.foglio .eti { color: var(--oro); font-weight: 700; letter-spacing: 1px; }

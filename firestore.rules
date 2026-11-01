@@ -76,6 +76,13 @@ service cloud.firestore {
     match /allenamenti/{id} {
       allow read: if perm('allenamenti') || (signed() && myTeam() != null && myTeam() in resource.data.team);
       allow write: if perm('allenamenti');
+      // risposte all'invito: ognuno la sua; tutte chi organizza
+      match /adesioni/{uid} {
+        function inv() { return signed() && myTeam() != null && myTeam() in get(/databases/$(database)/documents/allenamenti/$(id)).data.team; }
+        allow read: if perm('allenamenti') || (signed() && request.auth.uid == uid);
+        allow create, update: if inv() && request.auth.uid == uid && request.resource.data.team == myTeam();
+        allow delete: if perm('allenamenti') || (signed() && request.auth.uid == uid);
+      }
     }
 
     // Combat a scenari (PCS): li prepara chi organizza
