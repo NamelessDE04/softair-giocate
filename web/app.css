@@ -698,3 +698,9 @@ main > .btn.big { margin-bottom: 6px; }
 .carta.promemoria.prova { border-style: dashed; border-color: #c98a2b; }
 .carta.promemoria.prova .pm-eti { background: #c98a2b; color: #1a1206; }
 .prova-flag { background: #2b2412; border: 1px dashed #c98a2b; border-radius: 12px; padding: 10px 12px; font-weight: 700; }
+.btn.fz-simula { position: absolute; right: 12px; bottom: calc(214px + var(--sa-b)); z-index: 5; min-height: 48px; border-radius: 14px; background: #2b2412; color: #f3d48f; border-color: #c98a2b; box-shadow: 0 2px 10px rgba(0,0,0,.4); }
+.sim-pan { position: absolute; right: 12px; bottom: calc(272px + var(--sa-b)); z-index: 6; width: min(300px, calc(100% - 24px)); background: rgba(27,32,22,.96); border: 1px solid #c98a2b; border-radius: 14px; padding: 10px 12px; display: grid; gap: 6px; }
+.sim-pan small { color: var(--muto); }
+.sim-pan .riga2 { margin: 4px 0; }
+.btn.piccolo.s-blu { background: var(--blu); border-color: var(--blu); color: #fff; }
+.btn.piccolo.s-rossa { background: var(--rossa); border-color: var(--rossa); color: #fff; }

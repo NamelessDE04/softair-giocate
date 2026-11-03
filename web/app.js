@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.24.1';
+  var VERSIONE = '0.25';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -565,12 +565,36 @@
     } : null;
     conCampo(c.campo, box, function (cm) { cm = perCategoria(cm, 'conflict');
     // mortaio: stato ricalcolato dagli eventi, con chi tiene le aree adesso
+    // conflict di prova: chi organizza mette e sposta pallini blu e rossi sulle aree per simulare le situazioni
+    var simAttivo = !!(c.prova && P('conflitti'));
+    function pallini() {
+      var ult = {};
+      ultimi.forEach(function (e) { if (e.tipo === 'zona' && e.sim && (!ult[e.uid] || ult[e.uid].t <= e.t)) ult[e.uid] = e; });
+      return Object.keys(ult).map(function (k) { return ult[k]; }).filter(function (e) { return !e.via; })
+        .map(function (e) { return { id: e.uid, team: e.team, x: e.x, y: e.y, nome: e.nome, pt: e.pt }; });
+    }
+    function muoviPallino(id, x, y, pt) {
+      var b = pallini().filter(function (q) { return q.id === id; })[0]; if (!b) return;
+      S.scriviEvento(c.id, { tipo: 'zona', uid: id, team: b.team, pt: pt || null, x: x, y: y, sim: true, nome: b.nome, t: Date.now() });
+    }
+    function xyDi(p) {
+      if (p.x != null) return { x: p.x, y: p.y };
+      var g0 = cm.geo; return { x: g0.cx[0] * p.lon + g0.cx[1] * p.lat + g0.cx[2], y: g0.cy[0] * p.lon + g0.cy[1] * p.lat + g0.cy[2] };
+    }
+    function nuovoPallino(team) {
+      var fz = (c.fazioni || []).filter(function (x) { return x.id === team; })[0], mob = fz && (cm.punti || []).filter(function (p) { return p.id === fz.mob; })[0];
+      if (!mob) { toast('Manca la base della fazione'); return; }
+      var q = xyDi(mob), tutti = {}; ultimi.forEach(function (e) { if (e.sim && e.team === team) tutti[e.uid] = 1; });
+      var n = Object.keys(tutti).length + 1, sp = (n % 5) * 14 - 28;
+      S.scriviEvento(c.id, { tipo: 'zona', uid: 'sim-' + S.idBreve(), team: team, pt: mob.id, x: q.x + sp, y: q.y + 18, sim: true, nome: (team === 'blu' ? 'B' : 'R') + n, t: Date.now() });
+    }
     // il mortaio per ora solo nei conflict di prova
     var mortOn = !!(cm.geo && c.prova);
     var puntiG = puntiGeo(cm), visti = {}, apertoIl = Date.now(), mortPan = null, annullati = {};
     function statoMort() { var now = Date.now(), own = F.stato(motore(c), cm, ultimi, now).owner; return { s: window.AC_MORT.stato(c, puntiG, ultimi, now, own), own: own }; }
     var v = F.vista(box, {
       g: motore(c), campo: cm, team: f, ordiniPersonali: personali, colori: COLORI, nomi: nomiFaz(c), ora: Date.now,
+      sim: c.prova ? { attivo: simAttivo, pallini: pallini, muovi: muoviPallino } : null,
       segni: function () { return f && mortOn ? segniMortaio(statoMort().s, f, puntiG, Date.now(), false) : []; },
       gps: !!f, qr: !!f, comandante: comandante, presenze: P('presenze'),
       onZona: function (pt) { S.scriviEvento(c.id, { tipo: 'zona', uid: st.user.uid, team: f, pt: pt || null, t: Date.now() }); },
@@ -587,6 +611,29 @@
         tendina.hidden = false;
       }
     });
+    if (simAttivo) {
+      var simPan = el('div', 'sim-pan'); simPan.hidden = true; box.appendChild(simPan);
+      var bs = bottone('Simula', 'fz-simula', function () { simPan.hidden = !simPan.hidden; disegnaSim(); }); box.appendChild(bs);
+      var disegnaSim = function () {
+        if (simPan.hidden) return;
+        simPan.innerHTML = '';
+        simPan.appendChild(el('b', null, 'Pallini simulati'));
+        simPan.appendChild(el('small', null, 'Trascinali sulle aree: contano come giocatori presenti finché non li sposti.'));
+        var r0 = el('div', 'riga2');
+        r0.appendChild(bottone('+ ' + nomeFaz(c, 'blu'), 'piccolo s-blu', function () { nuovoPallino('blu'); simPan.hidden = true; toast('Pallino nella base: trascinalo su un\'area'); }));
+        r0.appendChild(bottone('+ ' + nomeFaz(c, 'rossa'), 'piccolo s-rossa', function () { nuovoPallino('rossa'); simPan.hidden = true; toast('Pallino nella base: trascinalo su un\'area'); }));
+        simPan.appendChild(r0);
+        var ch = el('div', 'chips');
+        pallini().forEach(function (b) {
+          var x = bottone(b.nome + ' ✕', 'chip on s-' + b.team, function () { S.scriviEvento(c.id, { tipo: 'zona', uid: b.id, team: b.team, pt: null, x: null, y: null, sim: true, via: true, nome: b.nome, t: Date.now() }); });
+          ch.appendChild(x);
+        });
+        simPan.appendChild(ch);
+        if (pallini().length) simPan.appendChild(bottone('Togli tutti', 'link pericolo', function () {
+          pallini().forEach(function (b) { S.scriviEvento(c.id, { tipo: 'zona', uid: b.id, team: b.team, pt: null, x: null, y: null, sim: true, via: true, nome: b.nome, t: Date.now() }); });
+        }));
+      };
+    }
     if (f) {
       var bq = bottone('QR', 'fz-qr'); bq.setAttribute('aria-label', 'Scansiona il QR dell\'area');
       var scQr = function (pre) {
@@ -627,7 +674,7 @@
       }
       if (qrInSospeso) { var pre = qrInSospeso; qrInSospeso = null; setTimeout(function () { scQr(pre); }, 400); }
     }
-    var stopE = S.ascoltaEventi(c.id, function (ev) { ultimi = ev; v.aggiorna(ev); if (mortPan && !tendina.hidden) mortPan.aggiorna(); });
+    var stopE = S.ascoltaEventi(c.id, function (ev) { ultimi = ev; v.aggiorna(ev); if (mortPan && !tendina.hidden) mortPan.aggiorna(); if (simAttivo) disegnaSim(); });
     // ogni secondo: impatti arrivati, costruzioni abbandonate, pannello aperto
     var giroM = mortOn ? setInterval(function () {
       var sm = statoMort().s;

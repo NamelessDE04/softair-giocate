@@ -222,6 +222,10 @@ service cloud.firestore {
       // Partita: posizione nei punti e ordini, solo per la propria fazione e nell'orario del conflict
       match /eventi/{eid} {
         allow read: if perm('conflitti') || invitato();
+        // conflict di prova: chi organizza mette e sposta pallini simulati
+        allow create: if perm('conflitti') && c().get('prova', false) == true
+          && request.resource.data.tipo == 'zona' && request.resource.data.get('sim', false) == true
+          && request.resource.data.uid is string && request.resource.data.uid.matches('sim-.*');
         allow create: if invitato()
           && request.resource.data.uid == request.auth.uid
           // in addestramento la fazione è del singolo giocatore (attacco o difesa), altrimenti del suo team

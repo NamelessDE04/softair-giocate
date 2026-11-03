@@ -52,7 +52,7 @@
     function conta(t) {
       var c = {}; campo.punti.forEach(function (p) { c[p.id] = {}; });
       Object.keys(ultimo).forEach(function (u) {
-        var e = ultimo[u]; if (!e.pt || t - e.t > SCADENZA || !c[e.pt]) return;
+        var e = ultimo[u]; if (!e.pt || (t - e.t > SCADENZA && !(e.sim && String(e.uid).indexOf('sim-') === 0)) || !c[e.pt]) return;   // i pallini simulati restano finché non si spostano
         c[e.pt][e.team] = (c[e.pt][e.team] || 0) + 1;
       });
       return c;
@@ -296,8 +296,22 @@
     function applica() { limita(); inner.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + sc + ')'; disegna(); }
     function zoomA(f, cx, cy) { var ns = Math.max(minSc, Math.min(3, sc * f)); tx = cx - (cx - tx) * ns / sc; ty = cy - (cy - ty) * ns / sc; sc = ns; applica(); }
     var ptr = {}, mosso = false, start = null;
-    mapBox.addEventListener('pointerdown', function (e) { mapBox.setPointerCapture(e.pointerId); ptr[e.pointerId] = { x: e.clientX, y: e.clientY }; mosso = false; start = { x: e.clientX, y: e.clientY }; });
+    // pallini simulati (conflict di prova): si prendono e si trascinano su un'area
+    var trascina = null;
+    function inMappa(e) { var r = mapBox.getBoundingClientRect(); return { x: (e.clientX - r.left - tx) / sc, y: (e.clientY - r.top - ty) / sc }; }
+    function pallinoSotto(e) {
+      if (!opts.sim || !opts.sim.attivo) return null;
+      var m = inMappa(e), k = Math.max(.72, Math.min(1, sc / .6)) / sc;
+      return opts.sim.pallini().filter(function (b) { return b.x != null && Math.hypot(b.x - m.x, b.y - m.y) < 22 * k; }).pop() || null;
+    }
+    mapBox.addEventListener('pointerdown', function (e) {
+      mapBox.setPointerCapture(e.pointerId);
+      var b = pallinoSotto(e);
+      if (b) { trascina = { id: b.id, team: b.team, nome: b.nome, x: b.x, y: b.y }; disegna(); return; }
+      ptr[e.pointerId] = { x: e.clientX, y: e.clientY }; mosso = false; start = { x: e.clientX, y: e.clientY };
+    });
     mapBox.addEventListener('pointermove', function (e) {
+      if (trascina) { var m = inMappa(e); trascina.x = m.x; trascina.y = m.y; disegna(); return; }
       if (!ptr[e.pointerId]) return;
       var ids = Object.keys(ptr), p = ptr[e.pointerId];
       if (fissa) { if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) mosso = true; return; }
@@ -311,6 +325,14 @@
       if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 8) mosso = true;
     });
     function su(e) {
+      if (trascina) {
+        var d = trascina; trascina = null;
+        // l'area in cui è stato lasciato (la più vicina, se dentro il suo raggio)
+        var best = null, bd = 1e9;
+        campo.punti.forEach(function (p) { var q = pxP(campo, p), dd = Math.hypot(q.x - d.x, q.y - d.y), rr = Math.max((p.raggio || regole(g).raggio) / mpp(campo), 30 / sc); if (dd < rr && dd < bd) { bd = dd; best = p; } });
+        opts.sim.muovi(d.id, d.x, d.y, best ? best.id : null);
+        return;
+      }
       var era = ptr[e.pointerId]; delete ptr[e.pointerId];
       if (era && !mosso && !Object.keys(ptr).length) tocco(e);
     }
@@ -450,6 +472,11 @@
         else if (q.tipo === 'impatto') s += '<path d="M' + m.x + ' ' + (m.y - 13 * k) + 'L' + (m.x + 4 * k) + ' ' + (m.y - 4 * k) + 'L' + (m.x + 13 * k) + ' ' + m.y + 'L' + (m.x + 4 * k) + ' ' + (m.y + 4 * k) + 'L' + m.x + ' ' + (m.y + 13 * k) + 'L' + (m.x - 4 * k) + ' ' + (m.y + 4 * k) + 'L' + (m.x - 13 * k) + ' ' + m.y + 'L' + (m.x - 4 * k) + ' ' + (m.y - 4 * k) + 'Z" fill="' + c + '" stroke="#fff" stroke-width="' + (1.4 * k) + '"/>';
         else if (q.tipo === 'linea' && q.a) { var a2 = px(campo, q.a.lat, q.a.lon); s += '<path d="M' + a2.x + ' ' + a2.y + 'L' + m.x + ' ' + m.y + '" stroke="' + c + '" stroke-width="' + (2 * k) + '" stroke-dasharray="' + (6 * k) + ' ' + (5 * k) + '"/>'; }
         if (q.testo) s += '<text x="' + m.x + '" y="' + (m.y + 26 * k) + '" font-size="' + (13 * k) + '" text-anchor="middle" class="fz-lab" style="fill:' + c + '">' + esc(q.testo) + '</text>';
+      });
+      if (opts.sim) opts.sim.pallini().forEach(function (b0) {
+        var b = trascina && trascina.id === b0.id ? trascina : b0; if (b.x == null) return;
+        s += '<circle cx="' + b.x + '" cy="' + b.y + '" r="' + (12 * k) + '" fill="' + col(b.team) + '" stroke="#fff" stroke-width="' + (2.4 * k) + '"' + (trascina && trascina.id === b0.id ? ' opacity=".75"' : '') + '/>';
+        s += '<text x="' + b.x + '" y="' + b.y + '" font-size="' + (10 * k) + '" text-anchor="middle" dominant-baseline="central" style="fill:#fff;font-weight:700;font-family:sans-serif">' + esc(b.nome || '') + '</text>';
       });
       if (campo.geo) (opts.extra ? opts.extra() : []).forEach(function (b) {
         var m = px(campo, b.lat, b.lon);
