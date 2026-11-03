@@ -615,3 +615,24 @@ main > .btn.big { margin-bottom: 6px; }
 .dmz-avviso.urgente { background: #3a1814; border-color: #5a231c; color: var(--ko); }
 .dmz-avviso.bonus { background: #13283a; border-color: #23506e; color: #9fd0f5; }
 .dmz-con.caldo { border-left-color: var(--ko); background: #2a1915; }
+
+/* schede (tab) e presenze */
+.schede { display: flex; gap: 4px; margin: 14px 0 12px; border-bottom: 1px solid var(--linea); }
+.btn.scheda { flex: 1; background: none; border: 0; border-bottom: 3px solid transparent; border-radius: 0; min-height: 46px; color: var(--muto); font-size: 18px; }
+.btn.scheda.on { color: var(--oro); border-bottom-color: var(--oro); }
+.pres-riep { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+.pres-riep > div { background: var(--pan); border: 1px solid var(--linea); border-radius: 12px; padding: 8px; text-align: center; }
+.pres-riep b { display: block; font-family: var(--mono); font-size: 28px; }
+.pres-riep small { color: var(--muto); }
+.pres-riep .si b, .pres-cnt .si, .pres-gr.si h4 { color: var(--ok); }
+.pres-riep .no b, .pres-cnt .no, .pres-gr.no h4 { color: var(--ko); }
+.pres-riep .att b, .pres-cnt .att, .pres-gr.att h4 { color: var(--muto); }
+.pres-team { margin-bottom: 10px; }
+.pres-testa { display: flex; align-items: center; gap: 10px; }
+.pres-testa > div:nth-child(2) { flex: 1; } .pres-testa small { display: block; color: var(--muto); }
+.pres-cnt { display: flex; gap: 10px; font-family: var(--mono); font-weight: 700; font-size: 18px; }
+.pres-gr h4 { margin: 10px 0 4px; font-size: 16px; }
+.pres-nomi { display: flex; flex-wrap: wrap; gap: 6px; }
+.pres-nome { display: inline-flex; align-items: center; gap: 4px; background: var(--pan2); border: 1px solid var(--linea); border-radius: 999px; padding: 3px 10px; font-size: 16px; }
+.pres-gr.si .pres-nome { border-color: #2f5a35; } .pres-gr.no .pres-nome { border-color: #5a231c; }
+.pres-x { background: none; border: 0; color: var(--muto); padding: 0 0 0 4px; cursor: pointer; font-size: 14px; }

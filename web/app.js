@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.20';
+  var VERSIONE = '0.21';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -279,6 +279,11 @@
       adm.appendChild(bottone('📻 Maglia radio', '', function () { vai('radio', c.id); }));
       box.appendChild(bottone('⚙ Gestisci', 'link', function () { adm.hidden = !adm.hidden; }));
       box.appendChild(adm);
+      // solo chi organizza: due schede, la giocata e le presenze (chi ha risposto, team per team)
+      var adesC = D.adesioni[c.id] || [];
+      var pres = el('div', 'pres'), giocata = el('div');
+      schede(box, 'conf:' + c.id, [['giocata', 'Giocata', giocata], ['presenze', 'Presenze · ' + adesC.filter(function (x) { return x.si; }).length + ' sì', pres, function () { vistaPresenze(pres, adesC, c.team || [], function (a) { return S.eliminaAdesione(c.id, a.id); }); }]]);
+      box = giocata;
     }
 
     // fazioni
@@ -304,7 +309,7 @@
         row.appendChild(logo(t, 40));
         var info = el('div', 'faz-info');
         info.appendChild(el('b', null, t.nome));
-        var n = P('risposte') ? ades.filter(function (x) { return x.team === tid && x.si; }).length : 0;
+        var n = P('conflitti') ? ades.filter(function (x) { return x.team === tid && x.si; }).length : 0;
         info.appendChild(el('small', null, (t.referente && t.referente.nome ? 'Ref. ' + t.referente.nome : 'Referente da indicare') + (n ? ' · ' + n + ' confermati' : '')));
         row.appendChild(info);
         var tel = D.contatti[tid];
@@ -320,24 +325,6 @@
       fz.appendChild(k);
     });
     box.appendChild(fz);
-
-    // risposte agli inviti (solo organizzatore: si possono togliere)
-    if (P('risposte')) {
-      box.appendChild(el('h3', 'sez', 'Risposte'));
-      var rBox = el('div', 'carta');
-      var si = ades.filter(function (x) { return x.si; }), no = ades.filter(function (x) { return !x.si; });
-      if (!ades.length) rBox.appendChild(el('p', 'hint', 'Nessuna risposta ancora.'));
-      [['Vengono', si], ['Non vengono', no]].forEach(function (g) {
-        if (!g[1].length) return;
-        rBox.appendChild(el('h4', 'ris-tit', g[0] + ' · ' + g[1].length));
-        g[1].forEach(function (a) {
-          var r = el('div', 'gioc'); r.appendChild(el('span', null, (a.nome || 'Giocatore') + ' · ' + ((teamDi(a.team) || {}).nome || '')));
-          r.appendChild(bottone('✕', 'icon', function () { if (confirm('Togliere la risposta di ' + (a.nome || 'questo giocatore') + '?')) S.eliminaAdesione(c.id, a.id).catch(errore); }));
-          rBox.appendChild(r);
-        });
-      });
-      box.appendChild(rBox);
-    }
 
     // bacheca
     var tb = el('h3', 'sez', 'Bacheca'); box.appendChild(tb);
@@ -382,6 +369,69 @@
         if (pk.da && Date.now() < pk.da) k.appendChild(el('small', 'prog', 'I giocatori lo vedono dal ' + dataBreve(pk.da)));
         box.appendChild(k);
       } else box.appendChild(bloccato('Le indicazioni arrivano da ' + dataLunga(pk.da)));
+    }
+  }
+  // schede (tab): la scelta resta finché non si cambia pagina
+  var schedaScelta = {};
+  function schede(box, chiave, voci) {
+    var bar = el('div', 'schede'); box.appendChild(bar);
+    voci.forEach(function (v) { box.appendChild(v[2]); });
+    function apri(id) {
+      schedaScelta[chiave] = id;
+      voci.forEach(function (v) { v[2].hidden = v[0] !== id; v.b.classList.toggle('on', v[0] === id); if (v[0] === id && v[3] && !v.fatto) { v.fatto = true; v[3](); } });
+    }
+    voci.forEach(function (v) { v.b = bottone(v[1], 'scheda', function () { apri(v[0]); }); bar.appendChild(v.b); });
+    apri(schedaScelta[chiave] || voci[0][0]);
+  }
+  // presenze per team: chi viene, chi no, chi non ha ancora risposto (solo organizzatori)
+  function vistaPresenze(box, ades, teams, togli) {
+    box.innerHTML = '';
+    var att = el('p', 'hint', 'Caricamento dei giocatori…'); box.appendChild(att);
+    var stopU = S.ascoltaUtenti(function (ut) { disegna(ut); });
+    var prima = chiusura; chiusura = function () { stopU(); if (prima) prima(); };
+    function nomeU(u) { return u.callsign || u.nome || u.email || 'Giocatore'; }
+    function disegna(ut) {
+      box.innerHTML = '';
+      var perId = {}; ades.forEach(function (a) { perId[a.id] = a; });
+      // i team invitati, più quelli di chi ha risposto ed è passato a un altro team
+      var ids = teams.slice(); ades.forEach(function (a) { if (a.team && ids.indexOf(a.team) < 0) ids.push(a.team); });
+      var tot = { si: 0, no: 0, att: 0 }, carte = [];
+      ids.forEach(function (tid) {
+        var t = teamDi(tid) || { nome: 'Team eliminato' };
+        var membri = ut.filter(function (u) { return u.team === tid; });
+        var si = [], no = [], at = [];
+        membri.forEach(function (u) {
+          var a = perId[u.id];
+          if (a && !a.dopo) (a.si ? si : no).push({ nome: nomeU(u), a: a }); else at.push({ nome: nomeU(u), dopo: !!(a && a.dopo) });
+        });
+        // risposte di chi ora non è più nel team
+        ades.forEach(function (a) { if (a.team === tid && !membri.some(function (u) { return u.id === a.id; }) && !a.dopo) (a.si ? si : no).push({ nome: a.nome || 'Giocatore', a: a }); });
+        [si, no, at].forEach(function (l) { l.sort(function (x, y) { return x.nome.localeCompare(y.nome); }); });
+        tot.si += si.length; tot.no += no.length; tot.att += at.length;
+        var k = el('div', 'carta pres-team');
+        var h = el('div', 'pres-testa'); h.appendChild(logo(t, 36));
+        var ti = el('div'); ti.appendChild(el('b', null, (t.nome || '').toUpperCase())); ti.appendChild(el('small', null, membri.length === 1 ? '1 giocatore nel team' : membri.length + ' giocatori nel team')); h.appendChild(ti);
+        var cnt = el('div', 'pres-cnt'); cnt.appendChild(el('span', 'si', si.length)); cnt.appendChild(el('span', 'no', no.length)); cnt.appendChild(el('span', 'att', at.length)); h.appendChild(cnt);
+        k.appendChild(h);
+        [['si', 'Vengono', si], ['no', 'Non vengono', no], ['att', 'Non hanno ancora risposto', at]].forEach(function (g) {
+          if (!g[2].length) return;
+          var sez = el('div', 'pres-gr ' + g[0]); sez.appendChild(el('h4', null, g[1] + ' · ' + g[2].length));
+          var lst = el('div', 'pres-nomi');
+          g[2].forEach(function (x) {
+            var n = el('span', 'pres-nome', x.nome + (x.dopo ? ' · più tardi' : ''));
+            if (x.a && togli) { var b = el('button', 'pres-x', '✕'); b.type = 'button'; b.title = 'Togli la risposta'; b.onclick = function () { if (confirm('Togliere la risposta di ' + x.nome + '?')) togli(x.a).catch(errore); }; n.appendChild(b); }
+            lst.appendChild(n);
+          });
+          sez.appendChild(lst); k.appendChild(sez);
+        });
+        if (!membri.length && !si.length && !no.length) k.appendChild(el('p', 'hint', 'Nessun giocatore registrato in questo team.'));
+        carte.push(k);
+      });
+      var riep = el('div', 'pres-riep');
+      [['si', 'Vengono', tot.si], ['no', 'No', tot.no], ['att', 'In attesa', tot.att]].forEach(function (x) { var d = el('div', x[0]); d.appendChild(el('b', null, String(x[2]))); d.appendChild(el('small', null, x[1])); riep.appendChild(d); });
+      box.appendChild(riep);
+      carte.forEach(function (k) { box.appendChild(k); });
+      if (!ids.length) box.appendChild(el('p', 'hint', 'Nessun team invitato.'));
     }
   }
   function bloccato(t) { var b = el('div', 'bloccato'); b.appendChild(el('span', null, '🔒')); b.appendChild(el('p', null, t)); return b; }
@@ -1232,7 +1282,7 @@
     return Object.assign({}, cm, { punti: punti, link: (cm.link || []).filter(function (l) { return ids[l[0]] && ids[l[1]]; }) });
   }
   function pagAllenamento(id) {
-    var a = D.allenamenti.filter(function (x) { return x.id === id; })[0];
+    var a = D.allenamenti.filter(function (x) { return x.id === id; })[0]; var dove = app;
     testata(a ? a.titolo || 'Allenamento' : 'Allenamento');
     if (!a) { app.appendChild(el('p', 'hint', 'Allenamento non trovato.')); return; }
     if (P('allenamenti')) app.appendChild(bottone('⚙ Modifica', 'link', function () { vai('allenamentoModifica', a.id); }));
@@ -1256,21 +1306,20 @@
       }
     }
     if (P('allenamenti')) {
-      var ad = D.adesioni['a:' + a.id] || [], si = ad.filter(function (x) { return x.si; }), no = ad.filter(function (x) { return !x.si && !x.dopo; });
-      var rc = el('div', 'carta'); rc.appendChild(el('b', null, 'Risposte: ' + si.length + ' vengono · ' + no.length + ' no'));
-      if (si.length) rc.appendChild(el('small', 'hint', si.map(function (x) { return x.nome; }).join(', ')));
-      app.appendChild(rc);
+      var ad = D.adesioni['a:' + a.id] || [], presA = el('div', 'pres'), restoA = el('div');
+      schede(app, 'all:' + a.id, [['allenamento', 'Allenamento', restoA], ['presenze', 'Presenze · ' + ad.filter(function (x) { return x.si; }).length + ' sì', presA, function () { vistaPresenze(presA, ad, a.team || [], function (x) { return S.eliminaAdesione(a.id, x.id, 'allenamenti'); }); }]]);
+      dove = restoA;
     }
     var pk = a.parcheggio || {};
     if (pk.testo || pk.mapsUrl) {
       var k = el('div', 'carta all-park'); k.appendChild(el('b', null, '🅿 Parcheggio'));
       if (pk.testo) k.appendChild(el('p', 'testo', pk.testo));
       if (pk.mapsUrl) k.appendChild(link('Portami al parcheggio', pk.mapsUrl, 'btn'));
-      app.appendChild(k);
+      dove.appendChild(k);
     }
     // mappa con le zone di allenamento e argomenti: toccando un argomento lampeggia la sua zona
-    var mapBox = el('div', 'all-mappa'); app.appendChild(mapBox);
-    var lista = el('div', 'all-arg'); app.appendChild(el('h3', 'sez', 'Argomenti')); app.appendChild(lista);
+    var mapBox = el('div', 'all-mappa'); dove.appendChild(mapBox);
+    var lista = el('div', 'all-arg'); dove.appendChild(el('h3', 'sez', 'Argomenti')); dove.appendChild(lista);
     var v = null, scelto = null;
     function disegnaArg(cm) {
       lista.innerHTML = '';

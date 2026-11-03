@@ -19,8 +19,8 @@ service cloud.firestore {
     // permessi predefiniti se il developer non ha ancora salvato la tabella
     function predefiniti() {
       return {
-        'organizzatore': { 'conflitti': true, 'allenamenti': true, 'mappe': true, 'team': true, 'giocatori': true, 'risposte': true, 'telefoni': true, 'rosa': true, 'ordini': true },
-        'comandante': { 'risposte': true, 'telefoni': true, 'rosa': true, 'ordini': true },
+        'organizzatore': { 'conflitti': true, 'allenamenti': true, 'mappe': true, 'team': true, 'giocatori': true, 'telefoni': true, 'rosa': true, 'ordini': true },
+        'comandante': { 'telefoni': true, 'rosa': true, 'ordini': true },
         'caposquadra': { 'telefoni': true, 'rosa': true },
         'truppa': { 'telefoni': true, 'rosa': true }
       };
@@ -178,9 +178,9 @@ service cloud.firestore {
         allow write: if perm('conflitti');
       }
 
-      // Risposte agli inviti: ognuno vede la sua; tutte solo con il permesso "risposte"
+      // Risposte agli inviti: ognuno vede la sua; tutte solo chi organizza
       match /adesioni/{uid} {
-        allow read: if perm('conflitti') || (invitato() && (request.auth.uid == uid || perm('risposte')));
+        allow read: if perm('conflitti') || (invitato() && request.auth.uid == uid);
         allow create, update: if invitato() && request.auth.uid == uid && request.resource.data.team == myTeam();
         allow delete: if perm('conflitti') || (signed() && request.auth.uid == uid);
       }

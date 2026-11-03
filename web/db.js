@@ -26,8 +26,7 @@
       ['allenamenti', 'Creare e modificare gli allenamenti a porte chiuse'],
       ['mappe', 'Caricare e disegnare le cartine dei campi'],
       ['team', 'Creare, modificare ed eliminare team e codici'],
-      ['giocatori', 'Modificare, spostare ed eliminare giocatori'],
-      ['risposte', 'Vedere chi ha risposto agli inviti']]],
+      ['giocatori', 'Modificare, spostare ed eliminare giocatori']]],
     ['Prima del conflict', [
       ['bachecaPrima', 'Leggere i post della bacheca prima della pubblicazione'],
       ['cartinaPrima', 'Vedere la cartina del campo prima della data'],
@@ -41,8 +40,8 @@
       ['prova', 'Usare la mappa di prova']]]
   ];
   var DEFAULT = {
-    organizzatore: { conflitti: true, allenamenti: true, radio: true, mappe: true, team: true, giocatori: true, risposte: true, bachecaPrima: true, cartinaPrima: true, parcheggioPrima: true, telefoni: true, rosa: true, ordini: true, presenze: true, prova: true },
-    comandante: { radio: true, risposte: true, cartinaPrima: true, parcheggioPrima: true, telefoni: true, rosa: true, ordini: true, presenze: true, prova: true },
+    organizzatore: { conflitti: true, allenamenti: true, radio: true, mappe: true, team: true, giocatori: true, bachecaPrima: true, cartinaPrima: true, parcheggioPrima: true, telefoni: true, rosa: true, ordini: true, presenze: true, prova: true },
+    comandante: { radio: true, cartinaPrima: true, parcheggioPrima: true, telefoni: true, rosa: true, ordini: true, presenze: true, prova: true },
     caposquadra: { radio: true, parcheggioPrima: true, telefoni: true, rosa: true, presenze: true, prova: true },
     truppa: { radio: true, telefoni: true, rosa: true, prova: true }
   };
@@ -174,7 +173,7 @@
   api.ascoltaUtenti = function (cb) { return db.collection('utenti').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); }); };
   api.salvaUtente = function (uid, dati) { return db.collection('utenti').doc(uid).set(dati, { merge: true }); };
   api.eliminaUtente = function (uid) { return db.collection('utenti').doc(uid).delete(); };
-  api.eliminaAdesione = function (cid, uid) { return db.collection('conflitti/' + cid + '/adesioni').doc(uid).delete(); };
+  api.eliminaAdesione = function (cid, uid, coll) { return db.collection((coll || 'conflitti') + '/' + cid + '/adesioni').doc(uid).delete(); };
   api.codiceTeam = function (tid) {
     return db.collection('codiciTeam').doc(tid).get().then(function (s) { return s.exists ? s.data().codice : ''; }, function () { return ''; });
   };
@@ -220,7 +219,7 @@
   // risposte agli inviti di conflict (coll 'conflitti') e allenamenti (coll 'allenamenti')
   api.ascoltaAdesioni = function (cid, cb, coll) {
     coll = coll || 'conflitti';
-    var tutte = coll === 'allenamenti' ? api.puo('allenamenti') : (api.puo('risposte') || api.puo('conflitti'));
+    var tutte = api.puo(coll === 'allenamenti' ? 'allenamenti' : 'conflitti');   // tutte le risposte: solo chi organizza
     // senza il permesso si legge solo la propria risposta
     if (!tutte) return db.collection(coll + '/' + cid + '/adesioni').doc(stato.user.uid).onSnapshot(function (s) { cb(s.exists ? [Object.assign({ id: s.id }, s.data())] : []); }, function () { cb([]); });
     return db.collection(coll + '/' + cid + '/adesioni').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); });
