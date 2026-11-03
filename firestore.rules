@@ -223,6 +223,10 @@ service cloud.firestore {
           && request.time.toMillis() >= c().inizio - 3600000
           && request.time.toMillis() <= c().fine + 12 * 3600000
           && (request.resource.data.tipo == 'zona'
+              || request.resource.data.tipo in ['rif', 'richiesta', 'fuoco']
+              // il mortaio lo costruiscono capisquadra e comandanti
+              || (request.resource.data.tipo == 'mortaio' && (ruoloT() in ['caposquadra', 'comandante'] || perm('ordini')
+                  || c().get('comandanti', {}).get(request.resource.data.team, 'ia') == request.auth.uid))
               || (request.resource.data.tipo == 'ordine'
                   && (c().get('comandanti', {}).get(request.resource.data.team, 'ia') == request.auth.uid || perm('ordini'))));
         allow delete: if perm('conflitti');

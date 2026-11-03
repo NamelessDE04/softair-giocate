@@ -441,6 +441,16 @@
         if (mia.acc) s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + (mia.acc / mpp(campo)) + '" fill="#4ea4ff" fill-opacity=".15" stroke="none"/>';
         s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + (8 * k) + '" fill="' + (opts.team ? col(opts.team) : '#2f8cff') + '" stroke="#fff" stroke-width="' + (3 * k) + '"/>';
       }
+      // segni aggiuntivi (mortaio, bersagli, impatti) in coordinate geografiche
+      if (campo.geo && opts.segni) opts.segni().forEach(function (q) {
+        var m = px(campo, q.lat, q.lon), c = q.colore || '#fff';
+        if (q.raggio) s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + (q.raggio / mpp(campo)) + '" fill="' + c + '" fill-opacity="' + (q.opacita || .18) + '" stroke="' + c + '" stroke-width="' + (1.5 * k) + '" stroke-dasharray="' + (q.tratteggio ? 5 * k + ' ' + 4 * k : 'none') + '"/>';
+        if (q.tipo === 'mortaio') s += '<rect x="' + (m.x - 11 * k) + '" y="' + (m.y - 11 * k) + '" width="' + (22 * k) + '" height="' + (22 * k) + '" rx="' + (4 * k) + '" fill="' + c + '" stroke="#fff" stroke-width="' + (2 * k) + '"/><path d="M' + (m.x - 5 * k) + ' ' + (m.y + 6 * k) + 'L' + (m.x + 5 * k) + ' ' + (m.y - 7 * k) + '" stroke="#fff" stroke-width="' + (3.4 * k) + '" stroke-linecap="round"/>';
+        else if (q.tipo === 'bersaglio') s += '<g stroke="' + c + '" stroke-width="' + (2.6 * k) + '" fill="none"><circle cx="' + m.x + '" cy="' + m.y + '" r="' + (11 * k) + '"/><path d="M' + (m.x - 17 * k) + ' ' + m.y + 'h' + (34 * k) + 'M' + m.x + ' ' + (m.y - 17 * k) + 'v' + (34 * k) + '"/></g>';
+        else if (q.tipo === 'impatto') s += '<path d="M' + m.x + ' ' + (m.y - 13 * k) + 'L' + (m.x + 4 * k) + ' ' + (m.y - 4 * k) + 'L' + (m.x + 13 * k) + ' ' + m.y + 'L' + (m.x + 4 * k) + ' ' + (m.y + 4 * k) + 'L' + m.x + ' ' + (m.y + 13 * k) + 'L' + (m.x - 4 * k) + ' ' + (m.y + 4 * k) + 'L' + (m.x - 13 * k) + ' ' + m.y + 'L' + (m.x - 4 * k) + ' ' + (m.y - 4 * k) + 'Z" fill="' + c + '" stroke="#fff" stroke-width="' + (1.4 * k) + '"/>';
+        else if (q.tipo === 'linea' && q.a) { var a2 = px(campo, q.a.lat, q.a.lon); s += '<path d="M' + a2.x + ' ' + a2.y + 'L' + m.x + ' ' + m.y + '" stroke="' + c + '" stroke-width="' + (2 * k) + '" stroke-dasharray="' + (6 * k) + ' ' + (5 * k) + '"/>'; }
+        if (q.testo) s += '<text x="' + m.x + '" y="' + (m.y + 26 * k) + '" font-size="' + (13 * k) + '" text-anchor="middle" class="fz-lab" style="fill:' + c + '">' + esc(q.testo) + '</text>';
+      });
       if (campo.geo) (opts.extra ? opts.extra() : []).forEach(function (b) {
         var m = px(campo, b.lat, b.lon);
         s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + (5.5 * k) + '" fill="' + col(b.team) + '" stroke="#fff" stroke-width="' + (1.6 * k) + '"/>';
@@ -582,6 +592,7 @@
     aggiorna();
     return {
       aggiorna: aggiorna, posizione: impostaPos, centra: adatta, zonaQr: zonaQr, evidenzia: evidenzia,
+      ridisegna: function () { disegna(); }, miaPos: function () { return mia; }, zona: function () { return zonaMia; },
       chiudi: function () {
         clearInterval(tic); clearInterval(battito); window.removeEventListener('resize', adatta);
         if (watch != null) navigator.geolocation.clearWatch(watch);

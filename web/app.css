@@ -639,3 +639,54 @@ main > .btn.big { margin-bottom: 6px; }
 .privacy-tel summary { cursor: pointer; font-weight: 700; }
 .privacy-tel .spunta { margin: 10px 0; }
 .privacy-tel input:disabled + span { opacity: .5; }
+
+/* mortaio */
+.btn.fz-mort { position: absolute; left: 12px; bottom: calc(214px + var(--sa-b)); z-index: 5; min-height: 52px; min-width: 64px; border-radius: 14px; background: #3a1814; color: #ffb3a8; border-color: #8a3a2c; font-size: 26px; box-shadow: 0 2px 10px rgba(0,0,0,.4); }
+.mort-pan { display: grid; gap: 10px; }
+.mort-testa { display: flex; align-items: center; justify-content: space-between; }
+.mort-testa b { font-family: var(--tit); font-weight: 400; font-size: 24px; }
+.mort-i { width: 36px; height: 36px; border-radius: 50%; border: 2px solid var(--oro); background: none; color: var(--oro); font: 700 20px/1 Georgia, serif; font-style: italic; cursor: pointer; }
+.mort-c { display: grid; gap: 10px; }
+.mort-c .eti { font-family: var(--mono); font-size: 12px; letter-spacing: .5px; color: var(--muto); display: block; }
+.mort-c .big { font-size: 26px; display: block; }
+.mort-c .ok { color: var(--ok); } .mort-c .avviso { color: #f3d48f; }
+.mono { font-family: var(--mono); }
+.mort-fob { display: grid; gap: 6px; }
+.mort-fob-h { display: flex; justify-content: space-between; } .mort-fob-h span { font-family: var(--mono); color: var(--muto); }
+.mort-bar { height: 12px; border-radius: 6px; background: #0b0d09; border: 1px solid var(--linea); overflow: hidden; }
+.mort-bar i { display: block; height: 100%; background: linear-gradient(90deg, #c98a2b, #e8c96a); }
+.mort-ric { display: grid; gap: 2px; }
+.mort-mh { display: flex; justify-content: space-between; align-items: center; gap: 8px; } .mort-mh span { color: var(--oro); }
+.mort-mis { display: grid; gap: 4px; border-left: 4px solid var(--oro); } .mort-mis b { font-size: 18px; }
+.mort-sol { color: #9fd0f5; }
+.mort-dn { display: flex; justify-content: space-between; align-items: baseline; } .mort-dn b { font-size: 20px; } .mort-dn span { color: var(--muto); font-size: 15px; }
+.mort-dial { display: flex; gap: 6px; justify-content: center; }
+.mort-dig { width: 58px; display: grid; background: #0b0d09; border: 1px solid #4a5338; border-radius: 10px; overflow: hidden; }
+.mort-dig button { background: none; border: 0; color: var(--muto); font-size: 18px; padding: 6px 0; cursor: pointer; }
+.mort-dig button:active { background: var(--pan2); color: var(--oro); }
+.mort-dig b { text-align: center; font-family: var(--mono); font-size: 34px; color: #ffd96a; border-top: 1px solid var(--linea); border-bottom: 1px solid var(--linea); }
+.mort-seg { display: flex; gap: 6px; } .mort-seg .btn { flex: 1; font-family: var(--mono); min-height: 44px; } .mort-seg .btn.on { background: var(--oro); color: #16160f; border-color: var(--oro); }
+.mort-tav summary { cursor: pointer; font-weight: 700; }
+.mort-tav table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 13px; margin-top: 6px; }
+.mort-tav th { color: var(--muto); font-weight: 500; text-align: right; padding: 3px; } .mort-tav td { text-align: right; padding: 3px; border-top: 1px solid #262d1e; }
+.mort-tav td:first-child, .mort-tav th:first-child { text-align: left; color: var(--oro); } .mort-tav td small { color: var(--muto); font-size: 10px; margin-left: 3px; }
+.btn.mort-fuoco { min-height: 70px; background: var(--rossa); border-color: #ff8a7a; color: #fff; font-family: var(--tit); font-weight: 400; font-size: 30px; letter-spacing: 2px; }
+.btn.mort-fuoco:disabled { font-family: var(--txt); font-size: 20px; letter-spacing: 0; }
+.mort-colpito { position: fixed; inset: 0; z-index: 90; background: radial-gradient(circle at 50% 35%, #5a140e, #1c0907 70%); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; color: #fff; animation: mortLampo .25s 3 alternate; }
+@keyframes mortLampo { from { background-color: #ff3b2a; } }
+.mort-colpito .mort-ic { width: 120px; height: 120px; border-radius: 50%; border: 6px solid var(--ko); display: grid; place-items: center; font-size: 66px; color: var(--ko); margin-bottom: 18px; }
+.mort-colpito h2 { font-family: var(--tit); font-weight: 400; font-size: 36px; margin: 0 0 10px; } .mort-colpito p { font-size: 22px; color: #f3c8c2; }
+.mort-colpito small { color: #ffd96a; margin-bottom: 14px; } .mort-colpito .btn { max-width: 360px; }
+.mort-scegli { position: fixed; inset: 0; z-index: 80; background: var(--bg); display: flex; flex-direction: column; padding: calc(8px + var(--sa-t)) 10px 10px; }
+.mort-scegli .riga2 { align-items: center; margin: 4px 0 8px; } .mort-scegli .riga2 b { flex: 1; font-size: 20px; }
+.mort-scegli-m { flex: 1; position: relative; }
+.mort-mappa { height: 360px; } .mort-mappa.scegli { outline: 3px solid var(--ko); }
+.foglio-alto { max-height: 92vh; }
+.mort-info h2 { font-family: var(--tit); font-weight: 400; margin: 0 0 10px; } .mort-info h3 { color: var(--oro); margin: 18px 0 6px; }
+.mort-info p { margin: 0 0 8px; line-height: 1.35; } .mi-nota { color: var(--muto); font-size: 16px; }
+.mi-ciclo { display: flex; gap: 4px; } .mi-ciclo span { flex: 1; text-align: center; background: var(--pan); border: 1px solid var(--linea); border-radius: 10px; padding: 6px 2px; font-family: var(--mono); color: var(--oro); }
+.mi-ciclo b { display: block; font-family: var(--txt); color: var(--ink); font-size: 14px; }
+.mi-svg { width: 100%; height: auto; background: #1d1f17; border-radius: 12px; border: 1px solid var(--linea); margin: 4px 0; font-family: var(--txt); }
+.mi-costi { width: 100%; border-collapse: collapse; } .mi-costi td { padding: 4px 0; border-top: 1px solid var(--linea); } .mi-costi td:last-child { text-align: right; font-family: var(--mono); color: var(--oro); }
+.mi-es { background: #2b2412; border: 1px solid #5a4620; border-radius: 10px; padding: 8px 12px; margin: 6px 0 8px; }
+.btn.mort-fuoco:disabled { background: var(--pan2); color: var(--muto); border-color: var(--linea); }
