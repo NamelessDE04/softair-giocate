@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.22.1';
+  var VERSIONE = '0.22.2';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -148,10 +148,10 @@
     if (!me.callsign) return sceltaCallsign();
     var lista = attivi(), inviti = [], promemoria = [];
     lista.forEach(function (c) {
-      if (P('conflitti')) { promemoria.push(c); return; }
-      if (!me.team || (c.team || []).indexOf(me.team) < 0) return;
-      var a = miaAdesione(c.id);
-      if (!a || a.dopo) inviti.push(c); else if (a.si) promemoria.push(c);
+      // anche chi organizza risponde, se il suo team è invitato; e vede comunque tutti i conflict
+      var invitato = me.team && (c.team || []).indexOf(me.team) >= 0, a = invitato && miaAdesione(c.id);
+      if (invitato && (!a || a.dopo)) inviti.push(c);
+      else if (P('conflitti') || (invitato && a.si)) promemoria.push(c);
     });
     var all = allenamentiAttivi().filter(function (a) { var r = miaAdesione('a:' + a.id); return P('allenamenti') || !r || r.si || r.dopo; });
     var dz = D.dmz.filter(function (x) { return x.fine > Date.now() - 6 * 3600000 && (x.giocatori || []).indexOf(st.user.uid) >= 0; });
@@ -282,7 +282,7 @@
     if (addestramento(c)) hero.insertBefore(el('div', 'conf-tipo', 'ADDESTRAMENTO'), hero.firstChild);
     box.appendChild(hero);
 
-    if (!P('conflitti') && st.me.team) {
+    if (st.me.team && (c.team || []).indexOf(st.me.team) >= 0) {
       var a = miaAdesione(c.id), r = el('div', 'risposta');
       r.appendChild(el('span', null, a && !a.dopo ? (a.si ? 'Hai confermato la presenza' : 'Hai detto che non vieni') : 'Ci sarai?'));
       r.appendChild(bottone(a && a.si ? 'Non vengo più' : 'Partecipo', a && a.si ? 'piccolo' : 'accent piccolo', function () { S.rispondiInvito(c.id, a && a.si ? 'no' : 'si').then(function () { mostra(); }, errore); }));
@@ -1336,7 +1336,7 @@
     if (a.luogo || a.mapsUrl) lg.appendChild(link('Apri in Maps', mapsLink(a), 'btn piccolo'));
     hero.appendChild(lg);
     app.appendChild(hero);
-    if (!P('allenamenti') && S.stato().me.team) {
+    if (S.stato().me.team && (a.team || []).indexOf(S.stato().me.team) >= 0) {
       var mia = miaAdesione('a:' + a.id);
       if (!mia || mia.dopo) { var rk = el('div', 'carta'); rk.appendChild(el('b', null, 'Ci sarai?')); rk.appendChild(treRisposte(a.id, 'allenamenti', function () { mostra(); })); app.appendChild(rk); }
       else {
@@ -2387,9 +2387,9 @@
   var richiestaFatta = false;
   function chiediRisposte() {
     if (richiestaFatta || corrente().v !== 'home' || !$('foglio').hidden) return;
-    var st = S.stato(); if (!st.me || !st.me.team || P('conflitti')) return;
+    var st = S.stato(); if (!st.me || !st.me.team) return;
     var voci = attivi().filter(function (c) { return (c.team || []).indexOf(st.me.team) >= 0 && fase(c) !== 'finito'; }).map(function (c) { return { k: c.id, id: c.id, coll: 'conflitti', x: c }; })
-      .concat(allenamentiAttivi().filter(function (a) { return (a.inizio || 0) > Date.now(); }).map(function (a) { return { k: 'a:' + a.id, id: a.id, coll: 'allenamenti', x: a }; }));
+      .concat(allenamentiAttivi().filter(function (a) { return (a.inizio || 0) > Date.now() && (a.team || []).indexOf(st.me.team) >= 0; }).map(function (a) { return { k: 'a:' + a.id, id: a.id, coll: 'allenamenti', x: a }; }));
     if (voci.some(function (v) { return !D.adesioni[v.k]; })) return;   // aspetta che arrivino tutte le risposte
     var da = voci.filter(function (v) { var r = miaAdesione(v.k); return !r || r.dopo; });
     richiestaFatta = true;
