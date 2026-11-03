@@ -1,6 +1,7 @@
-/* Airsoft Conflict — mortaio: rifornimenti, costruzione nella FOB, richieste di fuoco, tiro e impatti.
+/* Airsoft Conflict — mortaio: rifornimenti dell'HQ, costruzione all'HQ, richieste di fuoco, tiro e impatti.
+   Come in Arma Reforger (Conflict): la base principale (HQ) riceve rifornimenti a intervalli regolari.
+   Il mortaio si costruisce solo all'HQ (niente da trasportare) e si paga con quei rifornimenti, come ogni colpo.
    Tutto si ricalcola dagli eventi del conflict (stesso risultato su ogni telefono):
-   { tipo:'rif', azione:'carica'|'scarica'|'perso', uid, team, pt, t }
    { tipo:'mortaio', azione:'costruisci'|'annulla', uid, team, pt, t }
    { tipo:'richiesta', uid, team, id, lat, lon, testo, t }
    { tipo:'fuoco', uid, team, pt, deriva, alzo, carica, rif, t }
@@ -8,9 +9,9 @@
 (function () {
   'use strict';
   var U = window.AC_UTM;
-  // viaggio: rifornimenti per giocatore · costo: postazione · colpo: costo di un colpo · max: capienza della FOB
-  // costruzione: secondi · letale/vicino: raggi in metri · cadenza: secondi tra due colpi dello stesso mortaio
-  var REGOLE = { viaggio: 100, costo: 600, colpo: 40, max: 1000, costruzione: 180, letale: 15, vicino: 40, cadenza: 20 };
+  // reddito: rifornimenti che arrivano all'HQ ogni "periodo" secondi · iniziali: quelli di partenza · max: capienza dell'HQ
+  // costo: postazione · colpo: costo di un colpo · costruzione: secondi · letale/vicino: raggi in metri · cadenza: secondi tra due colpi
+  var REGOLE = { reddito: 200, periodo: 300, iniziali: 0, max: 3000, costo: 1500, colpo: 50, costruzione: 180, letale: 15, vicino: 40, cadenza: 20 };
   var CARICHE = [45, 65, 80, 95];          // velocità alla bocca (m/s) per carica 0..3
   var ALZO_MIN = 800, ALZO_MAX = 1530, G = 9.81, MIL = 2 * Math.PI / 6400;
 
@@ -60,51 +61,53 @@
     return { lat: p.lat, lon: p.lon, gittata: dist, volo: b.volo };
   }
 
-  // stato dei rifornimenti e dei mortai di una partita
-  // punti: aree della cartina (con lat/lon) · owner: chi tiene ogni area adesso (dal motore delle fazioni)
-  function stato(c, punti, eventi, now, owner) {
-    var R = regole(c), P = {}, zaini = {}, fob = {}, mortai = {}, cantieri = {}, richieste = [], colpi = [], log = [];
+  // basi principali (HQ) delle fazioni: dal conflict, altrimenti dalla cartina
+  function hqDi(c, punti) {
+    var out = {};
+    ((c && c.fazioni) || []).forEach(function (f) { if (f.mob) out[f.id] = f.mob; });
+    (punti || []).forEach(function (p) { if (p.tipo === 'mob' && p.fazione && !out[p.fazione]) out[p.fazione] = p.id; });
+    return out;
+  }
+  // stato dei rifornimenti e dei mortai di una partita (inizio: quando è partita)
+  function stato(c, punti, eventi, now, owner, inizio) {
+    var R = regole(c), P = {}, HQ = hqDi(c, punti), cassa = {}, mortai = {}, cantieri = {}, richieste = [], colpi = [], log = [];
     (punti || []).forEach(function (p) { P[p.id] = p; });
-    function ok(team, pt) { return !owner || owner[pt] === team || (owner[pt] == null && P[pt] && P[pt].fazione === team); }
-    var ev = (eventi || []).filter(function (e) { return e.t <= now && (e.tipo === 'rif' || e.tipo === 'mortaio' || e.tipo === 'richiesta' || e.tipo === 'fuoco'); })
-      .sort(function (a, b) { return a.t - b.t; });
-    function chiudiCantieri(t) {
-      Object.keys(cantieri).forEach(function (pt) {
-        var k = cantieri[pt]; if (t - k.t < R.costruzione * 1000) return;
-        mortai[pt] = { pt: pt, team: k.team, da: k.t + R.costruzione * 1000, ultimo: 0 }; delete cantieri[pt];
-        log.push({ t: k.t + R.costruzione * 1000, team: k.team, testo: 'Mortaio pronto a ' + (P[pt] ? P[pt].nome : pt) });
+    Object.keys(HQ).forEach(function (f) { cassa[f] = { q: R.iniziali, scatto: inizio != null ? inizio : now }; });
+    // i rifornimenti arrivano a scatti: ogni periodo, fino alla capienza
+    function accredita(t) {
+      Object.keys(cassa).forEach(function (f) {
+        var k = cassa[f], n = Math.floor((t - k.scatto) / (R.periodo * 1000));
+        if (n > 0) { k.q = Math.min(R.max, k.q + n * R.reddito); k.scatto += n * R.periodo * 1000; }
       });
     }
+    function chiudiCantieri(t) {
+      Object.keys(cantieri).forEach(function (f) {
+        var k = cantieri[f]; if (t - k.t < R.costruzione * 1000) return;
+        mortai[f] = { pt: k.pt, team: f, da: k.t + R.costruzione * 1000, ultimo: 0 }; delete cantieri[f];
+        log.push({ t: k.t + R.costruzione * 1000, team: f, testo: 'Mortaio pronto all\'HQ' });
+      });
+    }
+    var ev = (eventi || []).filter(function (e) { return e.t <= now && (e.tipo === 'mortaio' || e.tipo === 'richiesta' || e.tipo === 'fuoco'); })
+      .sort(function (a, b) { return a.t - b.t; });
     ev.forEach(function (e) {
-      chiudiCantieri(e.t);
-      var pt = e.pt, f = e.team;
-      if (e.tipo === 'rif') {
-        if (e.azione === 'carica' && !zaini[e.uid]) zaini[e.uid] = { q: R.viaggio, team: f };
-        else if (e.azione === 'scarica' && zaini[e.uid] && P[pt] && P[pt].tipo === 'fob') {
-          var k = fob[pt] || (fob[pt] = { q: 0, team: f });
-          if (k.team !== f) { k.q = 0; k.team = f; }
-          k.q = Math.min(R.max, k.q + zaini[e.uid].q); delete zaini[e.uid];
-        } else if (e.azione === 'perso') delete zaini[e.uid];
-      } else if (e.tipo === 'mortaio') {
-        var s = fob[pt];
-        if (e.azione === 'costruisci' && !mortai[pt] && !cantieri[pt] && s && s.team === f && s.q >= R.costo) { s.q -= R.costo; cantieri[pt] = { uid: e.uid, team: f, t: e.t }; }
-        else if (e.azione === 'annulla' && cantieri[pt] && cantieri[pt].team === f) { delete cantieri[pt]; if (s) s.q += R.costo; }
+      accredita(e.t); chiudiCantieri(e.t);
+      var f = e.team, k = cassa[f];
+      if (e.tipo === 'mortaio') {
+        if (e.azione === 'costruisci' && k && !mortai[f] && !cantieri[f] && k.q >= R.costo) { k.q -= R.costo; cantieri[f] = { uid: e.uid, team: f, pt: HQ[f], t: e.t }; }
+        else if (e.azione === 'annulla' && cantieri[f]) { delete cantieri[f]; if (k) k.q = Math.min(R.max, k.q + R.costo); }
       } else if (e.tipo === 'richiesta') richieste.push({ id: e.id, uid: e.uid, team: f, lat: e.lat, lon: e.lon, testo: e.testo || '', t: e.t });
       else if (e.tipo === 'fuoco') {
-        var m = mortai[pt], sc = fob[pt], P0 = P[pt];
-        if (!m || m.team !== f || !sc || sc.q < R.colpo || !P0 || P0.lat == null || e.t - m.ultimo < R.cadenza * 1000) return;
+        var m = mortai[f], P0 = m && P[m.pt];
+        if (!m || !k || k.q < R.colpo || !P0 || P0.lat == null || e.t - m.ultimo < R.cadenza * 1000) return;
         var imp = impatto({ lat: P0.lat, lon: P0.lon }, e.deriva, e.alzo, e.carica, e.uid + ':' + e.t);
         if (!imp) return;
-        sc.q -= R.colpo; m.ultimo = e.t;
-        colpi.push({ id: e.uid + ':' + e.t, team: f, pt: pt, uid: e.uid, rif: e.rif || null, t: e.t, arrivo: e.t + imp.volo * 1000, lat: imp.lat, lon: imp.lon, gittata: imp.gittata });
+        k.q -= R.colpo; m.ultimo = e.t;
+        colpi.push({ id: e.uid + ':' + e.t, team: f, pt: m.pt, uid: e.uid, rif: e.rif || null, t: e.t, arrivo: e.t + imp.volo * 1000, lat: imp.lat, lon: imp.lon, gittata: imp.gittata });
       }
     });
-    chiudiCantieri(now);
-    // area persa: mortaio distrutto, rifornimenti persi
-    Object.keys(mortai).forEach(function (pt) { if (!ok(mortai[pt].team, pt)) { delete mortai[pt]; if (fob[pt]) fob[pt].q = 0; } });
-    Object.keys(cantieri).forEach(function (pt) { if (!ok(cantieri[pt].team, pt)) delete cantieri[pt]; });
-    Object.keys(fob).forEach(function (pt) { if (!ok(fob[pt].team, pt)) fob[pt].q = 0; });
-    return { regole: R, zaini: zaini, fob: fob, mortai: mortai, cantieri: cantieri, richieste: richieste, colpi: colpi, log: log };
+    accredita(now); chiudiCantieri(now);
+    var prossimo = {}; Object.keys(cassa).forEach(function (f) { prossimo[f] = cassa[f].q >= R.max ? null : cassa[f].scatto + R.periodo * 1000; });
+    return { regole: R, hq: HQ, cassa: cassa, prossimo: prossimo, mortai: mortai, cantieri: cantieri, richieste: richieste, colpi: colpi, log: log };
   }
   // dove è caduto un colpo rispetto al bersaglio, a parole
   function scarto(colpo, bersaglio) {
@@ -113,5 +116,5 @@
     return 'colpo caduto ' + Math.round(m.dist) + ' m a ' + versoDi(m.mil) + ' del bersaglio';
   }
 
-  window.AC_MORT = { REGOLE: REGOLE, CARICHE: CARICHE, ALZO_MIN: ALZO_MIN, ALZO_MAX: ALZO_MAX, regole: regole, balistica: balistica, alzoPer: alzoPer, tavola: tavola, misura: misura, sposta: sposta, versoDi: versoDi, impatto: impatto, stato: stato, scarto: scarto };
+  window.AC_MORT = { REGOLE: REGOLE, CARICHE: CARICHE, ALZO_MIN: ALZO_MIN, ALZO_MAX: ALZO_MAX, regole: regole, balistica: balistica, alzoPer: alzoPer, tavola: tavola, misura: misura, sposta: sposta, versoDi: versoDi, impatto: impatto, stato: stato, hqDi: hqDi, scarto: scarto };
 })();

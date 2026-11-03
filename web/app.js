@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.25';
+  var VERSIONE = '0.26';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -591,7 +591,7 @@
     // il mortaio per ora solo nei conflict di prova
     var mortOn = !!(cm.geo && c.prova);
     var puntiG = puntiGeo(cm), visti = {}, apertoIl = Date.now(), mortPan = null, annullati = {};
-    function statoMort() { var now = Date.now(), own = F.stato(motore(c), cm, ultimi, now).owner; return { s: window.AC_MORT.stato(c, puntiG, ultimi, now, own), own: own }; }
+    function statoMort() { var now = Date.now(), own = F.stato(motore(c), cm, ultimi, now).owner; return { s: window.AC_MORT.stato(c, puntiG, ultimi, now, own, motore(c).inizio), own: own }; }
     var v = F.vista(box, {
       g: motore(c), campo: cm, team: f, ordiniPersonali: personali, colori: COLORI, nomi: nomiFaz(c), ora: Date.now,
       sim: c.prova ? { attivo: simAttivo, pallini: pallini, muovi: muoviPallino } : null,
@@ -680,9 +680,9 @@
       var sm = statoMort().s;
       if (Date.now() - apertoIl < 3000) sm.colpi.forEach(function (cp) { if (cp.arrivo < apertoIl) visti[cp.id] = true; });
       sorvegliaImpatti(sm, puntiG, v.miaPos(), st.user.uid, visti, false);
-      if (f) Object.keys(sm.cantieri).forEach(function (pt) {
-        var k = sm.cantieri[pt]; if (k.uid !== st.user.uid || v.zona() === pt || annullati[pt + k.t]) return;
-        annullati[pt + k.t] = true; S.scriviEvento(c.id, { tipo: 'mortaio', azione: 'annulla', uid: st.user.uid, team: f, pt: pt, t: Date.now() }); toast('Sei uscito dalla FOB: costruzione del mortaio annullata');
+      if (f) Object.keys(sm.cantieri).forEach(function (fz) {
+        var k = sm.cantieri[fz]; if (k.uid !== st.user.uid || v.zona() === k.pt || annullati[fz + k.t]) return;
+        annullati[fz + k.t] = true; S.scriviEvento(c.id, { tipo: 'mortaio', azione: 'annulla', uid: st.user.uid, team: f, pt: k.pt, t: Date.now() }); toast('Sei uscito dall\'HQ: costruzione del mortaio annullata');
       });
       if (mortPan && !tendina.hidden) mortPan.aggiorna();
       v.ridisegna();
@@ -736,10 +736,10 @@
       f.classList.add('foglio-alto');
       var d = el('div', 'mort-info'); f.appendChild(d);
       d.innerHTML = '<h2>Come si spara col mortaio</h2>'
-        + '<div class="mi-ciclo"><span>1<b>Rifornisci</b></span><span>2<b>Costruisci</b></span><span>3<b>Osserva</b></span><span>4<b>Spara</b></span><span>5<b>Correggi</b></span></div>'
-        + '<h3>1 · Rifornimenti</h3><p>Alla tua <b>base principale</b> carichi 100 rifornimenti (bottone nella scheda o QR del deposito). Li porti a piedi fino a una <b>FOB</b> della tua fazione e li scarichi lì. Se ti eliminano per strada, il carico è perso: le colonne di rifornimento vanno scortate.</p>'
-        + '<table class="mi-costi"><tr><td>Postazione mortaio</td><td>600</td></tr><tr><td>Ogni colpo</td><td>40</td></tr><tr><td>Capienza di una FOB</td><td>1000</td></tr></table>'
-        + '<h3>2 · Costruzione</h3><p>Un <b>caposquadra</b> o il <b>comandante</b>, dentro la FOB, avvia la costruzione: servono 3 minuti senza uscire dall\'area. Se il nemico conquista la FOB, mortaio e rifornimenti sono persi.</p>'
+        + '<div class="mi-ciclo"><span>1<b>Rifornimenti</b></span><span>2<b>Costruisci</b></span><span>3<b>Osserva</b></span><span>4<b>Spara</b></span><span>5<b>Correggi</b></span></div>'
+        + '<h3>1 · Rifornimenti</h3><p>Come in Arma: la <b>base principale (HQ)</b> di ogni fazione riceve rifornimenti da sola, a scatti: <b>200 ogni 5 minuti</b>, fino a 3000. Non c\'è niente da trasportare.</p>'
+        + '<table class="mi-costi"><tr><td>Postazione mortaio</td><td>1500</td></tr><tr><td>Ogni colpo</td><td>50</td></tr><tr><td>Rifornimenti all\'HQ</td><td>+200 / 5 min</td></tr></table>'
+        + '<h3>2 · Costruzione</h3><p>Il mortaio si costruisce <b>solo all\'HQ</b>: lì c\'è la carta per calcolare il tiro. Lo avvia un <b>caposquadra</b> o il <b>comandante</b>: servono 3 minuti senza uscire dall\'area. Prima di poterlo costruire passa almeno mezz\'ora di partita.</p>'
         + '<h3>3 · L\'osservatore</h3><p>Chi vede il bersaglio manda al mortaio le <b>coordinate UTM</b> (lette sulla carta o toccando la mappa) e cosa c\'è. Il nemico non vede né le richieste né il mortaio.</p>'
         + '<h3>4 · Misurare sulla carta</h3><p>Sulla griglia UTM ogni quadretto è 100 m. Dal mortaio al bersaglio misuri quanti metri verso <b>est</b> e verso <b>nord</b>: da lì ricavi <b>distanza</b> e <b>direzione</b>.</p>'
         + '<svg viewBox="0 0 320 220" class="mi-svg"><defs><pattern id="mig" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#e8c96a" stroke-opacity=".25"/></pattern></defs><rect width="320" height="220" fill="url(#mig)"/>'
@@ -767,6 +767,7 @@
     });
   }
   // pannello del mortaio: rifornimenti, chiamata di fuoco, tiro. Uguale per partita e prova (ctx decide cosa succede)
+  function durata(sec) { return sec < 60 ? sec + ' secondi' : Math.round(sec / 60) + ' minuti'; }
   function pannelloMortaio(box, ctx) {
     var M = window.AC_MORT, sel = ctx.sel || (ctx.sel = { scheda: 'rif', deriva: 0, alzo: 1200, carica: 1, missione: null, coord: '', testo: '', mortaio: null });
     function nomeP(id) { var p = (ctx.punti || []).filter(function (q) { return q.id === id; })[0]; return p ? ((p.nomi && p.nomi[ctx.team]) || p.nome) : '?'; }
@@ -778,43 +779,33 @@
       var bi = el('button', 'mort-i', 'i'); bi.type = 'button'; bi.title = 'Come funziona'; bi.onclick = infoMortaio; testa.appendChild(bi);
       box.appendChild(testa);
       var tabs = el('div', 'schede');
-      [['rif', 'Rifornimenti'], ['oss', 'Chiama il fuoco'], ['tiro', 'Mortaio']].forEach(function (x) {
+      [['rif', 'HQ'], ['oss', 'Chiama il fuoco'], ['tiro', 'Mortaio']].forEach(function (x) {
         tabs.appendChild(bottone(x[1], 'scheda' + (sel.scheda === x[0] ? ' on' : ''), function () { sel.scheda = x[0]; disegna(); }));
       });
       box.appendChild(tabs);
-      var miei = Object.keys(s.mortai).filter(function (pt) { return s.mortai[pt].team === ctx.team; });
-      var fobMie = (ctx.punti || []).filter(function (p) { return p.tipo === 'fob' && (ctx.owner()[p.id] === ctx.team || (ctx.owner()[p.id] == null && p.fazione === ctx.team)); });
+      var mio = s.mortai[ctx.team], hq = s.hq[ctx.team], cassa = s.cassa[ctx.team] || { q: 0 }, allHq = ctx.prova || (hq && zona === hq);
       var cont = el('div', 'mort-c'); box.appendChild(cont);
       if (sel.scheda === 'rif') {
-        var z = s.zaini[ctx.uid], zp = (ctx.punti || []).filter(function (p) { return p.id === zona; })[0];
-        var k = el('div', 'carta mort-zaino');
-        k.appendChild(el('small', 'eti', 'IL TUO ZAINO')); k.appendChild(el('b', 'big', z ? z.q + ' rifornimenti' : 'Vuoto'));
-        k.appendChild(el('small', 'hint', ctx.prova ? 'In prova la posizione non conta: i tasti funzionano ovunque.' : zp ? 'Sei a ' + nomeP(zp.id) : 'Non sei in nessuna area'));
+        // rifornimenti dell'HQ: arrivano da soli, a scatti, come in Arma
+        var k = el('div', 'carta mort-fob');
+        var h = el('div', 'mort-fob-h'); h.appendChild(el('b', null, 'Rifornimenti all\'HQ' + (hq ? ' · ' + nomeP(hq) : ''))); h.appendChild(el('span', null, cassa.q + ' / ' + R.max)); k.appendChild(h);
+        var bar = el('div', 'mort-bar'), i = el('i'); i.style.width = Math.min(100, cassa.q / R.max * 100) + '%'; bar.appendChild(i); k.appendChild(bar);
+        var pr = s.prossimo[ctx.team];
+        k.appendChild(el('small', 'hint', pr ? '+' + R.reddito + ' tra ' + F.mmss(Math.max(0, pr - now)) + ' · ne arrivano ' + R.reddito + ' ogni ' + durata(R.periodo) : 'Deposito pieno'));
         cont.appendChild(k);
-        var aMob = ctx.prova || (zp && zp.tipo === 'mob' && zp.fazione === ctx.team), aFob = ctx.prova ? fobMie[0] : (zp && fobMie.indexOf(zp) >= 0 ? zp : null);
-        if (!z) { var b1 = bottone('Carica ' + R.viaggio + ' dal deposito', 'accent big', function () { ctx.scrivi({ tipo: 'rif', azione: 'carica', pt: zp ? zp.id : null }); }); b1.disabled = !aMob; cont.appendChild(b1); if (!aMob) cont.appendChild(el('small', 'hint', 'Si carica solo nella tua base principale.')); }
+        var c2 = el('div', 'carta mort-fob'); c2.appendChild(el('b', null, 'Mortaio'));
+        var cn = s.cantieri[ctx.team];
+        if (mio) c2.appendChild(el('small', 'ok', 'Pronto all\'HQ · ' + Math.floor(cassa.q / R.colpo) + ' colpi con i rifornimenti di adesso'));
+        else if (cn) c2.appendChild(el('small', 'avviso', 'In costruzione: ' + F.mmss(Math.max(0, cn.t + R.costruzione * 1000 - now)) + (cn.uid === ctx.uid ? ' · resta all\'HQ' : '')));
         else {
-          var b2 = bottone(aFob ? 'Scarica qui · ' + nomeP(aFob.id) : 'Scarica in una FOB', 'accent big', function () { ctx.scrivi({ tipo: 'rif', azione: 'scarica', pt: aFob.id }); }); b2.disabled = !aFob; cont.appendChild(b2);
-          cont.appendChild(bottone('Mi hanno eliminato: perdo il carico', 'link pericolo', function () { if (confirm('Perdere il carico?')) ctx.scrivi({ tipo: 'rif', azione: 'perso' }); }));
+          var pu = ctx.puoCostruire, basta = cassa.q >= R.costo;
+          var bc = bottone(basta ? 'Costruisci il mortaio · ' + R.costo : 'Mortaio: mancano ' + (R.costo - cassa.q) + ' rifornimenti', basta && allHq && pu ? 'accent' : '', function () { ctx.scrivi({ tipo: 'mortaio', azione: 'costruisci', pt: hq }); });
+          bc.disabled = !(basta && allHq && pu); c2.appendChild(bc);
+          if (basta && !pu) c2.appendChild(el('small', 'hint', 'Lo costruisce un caposquadra o il comandante.'));
+          else if (basta && !allHq) c2.appendChild(el('small', 'hint', 'Bisogna essere all\'HQ.'));
+          else if (!basta) c2.appendChild(el('small', 'hint', 'Costa ' + R.costo + ' rifornimenti, ogni colpo ' + R.colpo + '. Costruzione: ' + durata(R.costruzione) + ' all\'HQ.'));
         }
-        cont.appendChild(el('h4', 'sez', 'Le tue FOB'));
-        if (!fobMie.length) cont.appendChild(el('p', 'hint', 'La tua fazione non ha FOB.'));
-        fobMie.forEach(function (p) {
-          var q = s.fob[p.id] && s.fob[p.id].team === ctx.team ? s.fob[p.id].q : 0, r0 = el('div', 'carta mort-fob');
-          var h = el('div', 'mort-fob-h'); h.appendChild(el('b', null, nomeP(p.id))); h.appendChild(el('span', null, q + ' / ' + R.max)); r0.appendChild(h);
-          var bar = el('div', 'mort-bar'), i = el('i'); i.style.width = Math.min(100, q / R.max * 100) + '%'; bar.appendChild(i); r0.appendChild(bar);
-          var cn = s.cantieri[p.id], mo = s.mortai[p.id];
-          if (mo) r0.appendChild(el('small', 'ok', 'Mortaio pronto · ' + Math.floor(q / R.colpo) + ' colpi'));
-          else if (cn) r0.appendChild(el('small', 'avviso', 'Costruzione: ' + F.mmss(Math.max(0, cn.t + R.costruzione * 1000 - now)) + (cn.uid === ctx.uid ? ' · resta nell\'area' : '')));
-          else {
-            var qui = ctx.prova || zona === p.id, pu = ctx.puoCostruire;
-            var bc = bottone(q >= R.costo ? 'Costruisci mortaio · ' + R.costo : 'Mortaio: mancano ' + (R.costo - q), q >= R.costo && qui && pu ? 'accent' : '', function () { ctx.scrivi({ tipo: 'mortaio', azione: 'costruisci', pt: p.id }); });
-            bc.disabled = !(q >= R.costo && qui && pu); r0.appendChild(bc);
-            if (q >= R.costo && !pu) r0.appendChild(el('small', 'hint', 'Lo costruisce un caposquadra o il comandante.'));
-            else if (q >= R.costo && !qui) r0.appendChild(el('small', 'hint', 'Bisogna essere dentro la FOB.'));
-          }
-          cont.appendChild(r0);
-        });
+        cont.appendChild(c2);
       } else if (sel.scheda === 'oss') {
         cont.appendChild(el('p', 'hint', 'Manda al mortaio dove sparare. Il nemico non vede le richieste.'));
         var ci = el('input'); ci.value = sel.coord; ci.placeholder = '32T 375310 4983462'; ci.className = 'mono'; ci.oninput = function () { sel.coord = ci.value; };
@@ -836,11 +827,9 @@
           cont.appendChild(r1);
         });
       } else {
-        if (!miei.length) { cont.appendChild(el('p', 'hint', 'La tua fazione non ha mortai pronti. Si costruiscono nelle FOB, dalla scheda Rifornimenti.')); return; }
-        if (miei.indexOf(sel.mortaio) < 0) sel.mortaio = miei[0];
-        var mo = s.mortai[sel.mortaio], scorta = s.fob[sel.mortaio] ? s.fob[sel.mortaio].q : 0, P0 = (ctx.punti || []).filter(function (p) { return p.id === sel.mortaio; })[0];
-        var hm = el('div', 'mort-mh');
-        if (miei.length > 1) { var ms = select(miei.map(function (pt) { return [pt, nomeP(pt)]; }), sel.mortaio); ms.onchange = function () { sel.mortaio = ms.value; disegna(); }; hm.appendChild(ms); } else hm.appendChild(el('b', null, 'Mortaio · ' + nomeP(sel.mortaio)));
+        if (!mio) { cont.appendChild(el('p', 'hint', 'La tua fazione non ha ancora il mortaio. Si costruisce all\'HQ, dalla scheda HQ.')); return; }
+        var mo = mio, scorta = cassa.q, P0 = (ctx.punti || []).filter(function (p) { return p.id === mo.pt; })[0];
+        var hm = el('div', 'mort-mh'); hm.appendChild(el('b', null, 'Mortaio · HQ'));
         hm.appendChild(el('span', 'mono', Math.floor(scorta / R.colpo) + ' colpi')); cont.appendChild(hm);
         if (P0 && P0.lat != null) cont.appendChild(el('small', 'hint mono', 'Posizione del mortaio: ' + utmDi(P0.lat, P0.lon)));
         // missioni ricevute
@@ -884,14 +873,14 @@
           tb.appendChild(tr);
         });
         tv.appendChild(tb); cont.appendChild(tv);
-        var attesa = mo.ultimo ? mo.ultimo + R.cadenza * 1000 - now : 0, qui = ctx.prova || zona === sel.mortaio;
+        var attesa = mo.ultimo ? mo.ultimo + R.cadenza * 1000 - now : 0, qui = allHq;
         var bf = bottone(attesa > 0 ? 'Ricarica il tubo · ' + Math.ceil(attesa / 1000) + ' s' : 'FUOCO', 'mort-fuoco', function () {
           if (!bl) { toast('Alzo fuori dai limiti: tra ' + M.ALZO_MIN + ' e ' + M.ALZO_MAX); return; }
-          ctx.scrivi({ tipo: 'fuoco', pt: sel.mortaio, deriva: sel.deriva, alzo: sel.alzo, carica: sel.carica, rif: sel.missione || null }).then(function () { toast('Colpo partito · arrivo tra ' + Math.round(bl.volo) + ' s'); });
+          ctx.scrivi({ tipo: 'fuoco', pt: mo.pt, deriva: sel.deriva, alzo: sel.alzo, carica: sel.carica, rif: sel.missione || null }).then(function () { toast('Colpo partito · arrivo tra ' + Math.round(bl.volo) + ' s'); });
         });
         bf.disabled = attesa > 0 || scorta < R.colpo || !qui;
         cont.appendChild(bf);
-        if (!qui) cont.appendChild(el('small', 'hint', 'Per sparare devi essere nella FOB del mortaio.'));
+        if (!qui) cont.appendChild(el('small', 'hint', 'Per sparare devi essere all\'HQ, dove c\'è il mortaio e la carta.'));
         else if (scorta < R.colpo) cont.appendChild(el('small', 'hint', 'Rifornimenti finiti: servono ' + R.colpo + ' per colpo.'));
       }
     }
@@ -899,7 +888,7 @@
     var ultima = '';
     function firma() {
       var s = ctx.stato(), now = ctx.ora(), corre = Object.keys(s.cantieri).length || Object.keys(s.mortai).some(function (k) { return now - s.mortai[k].ultimo < s.regole.cadenza * 1000; });
-      return JSON.stringify([s.fob, Object.keys(s.mortai), s.cantieri, s.zaini[ctx.uid], s.richieste.length, s.colpi.filter(function (c) { return c.arrivo <= now; }).length, s.colpi.length, ctx.zona(), corre ? Math.floor(now / 5000) : 0]);
+      return JSON.stringify([s.cassa[ctx.team] && s.cassa[ctx.team].q, Object.keys(s.mortai), s.cantieri, s.richieste.length, s.colpi.filter(function (c) { return c.arrivo <= now; }).length, s.colpi.length, ctx.zona(), corre ? Math.floor(now / 5000) : 0]);
     }
     var disegna0 = disegna; disegna = function () { ultima = firma(); disegna0(); };
     disegna();
@@ -908,7 +897,7 @@
   // segni sulla mappa: i miei mortai, le richieste della mia fazione e gli impatti recenti
   function segniMortaio(s, team, punti, now, tutto) {
     var out = [];
-    Object.keys(s.mortai).forEach(function (pt) { var m = s.mortai[pt], p = punti.filter(function (q) { return q.id === pt; })[0]; if (p && p.lat != null && (tutto || m.team === team)) out.push({ tipo: 'mortaio', lat: p.lat, lon: p.lon, colore: COLORI[m.team] || '#2f7fd6' }); });
+    Object.keys(s.mortai).forEach(function (f) { var m = s.mortai[f], p = punti.filter(function (q) { return q.id === m.pt; })[0]; if (p && p.lat != null && (tutto || m.team === team)) out.push({ tipo: 'mortaio', lat: p.lat, lon: p.lon, colore: COLORI[m.team] || '#2f7fd6' }); });
     s.richieste.forEach(function (q) { if ((tutto || q.team === team) && now - q.t < 600000) out.push({ tipo: 'bersaglio', lat: q.lat, lon: q.lon, colore: '#ff6b5a', testo: q.testo ? q.testo.slice(0, 18) : '' }); });
     s.colpi.forEach(function (cp) {
       if (cp.arrivo > now || now - cp.arrivo > (tutto ? 600000 : 120000)) return;
@@ -940,16 +929,16 @@
     var cid = id || campi[0].id;
     var cs = select(campi.map(function (c) { return [c.id, c.nome]; }), cid); cs.onchange = function () { sostituisci('mortaioProva', cs.value); };
     app.appendChild(campoForm('Cartina', cs));
-    app.appendChild(el('p', 'hint', 'Simulazione: niente arriva ai giocatori. I controlli di posizione sono disattivati e la costruzione dura 5 secondi. Per provare il colpo: rifornisci una FOB, costruisci, manda una richiesta toccando la mappa, imposta deriva, alzo e carica e spara.'));
+    app.appendChild(el('p', 'hint', 'Simulazione: niente arriva ai giocatori. I controlli di posizione sono disattivati e tutto è accelerato: rifornimenti ogni 10 secondi, costruzione in 5. Per provare il colpo: aspetta i rifornimenti, costruisci il mortaio all\'HQ, manda una richiesta toccando la mappa, imposta deriva, alzo e carica e spara.'));
     var mapBox = el('div', 'all-mappa mort-mappa'); app.appendChild(mapBox);
     var panBox = el('div', 'mort-pan'); app.appendChild(panBox);
     conCampo(cid, mapBox, function (cm0) {
       var cm = Object.assign({}, cm0, { punti: puntiGeo(cm0) }), team = 'blu', eventi = [], visti = {}, scegliCb = null, uid = S.stato().user.uid;
-      var fob = cm.punti.filter(function (p) { return p.tipo === 'fob'; });
-      if (!fob.length) { panBox.appendChild(el('p', 'hint avviso', 'Questa cartina non ha FOB: aggiungine una nell\'editor per provare il mortaio.')); }
+      if (!cm.punti.some(function (p) { return p.tipo === 'mob' && p.fazione === team; })) panBox.appendChild(el('p', 'hint avviso', 'In questa cartina manca la base principale blu: segnala nell\'editor per provare il mortaio.'));
       var own = {}; cm.punti.forEach(function (p) { own[p.id] = p.tipo === 'fob' || p.fazione === team ? team : p.fazione || null; });
-      var cPrv = { regole: { mortaio: { costruzione: 5 } } };
-      function st() { return window.AC_MORT.stato(cPrv, cm.punti, eventi, Date.now(), own); }
+      // in prova tutto più veloce: rifornimenti ogni 10 secondi, costruzione in 5
+      var cPrv = { regole: { mortaio: { costruzione: 5, periodo: 10, reddito: 300 } } }, t0 = Date.now();
+      function st() { return window.AC_MORT.stato(cPrv, cm.punti, eventi, Date.now(), own, t0); }
       var g0 = { inizio: Date.now() + 864e5, durata: 60, fazioni: [{ team: 'blu', mob: null, partenza: [] }, { team: 'rossa', mob: null, partenza: [] }] };
       var v = F.vista(mapBox, { g: g0, campo: cm, team: null, colori: COLORI, nomi: {}, ora: Date.now, anteprima: true, mobile: true,
         segni: function () { return segniMortaio(st(), team, cm.punti, Date.now(), true); },
@@ -965,7 +954,7 @@
       var giro = setInterval(function () {
         var s = st();
         s.colpi.forEach(function (cp) { if (!visti[cp.id] && cp.arrivo <= Date.now()) { visti[cp.id] = true; suonoImpatto(false); var q = s.richieste.filter(function (r) { return r.id === cp.rif; })[0]; toast(q ? 'Osservatore: ' + window.AC_MORT.scarto(cp, q) : 'Colpo arrivato'); pan.aggiorna(); } });
-        v.ridisegna(); if (s.colpi.some(function (cp) { return cp.arrivo > Date.now() - 2000; }) || Object.keys(s.cantieri).length || s.colpi.length) pan.aggiorna();
+        v.ridisegna(); pan.aggiorna();
       }, 1000);
       var prima = chiusura; chiusura = function () { clearInterval(giro); v.chiudi(); if (prima) prima(); };
     });
