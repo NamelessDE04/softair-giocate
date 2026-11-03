@@ -690,3 +690,8 @@ main > .btn.big { margin-bottom: 6px; }
 .mi-costi { width: 100%; border-collapse: collapse; } .mi-costi td { padding: 4px 0; border-top: 1px solid var(--linea); } .mi-costi td:last-child { text-align: right; font-family: var(--mono); color: var(--oro); }
 .mi-es { background: #2b2412; border: 1px solid #5a4620; border-radius: 10px; padding: 8px 12px; margin: 6px 0 8px; }
 .btn.mort-fuoco:disabled { background: var(--pan2); color: var(--muto); border-color: var(--linea); }
+.carta.beta { width: 100%; text-align: left; color: var(--ink); border: 1px dashed #8a3a2c; background: linear-gradient(135deg, #2a1512, var(--pan)); cursor: pointer; margin-top: 12px; }
+.carta.beta .pm-eti { background: #d23a2c; color: #fff; }
+.beta-r { display: flex; gap: 12px; align-items: center; margin-top: 6px; }
+.beta-ic { width: 48px; height: 48px; flex: none; border-radius: 12px; background: #3a1814; border: 1px solid #8a3a2c; color: #ffb3a8; display: grid; place-items: center; font-size: 28px; }
+.beta-r h3 { margin: 0; } .beta-r small { color: var(--muto); font-size: 16px; }

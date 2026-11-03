@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.23';
+  var VERSIONE = '0.23.1';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -155,14 +155,25 @@
     });
     var all = allenamentiAttivi().filter(function (a) { var r = miaAdesione('a:' + a.id); return P('allenamenti') || !r || r.si || r.dopo; });
     var dz = D.dmz.filter(function (x) { return x.fine > Date.now() - 6 * 3600000 && (x.giocatori || []).indexOf(st.user.uid) >= 0; });
-    if (!inviti.length && !promemoria.length && !all.length && !dz.length) { schermataInvito(); return; }
+    if (!inviti.length && !promemoria.length && !all.length && !dz.length) { schermataInvito(); app.appendChild(cartaBeta()); return; }
     inviti.forEach(function (c) { app.appendChild(cartaInvito(c)); });
     // conflict e allenamenti in ordine di data
     promemoria.map(function (c) { return { t: c.inizio, el: cartaPromemoria(c) }; }).concat(all.map(function (a) { return { t: a.inizio || 0, el: cartaAllenamento(a) }; }))
       .concat(dz.map(function (x) { return { t: x.inizio, el: cartaDmz(x) }; }))
       .sort(function (x, y) { return x.t - y.t; }).forEach(function (x) { app.appendChild(x.el); });
+    app.appendChild(cartaBeta());
   }
 
+  // funzioni in prova, aperte a tutti: per ora il mortaio
+  function cartaBeta() {
+    var k = el('button', 'carta beta'); k.type = 'button';
+    var t = el('div', 'pm-testa'); t.appendChild(el('span', 'pm-eti', 'BETA')); k.appendChild(t);
+    var r0 = el('div', 'beta-r'); r0.appendChild(el('span', 'beta-ic', '✹'));
+    var tx = el('div'); tx.appendChild(el('h3', null, 'Mortaio')); tx.appendChild(el('small', null, 'Prova a sparare: deriva, alzo, carica e tavola di tiro. Simulazione, niente arriva sul campo.')); r0.appendChild(tx);
+    k.appendChild(r0);
+    k.onclick = function () { vai('mortaioProva'); };
+    return k;
+  }
   // al primo accesso: senza callsign non si entra (è l'unico nome che vedono gli altri)
   function sceltaCallsign() {
     var me = S.stato().me, box = el('div', 'invito');
@@ -853,7 +864,7 @@
   }
   // prova per gli organizzatori: tutto il giro su una cartina vera, senza effetti sul campo
   function pagMortaioProva(id) {
-    testata('Mortaio · prova');
+    testata('Mortaio · BETA');
     var campi = D.campi.filter(function (c) { return c.geo; });
     if (!campi.length) { app.appendChild(el('p', 'hint', 'Serve una cartina con le coordinate (georeferenziata).')); return; }
     var cid = id || campi[0].id;
@@ -1185,7 +1196,6 @@
       ['cartine', '⌖', 'Cartine', P('mappe')],
       ['pcs', '★', 'Scenari PCS', dev],
       ['dmz', '⇪', 'DMZ', dev],
-      ['mortaio', '✹', 'Mortaio (prova)', P('conflitti')],
       ['ruoli', '⚙', 'Ruoli e permessi', dev]
     ].filter(function (x) { return x[3]; });
     if (!sez) {
