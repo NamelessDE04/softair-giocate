@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.22';
+  var VERSIONE = '0.22.1';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -2452,7 +2452,7 @@
       Object.keys(stopAdesioni).forEach(function (id) { stopAdesioni[id](); }); stopAdesioni = {}; D.adesioni = {};
       chiaveTel = null; D.contatti = {}; riascoltaContatti();
       if (stopPriv) stopPriv(); stopPriv = null; D.privati = {};
-      if (P('giocatori') || P('conflitti')) stopPriv = S.ascoltaPrivati(function (m) { D.privati = m; });
+      if (P('giocatori') || P('conflitti')) stopPriv = S.ascoltaPrivati(function (m) { D.privati = m; nomiCambiati(); });
       if (S.stato().dev && !privacySistemata) { privacySistemata = true; S.sistemaPrivacy().then(function (n) { if (n) toast('Privacy: sistemati ' + n + ' profili'); }, function (e) { console.warn(e); }); }
       if (stopAll) stopAll();
       stopAll = S.ascoltaAllenamenti(function (x) { D.allenamenti = x; ascoltaAdesioniDi(); ridisegna(); });
@@ -2470,6 +2470,15 @@
   });
   // telefoni dei referenti: secondo la regola scelta dal developer
   var chiaveTel = null, stopPriv = null, privacySistemata = false;
+  // dopo una modifica a nome e cognome si ridisegnano le pagine che li mostrano (se non si sta scrivendo)
+  function nomiCambiati() {
+    var v = corrente().v;
+    if (['giocatori', 'team', 'conflitto', 'allenamento'].indexOf(v) < 0) return;
+    if (!$('foglio').hidden) { clearTimeout(nomiCambiati.t); nomiCambiati.t = setTimeout(nomiCambiati, 400); return; }
+    if (document.activeElement.matches('input,textarea,select')) return;
+    if ((v === 'conflitto') && $('pieno').querySelector('.fz')) return;
+    mostra();
+  }
   function sonoReferente() { var st = S.stato(); return D.team.some(function (t) { return t.referenteUid === st.user.uid; }); }
   function riascoltaContatti() {
     var k = S.vedeTelefoni(sonoReferente()) ? 'si' : 'no';
