@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.24';
+  var VERSIONE = '0.24.1';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -565,11 +565,13 @@
     } : null;
     conCampo(c.campo, box, function (cm) { cm = perCategoria(cm, 'conflict');
     // mortaio: stato ricalcolato dagli eventi, con chi tiene le aree adesso
+    // il mortaio per ora solo nei conflict di prova
+    var mortOn = !!(cm.geo && c.prova);
     var puntiG = puntiGeo(cm), visti = {}, apertoIl = Date.now(), mortPan = null, annullati = {};
     function statoMort() { var now = Date.now(), own = F.stato(motore(c), cm, ultimi, now).owner; return { s: window.AC_MORT.stato(c, puntiG, ultimi, now, own), own: own }; }
     var v = F.vista(box, {
       g: motore(c), campo: cm, team: f, ordiniPersonali: personali, colori: COLORI, nomi: nomiFaz(c), ora: Date.now,
-      segni: function () { return f && cm.geo ? segniMortaio(statoMort().s, f, puntiG, Date.now(), false) : []; },
+      segni: function () { return f && mortOn ? segniMortaio(statoMort().s, f, puntiG, Date.now(), false) : []; },
       gps: !!f, qr: !!f, comandante: comandante, presenze: P('presenze'),
       onZona: function (pt) { S.scriviEvento(c.id, { tipo: 'zona', uid: st.user.uid, team: f, pt: pt || null, t: Date.now() }); },
       onOrdine: function (pt, azione, testo) { S.scriviEvento(c.id, { tipo: 'ordine', uid: st.user.uid, team: f, pt: pt, azione: azione, testo: testo, t: Date.now() }); },
@@ -599,7 +601,7 @@
       };
       bq.onclick = function () { scQr(); };
       box.appendChild(bq);
-      if (cm.geo) {
+      if (mortOn) {
         var bm = bottone('✹', 'fz-mort'); bm.setAttribute('aria-label', 'Mortaio');
         bm.onclick = function () {
           tendina.innerHTML = '';
@@ -627,7 +629,7 @@
     }
     var stopE = S.ascoltaEventi(c.id, function (ev) { ultimi = ev; v.aggiorna(ev); if (mortPan && !tendina.hidden) mortPan.aggiorna(); });
     // ogni secondo: impatti arrivati, costruzioni abbandonate, pannello aperto
-    var giroM = cm.geo ? setInterval(function () {
+    var giroM = mortOn ? setInterval(function () {
       var sm = statoMort().s;
       if (Date.now() - apertoIl < 3000) sm.colpi.forEach(function (cp) { if (cp.arrivo < apertoIl) visti[cp.id] = true; });
       sorvegliaImpatti(sm, puntiG, v.miaPos(), st.user.uid, visti, false);
