@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.26';
+  var VERSIONE = '0.27';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -935,7 +935,7 @@
     conCampo(cid, mapBox, function (cm0) {
       var cm = Object.assign({}, cm0, { punti: puntiGeo(cm0) }), team = 'blu', eventi = [], visti = {}, scegliCb = null, uid = S.stato().user.uid;
       if (!cm.punti.some(function (p) { return p.tipo === 'mob' && p.fazione === team; })) panBox.appendChild(el('p', 'hint avviso', 'In questa cartina manca la base principale blu: segnala nell\'editor per provare il mortaio.'));
-      var own = {}; cm.punti.forEach(function (p) { own[p.id] = p.tipo === 'fob' || p.fazione === team ? team : p.fazione || null; });
+      var own = {}; cm.punti.forEach(function (p) { own[p.id] = p.fazione || null; });
       // in prova tutto più veloce: rifornimenti ogni 10 secondi, costruzione in 5
       var cPrv = { regole: { mortaio: { costruzione: 5, periodo: 10, reddito: 300 } } }, t0 = Date.now();
       function st() { return window.AC_MORT.stato(cPrv, cm.punti, eventi, Date.now(), own, t0); }
@@ -1938,16 +1938,14 @@
       var cm = campoMeta(cSel.value, 'conflict');
       if (!cm) { mobBox.appendChild(el('p', 'hint', D.campi.length ? 'Scegli la cartina del campo.' : 'Nessuna cartina: creala da Organizza → Cartine (da computer).')); return; }
       if (!cm.geo) mobBox.appendChild(el('p', 'hint avviso', 'Questa cartina non è georeferenziata: il GPS non potrà riconoscere le aree.'));
-      var mobs = (cm.punti || []).filter(function (p) { return p.tipo === 'mob'; }), altri = (cm.punti || []).filter(function (p) { return p.tipo !== 'mob' && p.tipo !== 'fob'; });
+      var mobs = (cm.punti || []).filter(function (p) { return p.tipo === 'mob'; }), altri = (cm.punti || []).filter(function (p) { return p.tipo !== 'mob'; });
       var mB = mobs.filter(function (p) { return p.fazione === 'blu'; })[0], mR = mobs.filter(function (p) { return p.fazione === 'rossa'; })[0];
       if (mB && mR) {
-        // basi e FOB sono già assegnate alle fazioni nella cartina
+        // le basi principali sono già assegnate alle fazioni nella cartina
         base.blu = mB.id; base.rossa = mR.id;
         var info = el('div', 'basi-info');
         [['blu', mB], ['rossa', mR]].forEach(function (x) {
-          var fobs = (cm.punti || []).filter(function (p) { return p.tipo === 'fob' && p.fazione === x[0]; });
           var r = el('div', 'basi-r s-' + x[0]); r.appendChild(el('b', null, '⚑ ' + nomeArea(x[1], x[0])));
-          if (fobs.length) r.appendChild(el('small', null, '▲ ' + fobs.map(function (p) { return nomeArea(p, x[0]); }).join(', ')));
           info.appendChild(r);
         });
         mobBox.appendChild(campoForm('Basi dalla cartina', info));
@@ -1978,7 +1976,7 @@
       });
     }
     function nomeArea(p, f) { return (p.nomi && p.nomi[f]) || p.nome; }
-    function difesaTutto() { var cm0 = campoMeta(cSel.value, 'conflict'); return ((cm0 && cm0.punti) || []).filter(function (p) { return p.tipo !== 'mob' && p.tipo !== 'fob'; }).map(function (p) { return p.id; }); }
+    function difesaTutto() { var cm0 = campoMeta(cSel.value, 'conflict'); return ((cm0 && cm0.punti) || []).filter(function (p) { return p.tipo !== 'mob'; }).map(function (p) { return p.id; }); }
     cSel.onchange = function () { partenza = { blu: [], rossa: modo === 'addestramento' ? difesaTutto() : [] }; disegnaBasi(); };
     disegnaBasi();
     // fazioni e team
@@ -2136,15 +2134,14 @@
         mm.forEach(function (u) { nomiGioc[u.id] = nomeG(u); });
       } else Object.keys(scelta).forEach(function (t) { if (scelta[t]) { team.push(t); fazioneDi[t] = scelta[t]; } });
       var cmS = campoMeta(cSel.value, 'conflict');
-      function fobDi(f) { return ((cmS && cmS.punti) || []).filter(function (p) { return p.tipo === 'fob' && p.fazione === f; }).map(function (p) { return p.id; }); }
       if (!cmS) { toast('Scegli la cartina del campo'); return; }
       if ((cmS.punti || []).filter(function (p) { return p.tipo === 'mob'; }).length < 2 || base.blu === base.rossa) { toast('Servono due basi di partenza diverse'); return; }
       var out = {
         id: c.id, titolo: tit.value.trim(), luogo: lg.value.trim(), mapsUrl: mu.value.trim(), campo: cSel.value,
         ritrovo: pv ? null : ms(hR.value), inizio: ini, fine: fin, prova: pv, provaDa: pv ? (vecchio && vecchio.prova && vecchio.provaDa) || ini : null, invitati: invitati,
         fazioni: [
-          { id: 'blu', nome: nB.value.trim() || 'Blu', team: modo === 'addestramento' ? team : team.filter(function (t) { return fazioneDi[t] === 'blu'; }), mob: base.blu, partenza: partenza.blu.concat(fobDi('blu')) },
-          { id: 'rossa', nome: nR.value.trim() || 'Rossa', team: modo === 'addestramento' ? team : team.filter(function (t) { return fazioneDi[t] === 'rossa'; }), mob: base.rossa, partenza: partenza.rossa.concat(fobDi('rossa')) }
+          { id: 'blu', nome: nB.value.trim() || 'Blu', team: modo === 'addestramento' ? team : team.filter(function (t) { return fazioneDi[t] === 'blu'; }), mob: base.blu, partenza: partenza.blu },
+          { id: 'rossa', nome: nR.value.trim() || 'Rossa', team: modo === 'addestramento' ? team : team.filter(function (t) { return fazioneDi[t] === 'rossa'; }), mob: base.rossa, partenza: partenza.rossa }
         ],
         team: team, fazioneDi: fazioneDi, comandanti: { blu: cmB.value || 'ia', rossa: modo === 'addestramento' && !pv ? 'ia' : (cmR.value || 'ia') },
         modo: modo, fazioneUtente: fazioneUtente, nomiGioc: nomiGioc,
@@ -2198,8 +2195,8 @@
   }
 
   // ================= QR: scanner, fogli da stampare, posa sul campo
-  var SIMB = { mob: '⚑', fob: '▲', chiave: '★', base: '●', torre: '📡' };
-  var DESCR = { mob: 'Base principale', fob: 'Base avanzata (FOB)', chiave: 'Punto chiave', base: 'Punto base', torre: 'Torre radio' };
+  var SIMB = { mob: '⚑', chiave: '★', base: '●', torre: '📡' };
+  var DESCR = { mob: 'Base principale', chiave: 'Punto chiave', base: 'Punto base', torre: 'Torre radio' };
   function posaConsentita() { var me = S.stato().me || {}; return P('mappe') || (me.posaQrFino || 0) > Date.now(); }
   function urlQr(cm, p, tok) { return location.origin + location.pathname.replace(/index\.html$/, '') + '?qr=' + cm.id + '.' + p.id + '.' + tok; }
 

@@ -4,10 +4,10 @@
 (function () {
   'use strict';
   var U = window.AC_UTM;
-  var TIPI = [['mob', '⚑ Base principale (MOB)'], ['fob', '▲ Base avanzata (FOB)'], ['chiave', '★ Punto chiave'], ['base', '● Punto base'], ['torre', '📡 Torre radio']];
+  var TIPI = [['mob', '⚑ Base principale (MOB)'], ['chiave', '★ Punto chiave'], ['base', '● Punto base'], ['torre', '📡 Torre radio']];
   var FAZ = [['blu', 'Fazione blu'], ['rossa', 'Fazione rossa']], COLF = { blu: '#2f7fd6', rossa: '#d23a2c' };
-  function conFazione(t) { return t === 'mob' || t === 'fob'; }
-  function simbolo(t) { return t === 'mob' ? '⚑' : t === 'fob' ? '▲' : t === 'chiave' ? '★' : t === 'torre' ? '📡' : '●'; }
+  function conFazione(t) { return t === 'mob'; }
+  function simbolo(t) { return t === 'mob' ? '⚑' : t === 'chiave' ? '★' : t === 'torre' ? '📡' : '●'; }
   var LATO = 3000;   // lato massimo dell'immagine salvata (pixel)
 
   function el(tag, cls, testo) { var e = document.createElement(tag); if (cls) e.className = cls; if (testo != null) e.textContent = testo; return e; }

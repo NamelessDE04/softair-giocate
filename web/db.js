@@ -320,6 +320,8 @@
   // Firestore non accetta liste dentro liste: collegamenti e tracce si salvano come oggetti e qui si riportano a coppie
   function normalizza(c) {
     c.link = (c.link || []).map(function (l) { return Array.isArray(l) ? l : [l.a, l.b]; });
+    // le FOB non esistono più: diventano punti base senza fazione (chi le teneva all'inizio resta nel conflict)
+    c.punti = (c.punti || []).map(function (p) { if (p.tipo !== 'fob') return p; var q = Object.assign({}, p, { tipo: 'base' }); delete q.fazione; return q; });
     c.tracce = (c.tracce || []).map(function (tr) { return Object.assign({}, tr, { pts: (tr.pts || []).map(function (p) { return Array.isArray(p) ? p : [p.la, p.lo]; }) }); });
     return c;
   }
