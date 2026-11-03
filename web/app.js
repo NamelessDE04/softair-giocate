@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.23.1';
+  var VERSIONE = '0.23.2';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -155,13 +155,13 @@
     });
     var all = allenamentiAttivi().filter(function (a) { var r = miaAdesione('a:' + a.id); return P('allenamenti') || !r || r.si || r.dopo; });
     var dz = D.dmz.filter(function (x) { return x.fine > Date.now() - 6 * 3600000 && (x.giocatori || []).indexOf(st.user.uid) >= 0; });
-    if (!inviti.length && !promemoria.length && !all.length && !dz.length) { schermataInvito(); app.appendChild(cartaBeta()); return; }
+    if (!inviti.length && !promemoria.length && !all.length && !dz.length) { schermataInvito(); if (P('conflitti')) app.appendChild(cartaBeta()); return; }
     inviti.forEach(function (c) { app.appendChild(cartaInvito(c)); });
     // conflict e allenamenti in ordine di data
     promemoria.map(function (c) { return { t: c.inizio, el: cartaPromemoria(c) }; }).concat(all.map(function (a) { return { t: a.inizio || 0, el: cartaAllenamento(a) }; }))
       .concat(dz.map(function (x) { return { t: x.inizio, el: cartaDmz(x) }; }))
       .sort(function (x, y) { return x.t - y.t; }).forEach(function (x) { app.appendChild(x.el); });
-    app.appendChild(cartaBeta());
+    if (P('conflitti')) app.appendChild(cartaBeta());
   }
 
   // funzioni in prova, aperte a tutti: per ora il mortaio
@@ -865,6 +865,7 @@
   // prova per gli organizzatori: tutto il giro su una cartina vera, senza effetti sul campo
   function pagMortaioProva(id) {
     testata('Mortaio · BETA');
+    if (!P('conflitti')) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
     var campi = D.campi.filter(function (c) { return c.geo; });
     if (!campi.length) { app.appendChild(el('p', 'hint', 'Serve una cartina con le coordinate (georeferenziata).')); return; }
     var cid = id || campi[0].id;
