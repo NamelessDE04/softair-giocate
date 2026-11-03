@@ -31,7 +31,6 @@
       ['bachecaPrima', 'Leggere i post della bacheca prima della pubblicazione'],
       ['cartinaPrima', 'Vedere la cartina del campo prima della data'],
       ['parcheggioPrima', 'Vedere il parcheggio prima della data'],
-      ['telefoni', 'Vedere il numero di cellulare dei referenti'],
       ['rosa', 'Vedere i giocatori del proprio team']]],
     ['In partita', [
       ['radio', 'Vedere la maglia radio della propria fazione'],
@@ -40,10 +39,10 @@
       ['prova', 'Usare la mappa di prova']]]
   ];
   var DEFAULT = {
-    organizzatore: { conflitti: true, allenamenti: true, radio: true, mappe: true, team: true, giocatori: true, bachecaPrima: true, cartinaPrima: true, parcheggioPrima: true, telefoni: true, rosa: true, ordini: true, presenze: true, prova: true },
-    comandante: { radio: true, cartinaPrima: true, parcheggioPrima: true, telefoni: true, rosa: true, ordini: true, presenze: true, prova: true },
-    caposquadra: { radio: true, parcheggioPrima: true, telefoni: true, rosa: true, presenze: true, prova: true },
-    truppa: { radio: true, telefoni: true, rosa: true, prova: true }
+    organizzatore: { conflitti: true, allenamenti: true, radio: true, mappe: true, team: true, giocatori: true, bachecaPrima: true, cartinaPrima: true, parcheggioPrima: true, rosa: true, ordini: true, presenze: true, prova: true },
+    comandante: { radio: true, cartinaPrima: true, parcheggioPrima: true, rosa: true, ordini: true, presenze: true, prova: true },
+    caposquadra: { radio: true, parcheggioPrima: true, rosa: true, presenze: true, prova: true },
+    truppa: { radio: true, rosa: true, prova: true }
   };
   api.RUOLI = RUOLI; api.PERMESSI = PERMESSI; api.DEFAULT = DEFAULT;
   api.nomeRuolo = function (r) { if (r === 'developer') return 'Developer'; var x = RUOLI.filter(function (q) { return q[0] === r; })[0]; return x ? x[1] : 'Truppa'; };
@@ -72,13 +71,24 @@
     fb.initializeApp(C.firebase);
     auth = fb.auth(); db = fb.firestore();
     try { db.enablePersistence({ synchronizeTabs: true }).catch(function () {}); } catch (e) {}
-    var stopMe = null, stopPerm = null;
+    var stopMe = null, stopPerm = null, stopPriv = null, stopPrivacy = null;
     auth.onAuthStateChanged(function (u) {
       if (stopMe) { stopMe(); stopMe = null; }
       if (stopPerm) { stopPerm(); stopPerm = null; }
+      if (stopPriv) { stopPriv(); stopPriv = null; }
+      if (stopPrivacy) { stopPrivacy(); stopPrivacy = null; }
+      stato.privato = {}; stato.privacy = null;
       stato.user = u; stato.dev = stato.admin = isAdmin(u); stato.me = null;
       if (u) stopPerm = db.collection('config').doc('permessi').onSnapshot(function (s) {
         stato.permessi = s.exists ? s.data() : null; if (stato.fase === 'pronto') emetti();
+      }, function () {});
+      if (u) stopPrivacy = db.collection('config').doc('privacy').onSnapshot(function (s) {
+        stato.privacy = s.exists ? s.data() : null; if (stato.fase === 'pronto') emetti();
+      }, function () {});
+      // nome e cognome stanno in privati/{uid}: li leggono solo il giocatore stesso e chi organizza
+      if (u) stopPriv = db.collection('privati').doc(u.uid).onSnapshot(function (s) {
+        stato.privato = s.exists ? s.data() : {};
+        if (stato.me) { stato.me.nome = stato.privato.nome || ''; stato.me.email = stato.privato.email || u.email || ''; if (stato.fase === 'pronto') emetti(); }
       }, function () {});
       if (!u) { stato.fase = 'login'; emetti(); return; }
       stato.fase = 'carico'; emetti();
@@ -86,12 +96,21 @@
       stopMe = ref.onSnapshot(function (s) {
         if (!s.exists) {
           if (s.metadata && s.metadata.fromCache) return;
-          ref.set({ email: u.email || '', nome: u.displayName || '', callsign: '', team: null, squadra: null }).catch(function (e) {
+          db.collection('privati').doc(u.uid).set({ nome: u.displayName || '', email: u.email || '' }, { merge: true }).catch(function () {});
+          ref.set({ callsign: '', team: null, squadra: null }).catch(function (e) {
             stato.fase = 'errore'; stato.errore = 'Profilo non creato: ' + (e.message || e); emetti();
           });
           return;
         }
-        stato.me = Object.assign({ uid: u.uid }, s.data());
+        var dati = s.data();
+        // profili vecchi: nome ed email passano in privati e spariscono dal profilo che vedono gli altri
+        if ('nome' in dati || 'email' in dati) {
+          var pv = {}; if (dati.nome) pv.nome = dati.nome; if (dati.email) pv.email = dati.email;
+          db.collection('privati').doc(u.uid).set(pv, { merge: true }).then(function () {
+            return ref.update({ nome: fb.firestore.FieldValue.delete(), email: fb.firestore.FieldValue.delete() });
+          }).catch(function (e) { console.warn('spostamento dati privati', e); });
+        }
+        stato.me = Object.assign({ uid: u.uid }, dati, { nome: stato.privato.nome || dati.nome || '', email: stato.privato.email || u.email || '' });
         stato.ruolo = stato.dev ? 'developer' : (stato.me.ruolo || 'truppa');
         stato.fase = 'pronto'; emetti();
       }, function (e) { stato.fase = 'errore'; stato.errore = 'Database non raggiungibile: ' + (e.message || e); emetti(); });
@@ -109,7 +128,66 @@
   function doc(s) { return s.exists ? Object.assign({ id: s.id }, s.data()) : null; }
 
   // ---------- profilo
-  api.aggiornaProfilo = function (p) { return db.collection('utenti').doc(stato.user.uid).set(p, { merge: true }); };
+  api.aggiornaProfilo = function (p) {
+    p = Object.assign({}, p); var pv = null;
+    if ('nome' in p) { pv = { nome: p.nome }; delete p.nome; }
+    return Promise.all([db.collection('utenti').doc(stato.user.uid).set(p, { merge: true }), pv ? db.collection('privati').doc(stato.user.uid).set(pv, { merge: true }) : null]);
+  };
+  // nomi veri: solo per chi organizza
+  api.ascoltaPrivati = function (cb) {
+    return db.collection('privati').onSnapshot(function (qs) { var m = {}; qs.docs.forEach(function (d) { m[d.id] = d.data(); }); cb(m); }, function () { cb({}); });
+  };
+  // chi vede i telefoni dei referenti (lo decide il developer): tutti, referenti, comandanti, capisquadra
+  api.privacyTelefoni = function () { var t = (stato.privacy || {}).telefoni; return t || { tutti: true }; };
+  api.salvaPrivacyTelefoni = function (t) { return db.collection('config').doc('privacy').set({ telefoni: t }, { merge: true }); };
+  api.vedeTelefoni = function (sonoReferente) {
+    if (stato.dev || api.puo('team')) return true;
+    var t = api.privacyTelefoni(), r = stato.ruolo;
+    return !!(t.tutti || (t.referenti && sonoReferente) || (t.comandante && r === 'comandante') || (t.caposquadra && r === 'caposquadra') || r === 'organizzatore');
+  };
+  // il developer sistema i profili vecchi di tutti: nome ed email in privati, il referente mostrato col callsign
+  api.sistemaPrivacy = function () {
+    if (!stato.dev) return Promise.resolve(0);
+    return Promise.all([db.collection('utenti').get(), db.collection('team').get(), db.collection('conflitti').get(), db.collection('dmz').get(), db.collection('campiPosa').get()]).then(function (r) {
+      var b = db.batch(), n = 0, cs = {}, radio = [];
+      r[0].docs.forEach(function (d) {
+        var x = d.data(); cs[d.id] = x.callsign || '';
+        if (!('nome' in x) && !('email' in x)) return;
+        var pv = {}; if (x.nome) pv.nome = x.nome; if (x.email) pv.email = x.email;
+        b.set(db.collection('privati').doc(d.id), pv, { merge: true });
+        b.update(d.ref, { nome: fb.firestore.FieldValue.delete(), email: fb.firestore.FieldValue.delete() }); n++;
+      });
+      r[1].docs.forEach(function (d) {
+        var t = d.data(), c = t.referenteUid && cs[t.referenteUid];
+        if (c && (t.referente || {}).nome !== c) { b.set(d.ref, { referente: { nome: c, tel: '' } }, { merge: true }); n++; }
+      });
+      // nomi copiati dentro conflict (addestramento), DMZ e posa dei QR: solo callsign
+      function rifai(mappa) { var o = {}, cambia = false; Object.keys(mappa || {}).forEach(function (u) { o[u] = cs[u] || 'Senza callsign'; if (o[u] !== mappa[u]) cambia = true; }); return cambia ? o : null; }
+      r[2].docs.forEach(function (d) { var o = rifai(d.data().nomiGioc); if (o) { b.update(d.ref, { nomiGioc: o }); n++; } radio.push(d.id); });
+      r[3].docs.forEach(function (d) { var o = rifai(d.data().nomi); if (o) { b.update(d.ref, { nomi: o }); n++; } });
+      r[4].docs.forEach(function (d) {
+        var aree = d.data().aree || {}, o = {};
+        Object.keys(aree).forEach(function (k) { var a = aree[k]; if (a && a.uid && a.nome !== (cs[a.uid] || '')) o['aree.' + k + '.nome'] = cs[a.uid] || ''; });
+        if (Object.keys(o).length) { b.update(d.ref, o); n++; }
+      });
+      // marconisti nella maglia radio
+      return Promise.all(radio.map(function (cid) { return db.collection('conflitti/' + cid + '/radio').get(); })).then(function (rr) {
+        rr.forEach(function (qs) {
+          qs.docs.forEach(function (d) {
+            var x = d.data(); if (!x.reti) return; var cambia = false;
+            var reti = x.reti.map(function (rt) {
+              if (!rt.marconisti) return rt;
+              var nm = rt.marconisti.map(function (u) { return u ? cs[u] || 'Senza callsign' : ''; });
+              if (JSON.stringify(nm) !== JSON.stringify(rt.nomiMarconisti || [])) cambia = true;
+              return Object.assign({}, rt, { nomiMarconisti: nm });
+            });
+            if (cambia) { b.update(d.ref, { reti: reti }); n++; }
+          });
+        });
+        return n ? b.commit().then(function () { return n; }) : 0;
+      });
+    });
+  };
 
   // ---------- team
   var ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // niente 0/O e 1/I
@@ -130,8 +208,8 @@
   };
   api.salvaTeam = function (tid, dati) { return db.collection('team').doc(tid).set(dati, { merge: true }); };
   // cellulare del referente: sta a parte, così lo vede solo chi ha il permesso
-  api.ascoltaContatti = function (cb) {
-    if (!api.puo('telefoni') && !api.puo('team')) { cb({}); return function () {}; }
+  api.ascoltaContatti = function (cb, consentito) {
+    if (!consentito && !api.vedeTelefoni(false)) { cb({}); return function () {}; }
     return db.collection('contatti').onSnapshot(function (qs) { var m = {}; qs.docs.forEach(function (d) { m[d.id] = d.data().tel || ''; }); cb(m); }, function () { cb({}); });
   };
   api.leggiContatto = function (tid) { return db.collection('contatti').doc(tid).get().then(function (s) { return s.exists ? s.data().tel || '' : ''; }, function () { return ''; }); };
@@ -171,8 +249,12 @@
   };
   // solo organizzatore: tutti i giocatori
   api.ascoltaUtenti = function (cb) { return db.collection('utenti').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); }); };
-  api.salvaUtente = function (uid, dati) { return db.collection('utenti').doc(uid).set(dati, { merge: true }); };
-  api.eliminaUtente = function (uid) { return db.collection('utenti').doc(uid).delete(); };
+  api.salvaUtente = function (uid, dati) {
+    dati = Object.assign({}, dati); var pv = null;
+    if ('nome' in dati) { pv = { nome: dati.nome }; delete dati.nome; }
+    return Promise.all([db.collection('utenti').doc(uid).set(dati, { merge: true }), pv ? db.collection('privati').doc(uid).set(pv, { merge: true }) : null]);
+  };
+  api.eliminaUtente = function (uid) { return Promise.all([db.collection('utenti').doc(uid).delete(), db.collection('privati').doc(uid).delete().catch(function () {})]); };
   api.eliminaAdesione = function (cid, uid, coll) { return db.collection((coll || 'conflitti') + '/' + cid + '/adesioni').doc(uid).delete(); };
   api.codiceTeam = function (tid) {
     return db.collection('codiciTeam').doc(tid).get().then(function (s) { return s.exists ? s.data().codice : ''; }, function () { return ''; });
@@ -228,7 +310,7 @@
   api.rispondiInvito = function (cid, valore, coll) {
     var me = stato.me, v = valore === true ? 'si' : valore === false ? 'no' : valore;
     return db.collection((coll || 'conflitti') + '/' + cid + '/adesioni').doc(stato.user.uid)
-      .set({ team: me.team, nome: me.callsign || me.nome || '', si: v === 'si', dopo: v === 'dopo', t: Date.now() });
+      .set({ team: me.team, nome: me.callsign || '', si: v === 'si', dopo: v === 'dopo', t: Date.now() });
   };
   // ---------- cartine dei campi: campi/{id} con punti e collegamenti, immagine a pezzi in campi/{id}/img/{n}
   var PEZZO = 900000;

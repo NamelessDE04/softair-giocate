@@ -19,10 +19,10 @@ service cloud.firestore {
     // permessi predefiniti se il developer non ha ancora salvato la tabella
     function predefiniti() {
       return {
-        'organizzatore': { 'conflitti': true, 'allenamenti': true, 'mappe': true, 'team': true, 'giocatori': true, 'telefoni': true, 'rosa': true, 'ordini': true },
-        'comandante': { 'telefoni': true, 'rosa': true, 'ordini': true },
-        'caposquadra': { 'telefoni': true, 'rosa': true },
-        'truppa': { 'telefoni': true, 'rosa': true }
+        'organizzatore': { 'conflitti': true, 'allenamenti': true, 'mappe': true, 'team': true, 'giocatori': true, 'rosa': true, 'ordini': true },
+        'comandante': { 'rosa': true, 'ordini': true },
+        'caposquadra': { 'rosa': true },
+        'truppa': { 'rosa': true }
       };
     }
     function ruoloT() { return ruolo() == null ? 'truppa' : ruolo(); }
@@ -39,6 +39,25 @@ service cloud.firestore {
     function ruoloInvariato() { return request.resource.data.get('ruolo', null) == resource.data.get('ruolo', null); }
     // il ruolo e il permesso temporaneo di posare i QR non se li dà da solo nessuno
     function permessiInvariati() { return ruoloInvariato() && request.resource.data.get('posaQrFino', null) == resource.data.get('posaQrFino', null); }
+    // nome, cognome ed email non stanno nel profilo pubblico (vanno in privati/{uid}): si possono solo togliere
+    function senzaNomi() {
+      return !request.resource.data.keys().hasAny(['nome', 'email'])
+        || (resource != null && request.resource.data.get('nome', null) == resource.data.get('nome', null)
+            && request.resource.data.get('email', null) == resource.data.get('email', null));
+    }
+    // telefoni dei referenti: chi li vede lo decide il developer (config/privacy)
+    function regolaTel() {
+      return exists(/databases/$(database)/documents/config/privacy)
+        ? get(/databases/$(database)/documents/config/privacy).data.get('telefoni', { 'tutti': true })
+        : { 'tutti': true };
+    }
+    function vedeTelefoni() {
+      return signed() && (regolaTel().get('tutti', false) == true
+        || ruoloT() == 'organizzatore'
+        || (regolaTel().get('referenti', false) == true && isRef(myTeam()))
+        || (regolaTel().get('comandante', false) == true && ruoloT() == 'comandante')
+        || (regolaTel().get('caposquadra', false) == true && ruoloT() == 'caposquadra'));
+    }
     function posaQr() { return perm('mappe') || (signed() && exists(meRef()) && get(meRef()).data.get('posaQrFino', 0) > request.time.toMillis()); }
 
     // Tabella dei permessi: la leggono tutti, la cambia solo il developer
@@ -53,14 +72,14 @@ service cloud.firestore {
         || (signed() && request.auth.uid == uid)
         || (signed() && resource.data.get('team', null) != null && resource.data.get('team', null) == myTeam()
             && (perm('rosa') || isRef(myTeam())));
-      allow create: if signed() && request.auth.uid == uid
+      allow create: if signed() && request.auth.uid == uid && senzaNomi()
         && request.resource.data.get('team', null) == null && request.resource.data.get('ruolo', null) == null;
       allow update: if isDev()
-        || (perm('giocatori') && ruoloInvariato())
+        || (perm('giocatori') && ruoloInvariato() && senzaNomi())
         // chi elimina un team toglie i giocatori dal team
         || (perm('team') && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['squadra', 'team', 'codice'])
             && request.resource.data.get('team', null) == null)
-        || (signed() && request.auth.uid == uid && permessiInvariati() && (
+        || (signed() && request.auth.uid == uid && permessiInvariati() && senzaNomi() && (
           request.resource.data.get('team', null) == resource.data.get('team', null)
           || request.resource.data.get('team', null) == null
           || (request.resource.data.get('codice', null) is string
@@ -69,6 +88,14 @@ service cloud.firestore {
         || (isRef(resource.data.get('team', null))
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['squadra', 'team', 'codice'])
           && (request.resource.data.get('team', null) == resource.data.get('team', null) || request.resource.data.get('team', null) == null));
+      allow delete: if perm('giocatori');
+    }
+
+    // Nome, cognome ed email: solo il giocatore stesso e chi organizza
+    match /privati/{uid} {
+      allow read: if (signed() && request.auth.uid == uid) || perm('giocatori') || perm('conflitti');
+      allow create, update: if ((signed() && request.auth.uid == uid) || perm('giocatori'))
+        && request.resource.data.keys().hasOnly(['nome', 'email']);
       allow delete: if perm('giocatori');
     }
 
@@ -139,9 +166,9 @@ service cloud.firestore {
               && request.resource.data.get('referenteUid', null) == resource.data.get('referenteUid', null)))
         && request.resource.data.get('logo', '').size() < 300000;
     }
-    // Cellulare del referente: solo chi ha il permesso "telefoni" (e il referente stesso)
+    // Cellulare del referente: chi organizza, il referente stesso e chi permette la regola del developer
     match /contatti/{tid} {
-      allow read: if perm('telefoni') || perm('team') || isRef(tid);
+      allow read: if perm('team') || isRef(tid) || vedeTelefoni();
       allow write: if perm('team') || isRef(tid);
     }
 

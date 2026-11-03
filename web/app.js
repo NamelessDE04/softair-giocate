@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.21';
+  var VERSIONE = '0.22';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -65,7 +65,7 @@
   function visibile(da, perm) { return P(perm) || da == null || Date.now() >= da; }
 
   // ---------- dati condivisi
-  var D = { team: [], conflitti: [], adesioni: {}, contatti: {}, campi: [], scenari: [], allenamenti: [], dmz: [] };
+  var D = { team: [], conflitti: [], adesioni: {}, contatti: {}, campi: [], scenari: [], allenamenti: [], dmz: [], privati: {} };
   var stopAdesioni = {};
   function teamDi(tid) { return D.team.filter(function (t) { return t.id === tid; })[0]; }
   function miaAdesione(cid) { var u = S.stato().user; return (D.adesioni[cid] || []).filter(function (a) { return a.id === u.uid; })[0]; }
@@ -145,6 +145,7 @@
   // ================= HOME
   function home() {
     var st = S.stato(), me = st.me;
+    if (!me.callsign) return sceltaCallsign();
     var lista = attivi(), inviti = [], promemoria = [];
     lista.forEach(function (c) {
       if (P('conflitti')) { promemoria.push(c); return; }
@@ -162,6 +163,21 @@
       .sort(function (x, y) { return x.t - y.t; }).forEach(function (x) { app.appendChild(x.el); });
   }
 
+  // al primo accesso: senza callsign non si entra (è l'unico nome che vedono gli altri)
+  function sceltaCallsign() {
+    var me = S.stato().me, box = el('div', 'invito');
+    box.appendChild(el('span', 'invito-stella', '★'));
+    box.appendChild(el('h2', null, 'Il tuo callsign'));
+    box.appendChild(el('p', null, 'Nell\'app gli altri giocatori vedono solo il tuo callsign. Nome e cognome restano privati: li vedi tu e gli organizzatori.'));
+    var form = el('form', 'codice'), inp = el('input'); inp.placeholder = 'es. FALCO'; inp.maxLength = 20; inp.autocomplete = 'off';
+    var ok = el('button', 'btn accent big', 'Conferma'); ok.type = 'submit';
+    form.appendChild(inp); form.appendChild(ok); box.appendChild(form);
+    form.onsubmit = function (e) {
+      e.preventDefault(); var v = inp.value.trim(); if (v.length < 2) { toast('Scrivi il tuo callsign'); return; }
+      S.aggiornaProfilo({ callsign: v }).then(function () { toast('Benvenuto, ' + v); }, errore);
+    };
+    app.appendChild(box);
+  }
   function schermataInvito() {
     var me = S.stato().me, t = teamDi(me.team);
     var box = el('div', 'invito');
@@ -371,6 +387,7 @@
       } else box.appendChild(bloccato('Le indicazioni arrivano da ' + dataLunga(pk.da)));
     }
   }
+  var privacyAperta = false;
   // schede (tab): la scelta resta finché non si cambia pagina
   var schedaScelta = {};
   function schede(box, chiave, voci) {
@@ -389,7 +406,7 @@
     var att = el('p', 'hint', 'Caricamento dei giocatori…'); box.appendChild(att);
     var stopU = S.ascoltaUtenti(function (ut) { disegna(ut); });
     var prima = chiusura; chiusura = function () { stopU(); if (prima) prima(); };
-    function nomeU(u) { return u.callsign || u.nome || u.email || 'Giocatore'; }
+    function nomeU(u) { return conNome(u); }
     function disegna(ut) {
       box.innerHTML = '';
       var perId = {}; ades.forEach(function (a) { perId[a.id] = a; });
@@ -653,7 +670,11 @@
     var stop = S.ascoltaMembri(tid, function (m) { elencoGiocatori(el_, t, m); });
     chiusura = stop;
   }
-  function nomeG(u) { return u.callsign || u.nome || u.email || 'Giocatore'; }
+  // per la privacy gli altri vedono solo il callsign; nome e cognome li vedono il giocatore stesso e chi organizza
+  function nomeG(u) { return (u && u.callsign) || 'Senza callsign'; }
+  function vedeNomi() { return P('giocatori') || P('conflitti'); }
+  function nomeVero(u) { var x = vedeNomi() && u && D.privati[u.id]; return x && x.nome ? x.nome : ''; }
+  function conNome(u) { var n = nomeVero(u); return nomeG(u) + (n ? ' (' + n + ')' : ''); }
   function elencoGiocatori(box, t, membri) {
     box.innerHTML = '';
     box.appendChild(el('h3', 'sez', 'Giocatori (' + membri.length + ')'));
@@ -665,7 +686,7 @@
       g.appendChild(el('h4', null, s.nome + ' · ' + dentro.length));
       dentro.sort(function (a, b) { return nomeG(a).localeCompare(nomeG(b)); }).forEach(function (u) {
         var r = el('div', 'gioc');
-        r.appendChild(el('span', null, nomeG(u)));
+        r.appendChild(el('span', null, conNome(u)));
         if (u.id === t.referenteUid) r.appendChild(el('small', 'tag', 'REFERENTE'));
         else if (u.ruolo && u.ruolo !== 'truppa') r.appendChild(el('small', 'tag', S.nomeRuolo(u.ruolo).toUpperCase()));
         if (P('giocatori')) { r.classList.add('apribile'); r.onclick = function () { editorGiocatore(u); }; }
@@ -699,9 +720,9 @@
     if (!refTel.value) S.leggiContatto(tid).then(function (x) { if (x && !refTel.value) refTel.value = x; }); refTel.type = 'tel'; refTel.placeholder = '333 1234567';
     form.appendChild(el('h3', 'sez', 'Referente'));
     form.appendChild(campoForm('Chi è (tra i giocatori del team)', refSel));
-    form.appendChild(campoForm('Nome da mostrare', refNome));
+    form.appendChild(campoForm('Callsign da mostrare', refNome));
     form.appendChild(campoForm('Numero di cellulare', refTel));
-    form.appendChild(el('p', 'hint', 'Il nome e il numero del referente li vedono i giocatori dei conflict a cui partecipa il team, per organizzarsi.'));
+    form.appendChild(el('p', 'hint', 'Si mostra solo il callsign, mai nome e cognome. Chi vede il numero lo decide il developer.'));
     // squadre
     form.appendChild(el('h3', 'sez', 'Squadre'));
     var sqBox = el('div', 'sq-lista'); form.appendChild(sqBox);
@@ -723,7 +744,7 @@
       mBox.innerHTML = '';
       if (!membri.length) mBox.appendChild(el('p', 'hint', 'Nessun giocatore ancora. Condividi il codice del team.'));
       membri.forEach(function (u) {
-        var r = el('div', 'm-riga'); r.appendChild(el('span', null, nomeG(u)));
+        var r = el('div', 'm-riga'); r.appendChild(el('span', null, conNome(u)));
         if (dati.squadre.length) {
           var s = select([['', '—']].concat(dati.squadre.map(function (q) { return [q.id, q.nome]; })), u.squadra || '');
           s.onchange = function () { S.impostaSquadra(u.id, s.value).catch(errore); };
@@ -740,7 +761,7 @@
     refSel.onchange = function () {
       dati.referenteUid = refSel.value || null;
       var u = membri.filter(function (x) { return x.id === refSel.value; })[0];
-      if (u && !refNome.value) refNome.value = u.nome || nomeG(u);
+      if (u && u.callsign) refNome.value = u.callsign;
     };
     chiusura = S.ascoltaMembri(tid, function (m) { membri = m; disegnaMembri(); });
     var salva = el('div', 'riga2 fisso');
@@ -763,19 +784,21 @@
     var st = S.stato(), me = st.me;
     testata('Profilo');
     var f = el('div', 'modulo'); app.appendChild(f);
-    var n = el('input'); n.value = me.nome || ''; f.appendChild(campoForm('Nome', n));
-    var cs = el('input'); cs.value = me.callsign || ''; cs.placeholder = 'es. Falco'; f.appendChild(campoForm('Nome in codice (callsign)', cs));
+    var cs = el('input'); cs.value = me.callsign || ''; cs.placeholder = 'es. Falco'; f.appendChild(campoForm('Callsign', cs));
+    var n = el('input'); n.value = me.nome || ''; f.appendChild(campoForm('Nome e cognome', n));
+    f.appendChild(el('p', 'hint', 'Gli altri giocatori vedono solo il tuo callsign. Nome e cognome li vedi tu e gli organizzatori.'));
     f.appendChild(el('p', 'hint', 'Accesso: ' + (st.user.email || '')));
-    f.appendChild(bottone('Salva', 'accent big', function () { S.aggiornaProfilo({ nome: n.value.trim(), callsign: cs.value.trim() }).then(function () { toast('Salvato'); indietro(); }, errore); }));
+    f.appendChild(bottone('Salva', 'accent big', function () { if (!cs.value.trim()) { toast('Serve il callsign'); return; } S.aggiornaProfilo({ nome: n.value.trim(), callsign: cs.value.trim() }).then(function () { toast('Salvato'); indietro(); }, errore); }));
     if (me.team) f.appendChild(bottone('Lascia il team', 'link pericolo', function () { if (confirm('Vuoi uscire dal team?')) S.togliMembro(st.user.uid).then(function () { sostituisci('home'); }, errore); }));
   }
 
   // ================= GIOCATORI (solo organizzatore)
   function editorGiocatore(u) {
     apriFoglio(function (f) {
+      var pv = D.privati[u.id] || {};
       f.appendChild(el('h3', null, nomeG(u)));
-      if (u.email) f.appendChild(el('p', 'hint', u.email));
-      var n = el('input'); n.value = u.nome || ''; f.appendChild(campoForm('Nome', n));
+      if (pv.email) f.appendChild(el('p', 'hint', pv.email));
+      var n = el('input'); n.value = pv.nome || ''; f.appendChild(campoForm('Nome e cognome (lo vedono solo gli organizzatori)', n));
       var cs = el('input'); cs.value = u.callsign || ''; f.appendChild(campoForm('Callsign', cs));
       var rSel = null;
       var attivo = (u.posaQrFino || 0) > Date.now();
@@ -820,9 +843,9 @@
         if (!dentro.length) return;
         var k = el('div', 'squadra'); k.appendChild(el('h4', null, g.nome + ' · ' + dentro.length));
         dentro.sort(function (a, b) { return nomeG(a).localeCompare(nomeG(b)); }).forEach(function (u) {
-          var r = el('div', 'gioc apribile'); r.appendChild(el('span', null, nomeG(u)));
+          var r = el('div', 'gioc apribile'); r.appendChild(el('span', null, conNome(u)));
           if (u.ruolo && u.ruolo !== 'truppa') r.appendChild(el('small', 'tag', S.nomeRuolo(u.ruolo).toUpperCase()));
-          r.appendChild(el('small', 'hint', u.email || ''));
+          r.appendChild(el('small', 'hint', (D.privati[u.id] || {}).email || ''));
           r.onclick = function () { editorGiocatore(u); };
           k.appendChild(r);
         });
@@ -904,6 +927,23 @@
       });
     } else if (sez === 'team') {
       testata('Team');
+      if (S.stato().dev) {
+        // privacy: chi vede il cellulare dei referenti (gli organizzatori e il referente stesso lo vedono sempre)
+        var tel = Object.assign({}, S.privacyTelefoni()), kt = el('details', 'carta privacy-tel');
+        kt.appendChild(el('summary', null, '☎ Chi vede i telefoni dei referenti')); kt.open = privacyAperta; kt.ontoggle = function () { privacyAperta = kt.open; };
+        [['tutti', 'Tutti i giocatori'], ['referenti', 'I referenti degli altri team'], ['comandante', 'I comandanti di fazione'], ['caposquadra', 'I caposquadra']].forEach(function (o) {
+          var l = el('label', 'spunta'), cb = el('input'); cb.type = 'checkbox'; cb.checked = !!tel[o[0]];
+          cb.onchange = function () {
+            tel[o[0]] = cb.checked;
+            kt.querySelectorAll('input').forEach(function (x, i) { if (i > 0) x.disabled = tel.tutti; });
+            S.salvaPrivacyTelefoni(tel).then(function () { toast('Salvato'); }, errore);
+          };
+          l.appendChild(cb); l.appendChild(el('span', null, o[1])); kt.appendChild(l);
+        });
+        kt.querySelectorAll('input').forEach(function (x, i) { if (i > 0) x.disabled = !!tel.tutti; });
+        kt.appendChild(el('small', 'hint', 'Gli organizzatori e il referente del team lo vedono sempre. Con «Tutti» le altre spunte non servono.'));
+        app.appendChild(kt);
+      }
       app.appendChild(bottone('+ Nuovo team', 'accent big', function () {
         var n = prompt('Nome del nuovo team'); if (!n || !n.trim()) return;
         S.creaTeam(n.trim()).then(function (tid) { vai('team', tid); }, errore);
@@ -918,7 +958,7 @@
   function mmss(ms) { var s = Math.max(0, Math.round(ms / 1000)); return Math.floor(s / 60) + ':' + ('0' + s % 60).slice(-2); }
   function hmmss(ms) { var m = Math.max(0, Math.round(ms / 1000)); return m >= 3600 ? Math.floor(m / 3600) + ':' + ('0' + Math.floor(m % 3600 / 60)).slice(-2) + ':' + ('0' + m % 60).slice(-2) : mmss(ms); }
   function dmzDi(id) { return D.dmz.filter(function (x) { return x.id === id; })[0]; }
-  function nomeGioc(u) { return u.callsign || u.nome || u.email || 'Giocatore'; }
+  function nomeGioc(u) { return nomeG(u); }
   function pagDmzModifica(id) {
     var vecchio = dmzDi(id), Z = window.AC_DMZ;
     testata(vecchio ? 'Modifica DMZ' : 'Nuova DMZ');
@@ -978,7 +1018,7 @@
         }));
         lista.forEach(function (u) {
           var on = x.scelti.indexOf(u.id) >= 0;
-          c.appendChild(bottone(nomeGioc(u), 'chip' + (on ? ' on arancio' : ''), function () { var i = x.scelti.indexOf(u.id); if (i >= 0) x.scelti.splice(i, 1); else x.scelti.push(u.id); disegnaGioc(); }));
+          c.appendChild(bottone(conNome(u), 'chip' + (on ? ' on arancio' : ''), function () { var i = x.scelti.indexOf(u.id); if (i >= 0) x.scelti.splice(i, 1); else x.scelti.push(u.id); disegnaGioc(); }));
         });
         gBox.appendChild(c);
       });
@@ -1624,7 +1664,7 @@
         var tt = modo === 'addestramento' ? (id === 'blu' ? [tAd] : []) : Object.keys(scelta).filter(function (t) { return scelta[t] === id; });
         tt.forEach(function (t) {
           (membriDi[t] || []).filter(function (u) { return modo !== 'addestramento' || !ruolo[u.id]; }).slice().sort(function (a, b) { return (b.ruolo === 'comandante') - (a.ruolo === 'comandante'); }).forEach(function (u) {
-            var q = el('option', null, (u.ruolo === 'comandante' ? '★ ' : '') + nomeG(u) + ' (' + (teamDi(t) || {}).nome + ')'); q.value = u.id; s.appendChild(q);
+            var q = el('option', null, (u.ruolo === 'comandante' ? '★ ' : '') + conNome(u) + ' (' + (teamDi(t) || {}).nome + ')'); q.value = u.id; s.appendChild(q);
           });
         });
         s.value = val; if (!s.value) s.value = 'ia';
@@ -1926,7 +1966,7 @@
           return S.leggiQr(cm, t).then(function (r) {
             if (!r.punto) return { ok: false, titolo: 'QR non valido', testo: r.errore };
             var p = r.punto, b = mia && p.lat != null ? bussola(mia, p) : null, me = S.stato().me;
-            var dati = { nome: me.callsign || me.nome || '', uid: S.stato().user.uid, t: Date.now(), lat: mia ? mia.lat : null, lon: mia ? mia.lon : null, dist: b ? b.m : null };
+            var dati = { nome: me.callsign || '', uid: S.stato().user.uid, t: Date.now(), lat: mia ? mia.lat : null, lon: mia ? mia.lon : null, dist: b ? b.m : null };
             return S.segnaPosa(cm.id, p.id, dati).then(function () {
               var lontano = b && b.m > Math.max(40, (p.raggio || 30) * 1.5);
               return { ok: true, avviso: lontano, titolo: etichetta(p) + ' posato',
@@ -1964,7 +2004,7 @@
       lista();
       var prima = chiusura; chiusura = function () { stopP(); if (watch != null) navigator.geolocation.clearWatch(watch); v.chiudi(); pg.classList.remove('posa'); if (prima) prima(); };
       if (qrInSospeso) { var t0 = qrInSospeso; qrInSospeso = null; setTimeout(function () { scansionaTesto(t0); }, 300); }
-      function scansionaTesto(t) { apriScanner('QR', function () { return S.leggiQr(cm, t).then(function (r) { if (!r.punto) return { ok: false, titolo: 'QR non valido', testo: r.errore }; return S.segnaPosa(cm.id, r.punto.id, { nome: (S.stato().me.callsign || S.stato().me.nome || ''), uid: S.stato().user.uid, t: Date.now(), lat: mia ? mia.lat : null, lon: mia ? mia.lon : null, dist: null }).then(function () { return { ok: true, titolo: etichetta(r.punto) + ' posato' }; }); }); }); }
+      function scansionaTesto(t) { apriScanner('QR', function () { return S.leggiQr(cm, t).then(function (r) { if (!r.punto) return { ok: false, titolo: 'QR non valido', testo: r.errore }; return S.segnaPosa(cm.id, r.punto.id, { nome: (S.stato().me.callsign || ''), uid: S.stato().user.uid, t: Date.now(), lat: mia ? mia.lat : null, lon: mia ? mia.lon : null, dist: null }).then(function () { return { ok: true, titolo: etichetta(r.punto) + ' posato' }; }); }); }); }
     });
   }
   var qrInSospeso = null;
@@ -2410,8 +2450,10 @@
       uidPrima = uid; avviato = teamOra;
       if (stopTeam) stopTeam(); if (stopConf) stopConf();
       Object.keys(stopAdesioni).forEach(function (id) { stopAdesioni[id](); }); stopAdesioni = {}; D.adesioni = {};
-      if (stopContatti) stopContatti();
-      stopContatti = S.ascoltaContatti(function (m) { D.contatti = m; ridisegna(); });
+      chiaveTel = null; D.contatti = {}; riascoltaContatti();
+      if (stopPriv) stopPriv(); stopPriv = null; D.privati = {};
+      if (P('giocatori') || P('conflitti')) stopPriv = S.ascoltaPrivati(function (m) { D.privati = m; });
+      if (S.stato().dev && !privacySistemata) { privacySistemata = true; S.sistemaPrivacy().then(function (n) { if (n) toast('Privacy: sistemati ' + n + ' profili'); }, function (e) { console.warn(e); }); }
       if (stopAll) stopAll();
       stopAll = S.ascoltaAllenamenti(function (x) { D.allenamenti = x; ascoltaAdesioniDi(); ridisegna(); });
       if (stopDmz) stopDmz();
@@ -2420,11 +2462,21 @@
       if (S.stato().dev) stopScen = S.ascoltaScenari(function (x) { D.scenari = x; if (corrente().v === 'organizza') ridisegna(); });
       if (stopCampi) stopCampi();
       stopCampi = S.ascoltaCampi(function (cm) { D.campi = cm; if (corrente().v === 'organizza') ridisegna(); });
-      stopTeam = S.ascoltaTeam(function (t) { D.team = t; ridisegna(); });
+      stopTeam = S.ascoltaTeam(function (t) { D.team = t; riascoltaContatti(); ridisegna(); });
       stopConf = S.ascoltaConflitti(function (c) { D.conflitti = c; ascoltaAdesioniDi(); ridisegna(); });
     }
+    riascoltaContatti();
     ridisegna();
   });
+  // telefoni dei referenti: secondo la regola scelta dal developer
+  var chiaveTel = null, stopPriv = null, privacySistemata = false;
+  function sonoReferente() { var st = S.stato(); return D.team.some(function (t) { return t.referenteUid === st.user.uid; }); }
+  function riascoltaContatti() {
+    var k = S.vedeTelefoni(sonoReferente()) ? 'si' : 'no';
+    if (k === chiaveTel) return; chiaveTel = k;
+    if (stopContatti) stopContatti(); stopContatti = null; D.contatti = {};
+    if (k === 'si') stopContatti = S.ascoltaContatti(function (m) { D.contatti = m; ridisegna(); }, true);
+  }
   $('btnLogin').onclick = function () { S.login().catch(function (e) { if (e && e.code !== 'auth/popup-closed-by-user') toast('Accesso non riuscito: ' + (e.message || e)); }); };
   $('btnRiprova').onclick = function () { location.reload(); };
   $('versione').textContent = 'Airsoft Conflict v' + VERSIONE;
