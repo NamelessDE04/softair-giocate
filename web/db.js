@@ -279,11 +279,13 @@
   api.nuovoId = function () { return db.collection('conflitti').doc().id; };
   api.ascoltaConflitti = function (cb) {
     var q = db.collection('conflitti');
-    if (!api.puo('conflitti')) {
-      if (!stato.me || !stato.me.team) { cb([]); return function () {}; }
-      q = q.where('team', 'array-contains', stato.me.team);
-    }
-    return q.onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); });
+    if (api.puo('conflitti')) return q.onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); });
+    // giocatori: i conflict del proprio team più le prove a cui sono invitati personalmente
+    var parti = { team: [], inv: [] }, stop = [];
+    function unisci() { var m = {}; parti.team.concat(parti.inv).forEach(function (c) { m[c.id] = c; }); cb(Object.keys(m).map(function (k) { return m[k]; })); }
+    if (stato.me && stato.me.team) stop.push(q.where('team', 'array-contains', stato.me.team).onSnapshot(function (qs) { parti.team = lista(qs); unisci(); }, function () { parti.team = []; unisci(); }));
+    stop.push(q.where('invitati', 'array-contains', stato.user.uid).onSnapshot(function (qs) { parti.inv = lista(qs); unisci(); }, function () { parti.inv = []; unisci(); }));
+    return function () { stop.forEach(function (f) { f(); }); };
   };
   api.salvaConflitto = function (c) {
     var dati = JSON.parse(JSON.stringify(c)); var cid = dati.id; delete dati.id;

@@ -695,3 +695,6 @@ main > .btn.big { margin-bottom: 6px; }
 .beta-r { display: flex; gap: 12px; align-items: center; margin-top: 6px; }
 .beta-ic { width: 48px; height: 48px; flex: none; border-radius: 12px; background: #3a1814; border: 1px solid #8a3a2c; color: #ffb3a8; display: grid; place-items: center; font-size: 28px; }
 .beta-r h3 { margin: 0; } .beta-r small { color: var(--muto); font-size: 16px; }
+.carta.promemoria.prova { border-style: dashed; border-color: #c98a2b; }
+.carta.promemoria.prova .pm-eti { background: #c98a2b; color: #1a1206; }
+.prova-flag { background: #2b2412; border: 1px dashed #c98a2b; border-radius: 12px; padding: 10px 12px; font-weight: 700; }

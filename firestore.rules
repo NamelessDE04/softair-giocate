@@ -185,8 +185,15 @@ service cloud.firestore {
     // Conflict: li vedono i team invitati e chi li organizza
     match /conflitti/{cid} {
       function c() { return get(/databases/$(database)/documents/conflitti/$(cid)).data; }
-      function invitato() { return signed() && myTeam() != null && myTeam() in c().team; }
-      allow read: if perm('conflitti') || (signed() && myTeam() != null && myTeam() in resource.data.team);
+      // invitato: con il proprio team, oppure personalmente (conflict di prova)
+      function invitato() { return signed() && ((myTeam() != null && myTeam() in c().team) || request.auth.uid in c().get('invitati', [])); }
+      // la fazione del giocatore: quella personale (addestramento, prova) o quella del suo team
+      function fazioneMia() {
+        return c().get('fazioneUtente', {}).keys().hasAny([request.auth.uid]) ? c().fazioneUtente[request.auth.uid]
+          : (myTeam() != null ? c().get('fazioneDi', {}).get(myTeam(), null) : null);
+      }
+      allow read: if perm('conflitti') || (signed() && myTeam() != null && myTeam() in resource.data.team)
+        || (signed() && request.auth.uid in resource.data.get('invitati', []));
       // chi elimina un team lo toglie anche dai conflict
       allow update: if perm('conflitti')
         || (perm('team') && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['team', 'fazioneDi', 'fazioni']));
@@ -201,7 +208,7 @@ service cloud.firestore {
       // Maglia radio: il canale comune lo vedono tutti gli invitati, quella di una fazione solo i suoi giocatori
       match /radio/{doc} {
         allow read: if perm('conflitti') || (invitato() && (doc == 'comune'
-          || doc == c().get('fazioneUtente', {}).get(request.auth.uid, c().fazioneDi[myTeam()])));
+          || doc == fazioneMia()));
         allow write: if perm('conflitti');
       }
 
@@ -218,7 +225,7 @@ service cloud.firestore {
         allow create: if invitato()
           && request.resource.data.uid == request.auth.uid
           // in addestramento la fazione è del singolo giocatore (attacco o difesa), altrimenti del suo team
-          && request.resource.data.team == c().get('fazioneUtente', {}).get(request.auth.uid, c().fazioneDi[myTeam()])
+          && request.resource.data.team == fazioneMia()
           && request.resource.data.t is number
           && request.time.toMillis() >= c().inizio - 3600000
           && request.time.toMillis() <= c().fine + 12 * 3600000
