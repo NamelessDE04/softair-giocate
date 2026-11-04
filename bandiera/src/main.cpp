@@ -29,7 +29,7 @@
 #error "Scegli l'ambiente bandiera, hq o tag in PlatformIO"
 #endif
 
-#define VERSIONE "0.5"
+#define VERSIONE "0.6"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -143,16 +143,18 @@ bool leggiUuid(const char *s, uint8_t *out) {
 #if defined(RUOLO_BANDIERA) || defined(RUOLO_HQ)
 // Il T-Beam a 433 MHz può avere due chip radio: SX1278 (il più comune) o SX1268 (alcune V1.2). Si prova il primo, poi il secondo.
 SX1278 r78 = new Module(LORA_CS, LORA_DIO0, LORA_RST, LORA_DIO1, SPI);
-SX1268 r68 = new Module(LORA_CS, LORA_DIO1, LORA_RST, 32, SPI);   // 32 = BUSY
+SX1262 r62 = new Module(LORA_CS, LORA_DIO1, LORA_RST, 32, SPI);   // 32 = BUSY
+SX1268 r68 = new Module(LORA_CS, LORA_DIO1, LORA_RST, 32, SPI);
+SX126x *r6 = nullptr;   // chip della famiglia SX126x trovato (SX1262 o SX1268)
 bool is68 = false;
 const char *chipRadio = "nessuno";
 struct Radio {
-  int transmit(uint8_t *p, size_t n) { return is68 ? r68.transmit(p, n) : r78.transmit(p, n); }
-  int startReceive() { return is68 ? r68.startReceive() : r78.startReceive(); }
-  size_t getPacketLength() { return is68 ? r68.getPacketLength() : r78.getPacketLength(); }
-  int readData(uint8_t *p, size_t n) { return is68 ? r68.readData(p, n) : r78.readData(p, n); }
-  float getRSSI() { return is68 ? r68.getRSSI() : r78.getRSSI(); }
-  float getSNR() { return is68 ? r68.getSNR() : r78.getSNR(); }
+  int transmit(uint8_t *p, size_t n) { return is68 ? r6->transmit(p, n) : r78.transmit(p, n); }
+  int startReceive() { return is68 ? r6->startReceive() : r78.startReceive(); }
+  size_t getPacketLength() { return is68 ? r6->getPacketLength() : r78.getPacketLength(); }
+  int readData(uint8_t *p, size_t n) { return is68 ? r6->readData(p, n) : r78.readData(p, n); }
+  float getRSSI() { return is68 ? r6->getRSSI() : r78.getRSSI(); }
+  float getSNR() { return is68 ? r6->getSNR() : r78.getSNR(); }
 } radio;
 volatile bool arrivato = false;
 volatile uint32_t nIrq = 0;
@@ -185,19 +187,25 @@ bool accendiLoRa() {
   }
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI);
   diagnosi = leggiDiagnosi();
-  Serial.println("Diagnosi radio: " + diagnosi + "  (Von 3300 r42=12 = SX1278 a posto; r42=00 o FF = il chip non risponde)");
+  Serial.println("Diagnosi radio: " + diagnosi + "  (r42=12 = SX1278; r42=AA o simili = famiglia SX126x; r42=00 o FF = il chip non risponde)");
   int st = -1;
-  for (int k = 0; k < 3 && st != RADIOLIB_ERR_NONE; k++) { if (k) delay(300); st = r78.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SYNC, LORA_POTENZA, 8, 0); Serial.printf("Prova SX1278: %d\n", st); }
+  for (int k = 0; k < (diagnosi.endsWith("=12") ? 3 : 1) && st != RADIOLIB_ERR_NONE; k++) { if (k) delay(300); st = r78.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SYNC, LORA_POTENZA, 8, 0); Serial.printf("Prova SX1278: %d\n", st); }
   if (st == RADIOLIB_ERR_NONE) {
     is68 = false; chipRadio = "SX1278";
     r78.setCRC(true); r78.setPacketReceivedAction(suArrivo);
   } else {
-    st = r68.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SYNC, LORA_POTENZA, 8, 1.8);
-    Serial.printf("Prova SX1268 (TCXO 1,8 V): %d\n", st);
-    if (st != RADIOLIB_ERR_NONE) { st = r68.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SYNC, LORA_POTENZA, 8, 0); Serial.printf("Prova SX1268 (quarzo): %d\n", st); }
-    if (st == RADIOLIB_ERR_NONE) {
-      is68 = true; chipRadio = "SX1268";
-      r68.setDio2AsRfSwitch(true); r68.setCRC(2); r68.setPacketReceivedAction(suArrivo);
+    // famiglia SX126x (r42=AA nella diagnosi): si prova come SX1262 e come SX1268, con TCXO 1,6 V (come LilyGO), 1,8 V e quarzo
+    struct Prova { SX126x *m; const char *nome; float tcxo; } prove[] = {
+      { &r62, "SX1262", 1.6 }, { &r68, "SX1268", 1.6 }, { &r62, "SX1262", 1.8 }, { &r68, "SX1268", 1.8 }, { &r62, "SX1262", 0 }, { &r68, "SX1268", 0 } };
+    for (auto &q : prove) {
+      if (q.m == &r62) st = r62.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SYNC, LORA_POTENZA, 8, q.tcxo);
+      else st = r68.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SYNC, LORA_POTENZA, 8, q.tcxo);
+      Serial.printf("Prova %s (TCXO %.1f V): %d\n", q.nome, q.tcxo, st);
+      if (st == RADIOLIB_ERR_NONE) {
+        is68 = true; r6 = q.m; chipRadio = q.nome;
+        r6->setDio2AsRfSwitch(true); r6->setCRC(2); r6->setPacketReceivedAction(suArrivo);
+        break;
+      }
     }
   }
   statoLoRa = st;
