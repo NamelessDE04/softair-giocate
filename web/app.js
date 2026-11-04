@@ -1243,7 +1243,7 @@
     function disegna() {
       var ids = Object.keys(b.band).sort(function (x, y) { return b.band[y]._t - b.band[x]._t; }), j = ids.length ? b.band[ids[0]] : null;
       var hqOk = b.hq && Date.now() - b.hq._t < 25000;
-      testa.textContent = (b.via ? 'COLLEGATO via ' + b.via : 'NON COLLEGATO') + (b.avvio ? ' · scheda: ' + b.avvio : '') + (b.hq ? ' · HQ ' + b.hq.hq + (hqOk ? ' vivo' : ' MUTO da ' + eta(b.hq._t)) + ' · pacchetti ' + b.hq.pacchetti + (b.hq.irq != null ? ' · irq ' + b.hq.irq : '') + (b.hq.radio ? ' · radio ' + b.hq.radio : '') + (b.hq.lora ? ' · LoRa HQ IN ERRORE (' + b.hq.lora + ')' : '') : '') +
+      testa.textContent = (b.via ? 'COLLEGATO via ' + b.via : 'NON COLLEGATO') + (b.avvio ? ' · scheda: ' + b.avvio : '') + (b.hq ? ' · HQ ' + b.hq.hq + (hqOk ? ' vivo' : ' MUTO da ' + eta(b.hq._t)) + ' · pacchetti ' + b.hq.pacchetti + (b.hq.irq != null ? ' · irq ' + b.hq.irq : '') + (b.hq.radio ? ' · radio ' + b.hq.radio : '') + (b.hq.lora ? ' · LoRa HQ IN ERRORE (' + b.hq.lora + ') diagnosi ' + (b.hq.diag || '') : '') : '') +
         (b.tag ? ' · tag finto: ' + b.tag.f.toUpperCase() + ' #' + b.tag.tag + ' potenza ' + b.tag.pot + ' dBm' : '');
       testa.className = 'banco-st ' + (b.via ? 'on' : 'off');
       tb.hidden = !(b.hq || b.avvio === 'HQ' || b.avvio === 'BANDIERA');
