@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.30';
+  var VERSIONE = '0.31';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -1243,7 +1243,7 @@
     function disegna() {
       var ids = Object.keys(b.band).sort(function (x, y) { return b.band[y]._t - b.band[x]._t; }), j = ids.length ? b.band[ids[0]] : null;
       var hqOk = b.hq && Date.now() - b.hq._t < 25000;
-      testa.textContent = (b.via ? 'COLLEGATO via ' + b.via : 'NON COLLEGATO') + (b.avvio ? ' · scheda: ' + b.avvio : '') + (b.hq ? ' · HQ ' + b.hq.hq + (hqOk ? ' vivo' : ' MUTO da ' + eta(b.hq._t)) + ' · pacchetti ' + b.hq.pacchetti : '') +
+      testa.textContent = (b.via ? 'COLLEGATO via ' + b.via : 'NON COLLEGATO') + (b.avvio ? ' · scheda: ' + b.avvio : '') + (b.hq ? ' · HQ ' + b.hq.hq + (hqOk ? ' vivo' : ' MUTO da ' + eta(b.hq._t)) + ' · pacchetti ' + b.hq.pacchetti + (b.hq.irq != null ? ' · irq ' + b.hq.irq : '') + (b.hq.radio ? ' · radio ' + b.hq.radio : '') + (b.hq.lora ? ' · LoRa HQ IN ERRORE (' + b.hq.lora + ')' : '') : '') +
         (b.tag ? ' · tag finto: ' + b.tag.f.toUpperCase() + ' #' + b.tag.tag + ' potenza ' + b.tag.pot + ' dBm' : '');
       testa.className = 'banco-st ' + (b.via ? 'on' : 'off');
       tb.hidden = !(b.hq || b.avvio === 'HQ' || b.avvio === 'BANDIERA');
@@ -1276,7 +1276,7 @@
       }
       mappa.innerHTML = s + '</svg>';
       sotto.textContent = j ? 'Bandiera ' + j.bandiera + ' · ultimo stato ' + eta(j._t) + ' fa (#' + j.seq + ') · prossimo tra ~' + Math.max(0, 21 - Math.round((Date.now() - j._t) / 1000)) + ' s · batteria ' + (j.batt === 255 ? 'USB' : j.batt + '%') +
-        (j.rssiLora != null ? ' · radio ' + j.rssiLora + ' dBm, SNR ' + j.snr : '') + ' · conquista in ' + j.tempo + ' s' + (ids.length > 1 ? ' · (altre bandiere: ' + ids.slice(1).join(', ') + ')' : '') : '';
+        (j.rssiLora != null ? ' · radio ' + j.rssiLora + ' dBm, SNR ' + j.snr : '') + (j.radio ? ' · chip ' + j.radio : '') + (j.lora ? ' · LoRa IN ERRORE (' + j.lora + ')' : j.tx != null && j.tx !== 0 && j.tx !== 1 ? ' · invio radio fallito (' + j.tx + ')' : '') + ' · conquista in ' + j.tempo + ' s' + (ids.length > 1 ? ' · (altre bandiere: ' + ids.slice(1).join(', ') + ')' : '') : '';
       var v = b.visto, passi = [
         [b.via, 'Telefono o PC collegato a un T-Beam'], [hqOk || b.avvio === 'HQ', 'HQ vivo (battito ogni 10 s)'], [v.band, 'Messaggio della bandiera arrivato via radio'],
         [v.tag, 'La bandiera sente il tag'], [v.dentro, 'Tag DENTRO l\'area'], [v.conq, 'Conquista partita'], [v.owner, 'Area conquistata (luce fissa + bip lungo)'],

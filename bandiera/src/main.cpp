@@ -29,7 +29,7 @@
 #error "Scegli l'ambiente bandiera, hq o tag in PlatformIO"
 #endif
 
-#define VERSIONE "0.2"
+#define VERSIONE "0.3"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -49,6 +49,7 @@ XPowersLibInterface *PMU = nullptr;
 Adafruit_SSD1306 oled(128, 64, &Wire, -1);
 Preferences pref;
 bool haOled = false;
+const char *pmuNome = "nessuno";
 uint16_t mioId = 0;
 
 // ---------------------------------------------------------------- alimentazione
@@ -66,6 +67,7 @@ bool accendiPMU() {
     PMU->setPowerChannelVoltage(XPOWERS_LDO3, 3300); PMU->enablePowerOutput(XPOWERS_LDO3);     // GPS
     PMU->enablePowerOutput(XPOWERS_DCDC1);                                                      // display
   }
+  pmuNome = PMU->getChipModel() == XPOWERS_AXP2101 ? "AXP2101" : "AXP192";
   PMU->enableBattDetection();
   PMU->enableBattVoltageMeasure();
   return true;
@@ -138,21 +140,49 @@ bool leggiUuid(const char *s, uint8_t *out) {
 
 // ---------------------------------------------------------------- LoRa (bandiera e HQ)
 #if defined(RUOLO_BANDIERA) || defined(RUOLO_HQ)
-SX1278 radio = new Module(LORA_CS, LORA_DIO0, LORA_RST, LORA_DIO1, SPI);
+// Il T-Beam a 433 MHz può avere due chip radio: SX1278 (il più comune) o SX1268 (alcune V1.2). Si prova il primo, poi il secondo.
+SX1278 r78 = new Module(LORA_CS, LORA_DIO0, LORA_RST, LORA_DIO1, SPI);
+SX1268 r68 = new Module(LORA_CS, LORA_DIO1, LORA_RST, 32, SPI);   // 32 = BUSY
+bool is68 = false;
+const char *chipRadio = "nessuno";
+struct Radio {
+  int transmit(uint8_t *p, size_t n) { return is68 ? r68.transmit(p, n) : r78.transmit(p, n); }
+  int startReceive() { return is68 ? r68.startReceive() : r78.startReceive(); }
+  size_t getPacketLength() { return is68 ? r68.getPacketLength() : r78.getPacketLength(); }
+  int readData(uint8_t *p, size_t n) { return is68 ? r68.readData(p, n) : r78.readData(p, n); }
+  float getRSSI() { return is68 ? r68.getRSSI() : r78.getRSSI(); }
+  float getSNR() { return is68 ? r68.getSNR() : r78.getSNR(); }
+} radio;
 volatile bool arrivato = false;
-void IRAM_ATTR suArrivo() { arrivato = true; }
+volatile uint32_t nIrq = 0;
+int statoLoRa = -999, ultimoTx = 1;   // 0 = tutto bene; 1 = nessun invio ancora
+void IRAM_ATTR suArrivo() { arrivato = true; nIrq++; }
+String loraTesto() { return statoLoRa ? "LoRa ERR " + String(statoLoRa) : ultimoTx == 0 ? String("TX ok") : ultimoTx == 1 ? String("TX -") : "TX ERR " + String(ultimoTx); }
 
 bool accendiLoRa() {
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-  int st = radio.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SYNC, LORA_POTENZA, 8, 0);
-  if (st != RADIOLIB_ERR_NONE) { Serial.printf("LoRa NON partita, errore %d\n", st); return false; }
-  radio.setCRC(true);
-  radio.setPacketReceivedAction(suArrivo);
-  return true;
+  int st = r78.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SYNC, LORA_POTENZA, 8, 0);
+  Serial.printf("Prova SX1278: %d\n", st);
+  if (st == RADIOLIB_ERR_NONE) {
+    is68 = false; chipRadio = "SX1278";
+    r78.setCRC(true); r78.setPacketReceivedAction(suArrivo);
+  } else {
+    st = r68.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SYNC, LORA_POTENZA, 8, 1.8);
+    Serial.printf("Prova SX1268 (TCXO 1,8 V): %d\n", st);
+    if (st != RADIOLIB_ERR_NONE) { st = r68.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SYNC, LORA_POTENZA, 8, 0); Serial.printf("Prova SX1268 (quarzo): %d\n", st); }
+    if (st == RADIOLIB_ERR_NONE) {
+      is68 = true; chipRadio = "SX1268";
+      r68.setDio2AsRfSwitch(true); r68.setCRC(2); r68.setPacketReceivedAction(suArrivo);
+    }
+  }
+  statoLoRa = st;
+  Serial.printf("Chip di alimentazione: %s · radio: %s · LoRa: %s (%d)\n", pmuNome, chipRadio, st == RADIOLIB_ERR_NONE ? "ok" : "NON partita", st);
+  return st == RADIOLIB_ERR_NONE;
 }
 // trasmette e torna in ascolto
 int trasmetti(const uint8_t *p, size_t n) {
   int st = radio.transmit((uint8_t *)p, n);
+  ultimoTx = st;
   arrivato = false;
   radio.startReceive();
   return st;
@@ -297,7 +327,7 @@ String jsonStato() {
   String s = "{\"bandiera\":\"" + idTesto(mioId) + "\",\"seq\":" + String(seq) + ",\"blu\":" + String(blu) + ",\"rossi\":" + String(rossi) +
              ",\"owner\":" + jsonFaz(owner) + ",\"conq\":" + jsonFaz(progF) + ",\"pct\":" + String((int)(100 * prog / tempoConq)) +
              ",\"contesa\":" + (contesa ? "true" : "false") + ",\"soglia\":" + String(soglia) + ",\"tempo\":" + String(tempoConq) +
-             ",\"batt\":" + String(batteria()) + ",\"gps\":" + (gps.location.isValid() ? "true" : "false") + ",\"tag\":[";
+             ",\"batt\":" + String(batteria()) + ",\"gps\":" + (gps.location.isValid() ? "true" : "false") + ",\"lora\":" + String(statoLoRa) + ",\"tx\":" + String(ultimoTx) + ",\"pmu\":\"" + pmuNome + "\",\"radio\":\"" + chipRadio + "\",\"tag\":[";
   uint32_t ora = millis(); bool primo = true;
   portENTER_CRITICAL(&muxTag);
   for (int i = 0; i < nTag; i++) {
@@ -343,7 +373,7 @@ void aggiornaDisplay() {
   scrivi("BAND " + idTesto(mioId) + " #" + String(seq) + " " + battTesto(batteria()),
          "B" + String(blu) + "  R" + String(rossi),
          riga, "Tag sentiti: " + String(nTag) + " soglia " + String(soglia),
-         String(gps.location.isValid() ? "GPS ok" : "GPS cerca...") + (muto ? "  MUTO" : ""));
+         String(gps.location.isValid() ? "GPS ok " : "GPS -- ") + loraTesto() + (muto ? " MUTO" : ""));
 }
 
 // comandi (da USB o via radio dall'HQ). Risponde con una riga di testo.
@@ -472,7 +502,8 @@ void registro(const String &s) { String e = s; e.replace("\\", "/"); e.replace("
 void mostra() {
   if (!haOled) return;
   oled.clearDisplay(); oled.setTextColor(SSD1306_WHITE); oled.setTextSize(1);
-  oled.setCursor(0, 0); oled.printf("HQ %s %s pk%d", bleConnesso ? "BT" : "--", idTesto(mioId).c_str(), nPacchetti);
+  oled.setCursor(0, 0); oled.printf("HQ %s %s pk%d%s", bleConnesso ? "BT" : "--", idTesto(mioId).c_str(), nPacchetti, statoLoRa ? " LORA!" : "");
+  if (statoLoRa) { oled.setCursor(0, 54); oled.printf("LoRa ERR %d %s", statoLoRa, pmuNome); }
   for (int i = 0; i < nBand && i < 5; i++) {
     Band &b = band[i];
     uint32_t s = (millis() - b.visto) / 1000;
@@ -535,7 +566,7 @@ void loop() {
   if (bufBle.length() && bl.length() == 0) { comando(bufBle); bufBle = ""; }   // comando senza "a capo"
   // battito ogni 10 s: l'app capisce che l'HQ è vivo anche senza bandiere
   static uint32_t battito = 0;
-  if (millis() - battito > 10000) { battito = millis(); esci("{\"hq\":\"" + idTesto(mioId) + "\",\"pacchetti\":" + String(nPacchetti) + ",\"scartati\":" + String(nScartati) + ",\"batt\":" + String(batteria()) + "}"); }
+  if (millis() - battito > 10000) { battito = millis(); esci("{\"hq\":\"" + idTesto(mioId) + "\",\"pacchetti\":" + String(nPacchetti) + ",\"scartati\":" + String(nScartati) + ",\"irq\":" + String(nIrq) + ",\"lora\":" + String(statoLoRa) + ",\"pmu\":\"" + pmuNome + "\",\"radio\":\"" + chipRadio + "\",\"batt\":" + String(batteria()) + "}"); }
   if (!arrivato) { delay(5); return; }
   arrivato = false;
   uint8_t p[TESTA + 4 * MAX_TAG_PACCHETTO + 8];
