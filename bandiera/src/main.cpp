@@ -29,7 +29,7 @@
 #error "Scegli l'ambiente bandiera, hq o tag in PlatformIO"
 #endif
 
-#define VERSIONE "0.3"
+#define VERSIONE "0.4"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -68,6 +68,7 @@ bool accendiPMU() {
     PMU->enablePowerOutput(XPOWERS_DCDC1);                                                      // display
   }
   pmuNome = PMU->getChipModel() == XPOWERS_AXP2101 ? "AXP2101" : "AXP192";
+  delay(200);   // la radio ha bisogno di un attimo dopo che le arriva corrente
   PMU->enableBattDetection();
   PMU->enableBattVoltageMeasure();
   return true;
@@ -161,8 +162,8 @@ String loraTesto() { return statoLoRa ? "LoRa ERR " + String(statoLoRa) : ultimo
 
 bool accendiLoRa() {
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-  int st = r78.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SYNC, LORA_POTENZA, 8, 0);
-  Serial.printf("Prova SX1278: %d\n", st);
+  int st = -1;
+  for (int k = 0; k < 3 && st != RADIOLIB_ERR_NONE; k++) { if (k) delay(300); st = r78.begin(LORA_FREQ, LORA_BW, LORA_SF, LORA_CR, LORA_SYNC, LORA_POTENZA, 8, 0); Serial.printf("Prova SX1278: %d\n", st); }
   if (st == RADIOLIB_ERR_NONE) {
     is68 = false; chipRadio = "SX1278";
     r78.setCRC(true); r78.setPacketReceivedAction(suArrivo);
@@ -372,7 +373,7 @@ void aggiornaDisplay() {
   String riga = contesa ? "CONTESA" : (progF && prog > 0) ? String(progF == 1 ? "BLU " : "ROSSI ") + String((int)(100 * prog / tempoConq)) + "%" : String("Area: ") + nomeFaz(owner);
   scrivi("BAND " + idTesto(mioId) + " #" + String(seq) + " " + battTesto(batteria()),
          "B" + String(blu) + "  R" + String(rossi),
-         riga, "Tag sentiti: " + String(nTag) + " soglia " + String(soglia),
+         riga, statoLoRa ? String("PMU ") + pmuNome + " radio ?" : "Tag sentiti: " + String(nTag) + " soglia " + String(soglia),
          String(gps.location.isValid() ? "GPS ok " : "GPS -- ") + loraTesto() + (muto ? " MUTO" : ""));
 }
 
@@ -503,7 +504,7 @@ void mostra() {
   if (!haOled) return;
   oled.clearDisplay(); oled.setTextColor(SSD1306_WHITE); oled.setTextSize(1);
   oled.setCursor(0, 0); oled.printf("HQ %s %s pk%d%s", bleConnesso ? "BT" : "--", idTesto(mioId).c_str(), nPacchetti, statoLoRa ? " LORA!" : "");
-  if (statoLoRa) { oled.setCursor(0, 54); oled.printf("LoRa ERR %d %s", statoLoRa, pmuNome); }
+  if (statoLoRa) { oled.setCursor(0, 54); oled.printf("LoRa ERR %d PMU %s", statoLoRa, pmuNome); }
   for (int i = 0; i < nBand && i < 5; i++) {
     Band &b = band[i];
     uint32_t s = (millis() - b.visto) / 1000;
