@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.29';
+  var VERSIONE = '0.30';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -97,7 +97,7 @@
     app.innerHTML = ''; window.scrollTo(0, 0);
     $('pieno').hidden = true; $('pieno').innerHTML = '';
     document.body.classList.remove('a-pieno');
-    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva, dmz: pagDmz, dmzModifica: pagDmzModifica, dmzLive: pagDmzLive, mortaioProva: pagMortaioProva, banco: pagBanco }[c.v];
+    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva, dmz: pagDmz, dmzModifica: pagDmzModifica, dmzLive: pagDmzLive, mortaioProva: pagMortaioProva, banco: pagBanco, provaTbeam: pagProvaTbeam }[c.v];
     (r || home)(c.p);
   }
   function aPieno() { document.body.classList.add('a-pieno'); var p = $('pieno'); p.hidden = false; p.innerHTML = ''; return p; }
@@ -160,13 +160,13 @@
     });
     var all = allenamentiAttivi().filter(function (a) { var r = miaAdesione('a:' + a.id); return P('allenamenti') || !r || r.si || r.dopo; });
     var dz = D.dmz.filter(function (x) { return x.fine > Date.now() - 6 * 3600000 && (x.giocatori || []).indexOf(st.user.uid) >= 0; });
-    if (!inviti.length && !promemoria.length && !all.length && !dz.length) { schermataInvito(); if (P('conflitti')) { app.appendChild(cartaBeta()); app.appendChild(cartaBanco()); } return; }
+    if (!inviti.length && !promemoria.length && !all.length && !dz.length) { schermataInvito(); if (S.stato().dev) app.appendChild(cartaProvaTbeam()); if (P('conflitti')) { app.appendChild(cartaBeta()); app.appendChild(cartaBanco()); } return; }
     inviti.forEach(function (c) { app.appendChild(cartaInvito(c)); });
     // conflict e allenamenti in ordine di data
     promemoria.map(function (c) { return { t: c.inizio, el: cartaPromemoria(c) }; }).concat(all.map(function (a) { return { t: a.inizio || 0, el: cartaAllenamento(a) }; }))
       .concat(dz.map(function (x) { return { t: x.inizio, el: cartaDmz(x) }; }))
       .sort(function (x, y) { return x.t - y.t; }).forEach(function (x) { app.appendChild(x.el); });
-    if (P('conflitti')) { app.appendChild(cartaBeta()); app.appendChild(cartaBanco()); }
+    if (S.stato().dev) app.appendChild(cartaProvaTbeam()); if (P('conflitti')) { app.appendChild(cartaBeta()); app.appendChild(cartaBanco()); }
   }
 
   // funzioni in prova, aperte a tutti: per ora il mortaio
@@ -993,7 +993,7 @@
   // e, se vuoi, i tag visti dalle bandiere mandati come presenze in un conflict di prova
   var NUS = { s: '6e400001-b5a3-f393-e0a9-e50e24dcca9e', rx: '6e400002-b5a3-f393-e0a9-e50e24dcca9e', tx: '6e400003-b5a3-f393-e0a9-e50e24dcca9e' };
   var BANCO = { via: null, porta: null, lettore: null, scrittore: null, dev: null, rx: null, righe: [], band: {}, hq: null, tag: null, cb: null,
-    cid: null, cm: null, mappa: {}, attivo: false, ultimoPt: {}, scritti: 0 };
+    cid: null, cm: null, mappa: {}, attivo: false, ultimoPt: {}, scritti: 0, storia: [], visto: {}, avvio: null };
   function bancoRiga(s, da) {
     s = String(s).replace(/\s+$/, ''); if (!s) return;
     var t = new Date(), hh = ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2) + ':' + ('0' + t.getSeconds()).slice(-2);
@@ -1001,9 +1001,11 @@
     if (s.charAt(0) === '{') {
       try {
         var j = JSON.parse(s); j._t = Date.now();
-        if (j.bandiera) { BANCO.band[j.bandiera] = j; bancoInoltra(j); }
-        else if (j.hq) BANCO.hq = j;
-        else if (j.tag != null) BANCO.tag = j;
+        if (j.bandiera) { bancoStoria(BANCO.band[j.bandiera], j); BANCO.band[j.bandiera] = j; bancoInoltra(j); }
+        else if (j.avvio) BANCO.avvio = j.avvio;
+        else if (j.risposta) { BANCO.visto.risposta = 1; BANCO.storia.push({ t: Date.now(), testo: 'Risposta via radio da ' + j.risposta + ': ' + j.testo }); }
+        else if (j.hq) { BANCO.hq = j; BANCO.avvio = 'HQ'; }
+        else if (j.tag != null) { if (!BANCO.avvio) BANCO.avvio = 'TAG'; BANCO.tag = j; }
       } catch (e) { BANCO.righe.push(hh + ' !! JSON non valido: ' + e.message); }
     }
     if (BANCO.cb) BANCO.cb();
@@ -1175,6 +1177,127 @@
     var timer = setInterval(disegna, 2000);
     disegna();
     var prima = chiusura; chiusura = function () { clearInterval(timer); b.cb = null; if (prima) prima(); };
+  }
+  // ================= PROVA 3 T-BEAM (solo sviluppatore): una mappa con un punto, il tag che si muove secondo il segnale,
+  // controlli che si spuntano da soli e tasti grossi per i comandi
+  function bancoStoria(prima, j) {
+    var b = BANCO, s = b.storia, id = j.bandiera;
+    function d(t) { s.push({ t: Date.now(), testo: t }); if (s.length > 60) s.shift(); }
+    var dentro = function (x) { var o = {}; ((x && x.tag) || []).forEach(function (t) { if (t.rssi >= x.soglia) o[t.f + ' #' + t.n] = 1; }); return o; };
+    if (!prima) d('Bandiera ' + id + ' ricevuta' + (j.rssiLora != null ? ' (radio ' + j.rssiLora + ' dBm)' : ' (via USB)'));
+    var a = dentro(prima), n = dentro(j);
+    Object.keys(n).forEach(function (k) { if (!a[k]) d('Tag ' + k + ' DENTRO l\'area'); });
+    Object.keys(a).forEach(function (k) { if (!n[k]) d('Tag ' + k + ' uscito'); });
+    if (j.contesa && !(prima && prima.contesa)) d('Area CONTESA: conquista ferma');
+    if (j.conq && (!prima || prima.conq !== j.conq)) d('Conquista iniziata dai ' + j.conq);
+    if (j.owner !== (prima ? prima.owner : null) && prima) d(j.owner ? 'AREA CONQUISTATA dai ' + j.owner : 'Area tornata neutra');
+    if (prima && prima.soglia !== j.soglia) d('Soglia ora ' + j.soglia + ' dBm');
+    if (prima && prima.tempo !== j.tempo) d('Tempo di conquista ora ' + j.tempo + ' s');
+    var v = b.visto; v.band = 1;
+    (j.tag || []).forEach(function (t) { v.tag = 1; if (t.rssi >= j.soglia) v.dentro = 1; else v.fuori = 1; });
+    if (j.conq) v.conq = 1; if (j.owner) v.owner = 1; if (j.contesa) v.contesa = 1;
+    if (prima && prima.owner && j.conq && j.conq !== prima.owner) v.riconq = 1;
+  }
+  function pagProvaTbeam() {
+    testata('Prova 3 T-Beam');
+    if (!S.stato().dev) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
+    var b = BANCO, box = el('div', 'banco p3'); app.appendChild(box);
+    var aiuto = el('details', 'p3-aiuto'); aiuto.appendChild(el('summary', null, 'Come collegare i 3 T-Beam'));
+    aiuto.appendChild(el('pre', null,
+      'TELEFONO  → questa pagina → "Bluetooth" → scegli AC-HQ-…  (T-Beam con programma HQ)\n' +
+      '            qui vedi la mappa e mandi i comandi alla bandiera via radio\n' +
+      'PC        → questa pagina → "USB" → T-Beam col programma TAG FINTO\n' +
+      '            qui cambi colore, numero e potenza del tag\n' +
+      'TERZO     → programma BANDIERA, solo acceso, vicino al tag\n\n' +
+      'La bandiera manda lo stato ogni ~20 s: la mappa si aggiorna a scatti.\n' +
+      'Dopo ogni comando la bandiera risponde subito e rimanda lo stato.\n' +
+      'In stanza il segnale è fortissimo: per vedere il tag "uscire" premi Soglia stanza (-55)\n' +
+      'e porta il tag in un\'altra stanza, oppure dal PC Potenza minima.'));
+    box.appendChild(aiuto);
+    var testa = el('div', 'banco-st'); box.appendChild(testa);
+    var bt = el('div', 'banco-bt'); box.appendChild(bt);
+    bt.appendChild(bottone('Bluetooth (HQ)', '', bancoBle));
+    bt.appendChild(bottone('USB', '', bancoUsb));
+    bt.appendChild(bottone('Scollega', 'mini', function () { bancoScollega(); disegna(); }));
+    var mappa = el('div', 'p3-mappa'); box.appendChild(mappa);
+    var sotto = el('div', 'p3-sotto'); box.appendChild(sotto);
+    // tasti per la bandiera (via HQ con "cmd tutte", o diretti se la bandiera è collegata via USB)
+    var tb = el('div', 'p3-tasti'); box.appendChild(tb);
+    var tt = el('div', 'p3-tasti'); box.appendChild(tt);
+    function aBandiera(c) { bancoInvia(b.hq || b.avvio === 'HQ' ? 'cmd tutte ' + c : c); }
+    [['Conquista veloce (20 s)', 'tempo 20'], ['Conquista normale (60 s)', 'tempo 60'], ['Soglia stanza (-55)', 'soglia -55'], ['Soglia campo (-80)', 'soglia -80'],
+     ['Area neutra', 'reset'], ['Dai ai blu', 'fazione 1'], ['Dai ai rossi', 'fazione 2'], ['Test luce/cicalino', 'test'], ['Muto sì/no', 'muto'], ['Stato subito', 'invia'], ['Info', 'info']]
+      .forEach(function (x) { tb.appendChild(bottone(x[0], 'p3-b', function () { aBandiera(x[1]); })); });
+    [['Tag BLU', 'f 1'], ['Tag ROSSO', 'f 2'], ['Numero +1', null], ['Potenza minima', 'pot 0'], ['Potenza media', 'pot 4'], ['Potenza massima', 'pot 7']]
+      .forEach(function (x) { tt.appendChild(bottone(x[0], 'p3-b', function () { bancoInvia(x[1] || 'n ' + (((b.tag && b.tag.tag) || 0) + 1)); })); });
+    var lista = el('div', 'p3-lista'); box.appendChild(lista);
+    var storia = el('div', 'p3-storia'); box.appendChild(storia);
+    var cmdF = el('form', 'banco-cmd'), cmdI = el('input'); cmdI.placeholder = 'comando libero'; cmdI.autocapitalize = 'off'; cmdI.autocomplete = 'off';
+    var ok = el('button', 'btn', 'Invia'); ok.type = 'submit'; cmdF.appendChild(cmdI); cmdF.appendChild(ok); box.appendChild(cmdF);
+    cmdF.onsubmit = function (e) { e.preventDefault(); bancoInvia(cmdI.value); cmdI.value = ''; };
+    var raw = el('details', 'p3-aiuto'); raw.appendChild(el('summary', null, 'Righe grezze'));
+    raw.appendChild(bottone('Copia log', 'mini', function () { navigator.clipboard.writeText(b.righe.join('\n')).then(function () { toast('Log copiato: incollalo a Claude'); }, errore); }));
+    var pre = el('pre', 'banco-log'); raw.appendChild(pre); box.appendChild(raw);
+    function eta(t) { var s = Math.round((Date.now() - t) / 1000); return s < 120 ? s + ' s' : Math.round(s / 60) + ' min'; }
+    function hash(n) { var h = (n * 2654435761) >>> 0; return (h % 360) * Math.PI / 180; }
+    function disegna() {
+      var ids = Object.keys(b.band).sort(function (x, y) { return b.band[y]._t - b.band[x]._t; }), j = ids.length ? b.band[ids[0]] : null;
+      var hqOk = b.hq && Date.now() - b.hq._t < 25000;
+      testa.textContent = (b.via ? 'COLLEGATO via ' + b.via : 'NON COLLEGATO') + (b.avvio ? ' · scheda: ' + b.avvio : '') + (b.hq ? ' · HQ ' + b.hq.hq + (hqOk ? ' vivo' : ' MUTO da ' + eta(b.hq._t)) + ' · pacchetti ' + b.hq.pacchetti : '') +
+        (b.tag ? ' · tag finto: ' + b.tag.f.toUpperCase() + ' #' + b.tag.tag + ' potenza ' + b.tag.pot + ' dBm' : '');
+      testa.className = 'banco-st ' + (b.via ? 'on' : 'off');
+      tb.hidden = !(b.hq || b.avvio === 'HQ' || b.avvio === 'BANDIERA');
+      tt.hidden = !(b.tag || b.avvio === 'TAG');
+      // mappa: un punto al centro; il bordo del cerchio è la soglia; i tag più vicini al centro quanto più forte è il segnale
+      var W = 360, H = 300, cx = 180, cy = 150, R = 95, s = '<svg viewBox="0 0 ' + W + ' ' + H + '"><rect width="' + W + '" height="' + H + '" fill="#2c3a22"/>';
+      for (var i = 0; i < 14; i++) s += '<circle cx="' + ((i * 97) % W) + '" cy="' + ((i * 61) % H) + '" r="' + (14 + (i % 4) * 6) + '" fill="#334527"/>';
+      if (!j) s += '<circle cx="' + cx + '" cy="' + cy + '" r="' + R + '" fill="none" stroke="#777" stroke-width="2" stroke-dasharray="6 6"/><text x="' + cx + '" y="' + cy + '" fill="#ccc" font-size="14" text-anchor="middle">in attesa della bandiera…</text>';
+      else {
+        var col = { blu: '#2f7fd6', rossa: '#d23a2c' }, oc = j.owner ? col[j.owner] : '#aaa', vecchia = Date.now() - j._t > 45000;
+        var lamp = j.contesa && Math.floor(Date.now() / 500) % 2;
+        s += '<circle cx="' + cx + '" cy="' + cy + '" r="' + R + '" fill="' + (lamp ? '#d23a2c' : oc) + '" fill-opacity=".25" stroke="' + (j.contesa ? '#ffd23a' : oc) + '" stroke-width="3"/>';
+        if (j.conq && j.pct > 0) {
+          var a = Math.min(.999, j.pct / 100) * 2 * Math.PI, r2 = R + 8, x2 = cx + r2 * Math.sin(a), y2 = cy - r2 * Math.cos(a);
+          s += '<path d="M' + cx + ' ' + (cy - r2) + ' A' + r2 + ' ' + r2 + ' 0 ' + (a > Math.PI ? 1 : 0) + ' 1 ' + x2.toFixed(1) + ' ' + y2.toFixed(1) + '" fill="none" stroke="' + col[j.conq] + '" stroke-width="8" stroke-linecap="round"/>';
+        }
+        s += '<text x="' + cx + '" y="' + (cy - 6) + '" font-size="34" text-anchor="middle" fill="#fff">⚑</text>';
+        s += '<text x="' + cx + '" y="' + (cy + 22) + '" font-size="15" text-anchor="middle" fill="#fff" font-weight="700">' + (j.contesa ? 'CONTESA' : j.conq ? j.conq.toUpperCase() + ' ' + j.pct + '%' : j.owner ? 'DEI ' + j.owner.toUpperCase() : 'NEUTRA') + '</text>';
+        s += '<text x="' + cx + '" y="' + (cy + 40) + '" font-size="11" text-anchor="middle" fill="#ddd">B' + j.blu + ' R' + j.rossi + ' · soglia ' + j.soglia + '</text>';
+        (j.tag || []).forEach(function (t) {
+          // -30 dBm = al centro, soglia = sul bordo, -105 = lontano
+          var f = t.rssi >= j.soglia ? (-30 - t.rssi) / (-30 - j.soglia) : 1 + (j.soglia - t.rssi) / (j.soglia + 105) * 0.5;
+          var d = Math.max(.15, Math.min(1.55, f)) * R, an = hash(t.n + (t.f === 'rossa' ? 500 : 0)), x = cx + d * Math.sin(an), y = cy - d * Math.cos(an);
+          x = Math.max(14, Math.min(W - 14, x)); y = Math.max(14, Math.min(H - 14, y));
+          s += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="13" fill="' + col[t.f] + '" stroke="#fff" stroke-width="2"' + (t.rssi < j.soglia ? ' stroke-dasharray="3 3" fill-opacity=".5"' : '') + '/>';
+          s += '<text x="' + x.toFixed(1) + '" y="' + (y + 4).toFixed(1) + '" font-size="11" text-anchor="middle" fill="#fff" font-weight="700">' + t.n + '</text>';
+          s += '<text x="' + x.toFixed(1) + '" y="' + (y + 25).toFixed(1) + '" font-size="10" text-anchor="middle" fill="#eee">' + t.rssi + '</text>';
+        });
+        if (vecchia) s += '<rect width="' + W + '" height="22" fill="#a00"/><text x="8" y="16" fill="#fff" font-size="13">Bandiera muta da ' + eta(j._t) + ': è accesa? è lontana?</text>';
+      }
+      mappa.innerHTML = s + '</svg>';
+      sotto.textContent = j ? 'Bandiera ' + j.bandiera + ' · ultimo stato ' + eta(j._t) + ' fa (#' + j.seq + ') · prossimo tra ~' + Math.max(0, 21 - Math.round((Date.now() - j._t) / 1000)) + ' s · batteria ' + (j.batt === 255 ? 'USB' : j.batt + '%') +
+        (j.rssiLora != null ? ' · radio ' + j.rssiLora + ' dBm, SNR ' + j.snr : '') + ' · conquista in ' + j.tempo + ' s' + (ids.length > 1 ? ' · (altre bandiere: ' + ids.slice(1).join(', ') + ')' : '') : '';
+      var v = b.visto, passi = [
+        [b.via, 'Telefono o PC collegato a un T-Beam'], [hqOk || b.avvio === 'HQ', 'HQ vivo (battito ogni 10 s)'], [v.band, 'Messaggio della bandiera arrivato via radio'],
+        [v.tag, 'La bandiera sente il tag'], [v.dentro, 'Tag DENTRO l\'area'], [v.conq, 'Conquista partita'], [v.owner, 'Area conquistata (luce fissa + bip lungo)'],
+        [v.riconq, 'Riconquista: tag cambiato di colore (tasto Tag ROSSO o pulsante del tag)'], [v.risposta, 'Comando via radio: la bandiera ha risposto'], [v.fuori, 'Tag FUORI dall\'area (soglia o distanza)'], [v.contesa, 'Contesa (serve un secondo tag dell\'altro colore)']];
+      lista.innerHTML = '<b>Controlli</b>' + passi.map(function (p) { return '<div class="' + (p[0] ? 'ok' : '') + '">' + (p[0] ? '✔' : '○') + ' ' + p[1] + '</div>'; }).join('');
+      storia.innerHTML = '<b>Cosa è successo</b>' + (b.storia.length ? b.storia.slice().reverse().slice(0, 15).map(function (x) { var d = new Date(x.t); return '<div><span>' + ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2) + '</span> ' + escB(x.testo) + '</div>'; }).join('') : '<div>niente ancora</div>');
+      if (raw.open) { pre.textContent = b.righe.slice(-150).join('\n'); pre.scrollTop = pre.scrollHeight; }
+    }
+    var prossimo = null;
+    b.cb = function () { if (prossimo) return; prossimo = setTimeout(function () { prossimo = null; disegna(); }, 250); };
+    var timer = setInterval(disegna, 1000);
+    disegna();
+    var prima = chiusura; chiusura = function () { clearInterval(timer); b.cb = null; if (prima) prima(); };
+  }
+  function cartaProvaTbeam() {
+    var k = el('button', 'carta beta'); k.type = 'button';
+    var t = el('div', 'pm-testa'); t.appendChild(el('span', 'pm-eti', 'SOLO TU')); k.appendChild(t);
+    var r0 = el('div', 'beta-r'); r0.appendChild(el('span', 'beta-ic', '⚑'));
+    var tx = el('div'); tx.appendChild(el('h3', null, 'Prova 3 T-Beam')); tx.appendChild(el('small', null, 'Mappa con un punto, tag, conquista e controlli che si spuntano da soli.')); r0.appendChild(tx);
+    k.appendChild(r0); k.onclick = function () { vai('provaTbeam'); };
+    return k;
   }
   function cartaBanco() {
     var k = el('button', 'carta beta'); k.type = 'button';

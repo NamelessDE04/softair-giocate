@@ -727,3 +727,13 @@ main > .btn.big { margin-bottom: 6px; }
 .banco-chk{display:inline-flex;align-items:center;gap:4px;font-size:13px}
 .banco-log{background:#000;color:#9f9;font-family:ui-monospace,monospace;font-size:11px;height:320px;overflow:auto;padding:6px;white-space:pre-wrap;word-break:break-all;margin:4px 0 20px}
 .banco-chk input{width:auto;height:auto;margin:0}.banco-chk{white-space:nowrap}
+.p3-mappa svg{width:100%;height:auto;border-radius:8px;display:block}
+.p3-sotto{font-family:ui-monospace,monospace;font-size:11px;margin:4px 0 8px;opacity:.85}
+.p3-tasti{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;padding-top:6px;border-top:1px solid #333}
+.p3-tasti[hidden]{display:none}
+.p3 .p3-b{flex:1 1 45%;padding:10px 6px;font-size:14px;min-height:0}
+.p3-lista,.p3-storia{font-size:14px;margin:10px 0;line-height:1.5}
+.p3-lista div{opacity:.6}.p3-lista div.ok{opacity:1;color:#8f8}
+.p3-storia span{font-family:ui-monospace,monospace;font-size:11px;opacity:.7}
+.p3-aiuto{margin:6px 0}.p3-aiuto summary{cursor:pointer;font-weight:700}
+.p3-aiuto pre{white-space:pre-wrap;font-size:11px;background:#000;color:#ddd;padding:6px;border-radius:4px}
