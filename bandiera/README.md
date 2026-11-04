@@ -1,5 +1,11 @@
 # Bandiere elettroniche · prima prova al banco
 
+> **Novità (v0.2):** tre programmi (bandiera, HQ, tag finto) che si caricano dal browser su
+> https://softair-giocate.web.app/firmware/ (Chrome o Edge su computer, cavo USB): niente da installare.
+> Sono compilati da GitHub a ogni modifica. Per il debug: nell'app, carta **Banco bandiere** (organizzatori),
+> che si collega all'HQ via Bluetooth (Android) o USB (computer), mostra conteggi, tag e segnali e manda comandi.
+> La bandiera fa da sola la conquista: luce WS2812B sul pin 13, cicalino sul pin 14 (comandi in /firmware/).
+
 Obiettivo di questa prova: **con i T-Beam che avete già e 4-5 tag Bluetooth**, verificare che
 1. una bandiera riconosca i tag vicini e li conti per fazione;
 2. il conteggio arrivi via LoRa a un T-Beam "HQ";
