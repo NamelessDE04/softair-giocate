@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.27';
+  var VERSIONE = '0.28';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -655,7 +655,7 @@
           var bar = el('div', 'riga2'); bar.appendChild(bottone('Torna alla mappa', 'accent', function () { tendina.hidden = true; mortPan = null; })); tendina.appendChild(bar);
           var pb = el('div', 'mort-pan'); tendina.appendChild(pb);
           mortPan = pannelloMortaio(pb, {
-            campo: cm, punti: puntiG, team: f, uid: st.user.uid, ora: Date.now, zona: function () { return v.zona(); },
+            campo: cm, punti: puntiG, team: f, uid: st.user.uid, ora: Date.now, zona: function () { return v.zona(); }, modo: window.AC_MORT.semplice(c) ? 'semplice' : 'realistico',
             owner: function () { return statoMort().own; }, stato: function () { return statoMort().s; },
             puoCostruire: comandante || st.ruolo === 'caposquadra' || st.ruolo === 'comandante' || P('ordini'),
             scrivi: function (e) { e.uid = st.user.uid; e.team = f; e.t = Date.now(); S.scriviEvento(c.id, e); return Promise.resolve(); },
@@ -731,7 +731,8 @@
     suonoImpatto(true);
   }
   // spiegazione illustrata del tiro
-  function infoMortaio() {
+  function infoMortaio(modo) {
+    if (modo === 'semplice') return infoSemplice();
     apriFoglio(function (f) {
       f.classList.add('foglio-alto');
       var d = el('div', 'mort-info'); f.appendChild(d);
@@ -766,6 +767,31 @@
       f.appendChild(bottone('Ho capito', 'accent big', function () { chiudiFoglio(); }));
     });
   }
+  // spiegazione della versione semplificata: pensata per chi non ha mai usato un mortaio
+  function infoSemplice() {
+    var R = window.AC_MORT.regole({ mortaio: 'semplice' }), pp = window.AC_MORT.portata();
+    apriFoglio(function (f) {
+      f.classList.add('foglio-alto');
+      var d = el('div', 'mort-info'); f.appendChild(d);
+      d.innerHTML = '<h2>Mortaio semplificato</h2>'
+        + '<p>Basta sapere <b>quanto è lontano</b> il bersaglio e <b>in che direzione</b>. Alzo e carica li calcola l\'app.</p>'
+        + '<div class="mi-ciclo"><span>1<b>Costruisci</b></span><span>2<b>Osserva</b></span><span>3<b>Misura</b></span><span>4<b>Spara</b></span><span>5<b>Correggi</b></span></div>'
+        + '<h3>1 · Costruzione</h3><p>All\'HQ arrivano rifornimenti da soli: ' + R.reddito + ' ogni ' + Math.round(R.periodo / 60) + ' minuti. Il mortaio costa <b>' + R.costo + '</b> e si costruisce all\'HQ (caposquadra o comandante, ' + Math.round(R.costruzione / 60) + ' minuti senza uscire). Ogni colpo costa <b>' + R.colpo + '</b>.</p>'
+        + '<h3>2 · L\'osservatore</h3><p>Chi vede il bersaglio legge le <b>coordinate sulla carta di carta</b> e le manda al mortaio con una breve descrizione. Non si prendono dalla mappa del telefono.</p>'
+        + '<h3>3 · Misura: due modi</h3><p><b>Distanza e direzione.</b> Sulla carta misuri quanti metri ci sono dal mortaio al bersaglio (ogni quadretto della griglia = 100 m) e con la bussola la direzione in gradi.</p>'
+        + '<svg viewBox="0 0 320 210" class="mi-svg"><circle cx="160" cy="110" r="80" fill="none" stroke="#e8c96a" stroke-opacity=".5"/>'
+        + '<text x="160" y="22" fill="#e8c96a" font-size="14" text-anchor="middle">N · 0°</text><text x="250" y="114" fill="#e8c96a" font-size="14">E · 90°</text><text x="160" y="204" fill="#e8c96a" font-size="14" text-anchor="middle">S · 180°</text><text x="16" y="114" fill="#e8c96a" font-size="14">O · 270°</text>'
+        + '<path d="M160 110 L160 34" stroke="#b9b4a2" stroke-width="2"/><path d="M160 110 L215 55" stroke="#ffd96a" stroke-width="4"/><path d="M160 70 A40 40 0 0 1 188 82" stroke="#ff6b5a" stroke-width="3" fill="none"/>'
+        + '<text x="166" y="62" fill="#ff6b5a" font-size="15" font-weight="700">45°</text><text x="196" y="96" fill="#ffd96a" font-size="14" font-weight="700">350 m</text>'
+        + '<g stroke="#ff6b5a" stroke-width="3" fill="none"><circle cx="215" cy="55" r="9"/></g><rect x="152" y="102" width="16" height="16" rx="3" fill="#2f7fd6" stroke="#fff" stroke-width="2"/></svg>'
+        + '<div class="mi-es"><b>Esempio:</b> bersaglio a 350 m verso nord-est → scrivi <b>350</b> e <b>45</b>.</div>'
+        + '<p><b>Coordinate.</b> In alternativa scrivi le coordinate UTM del bersaglio, lette sulla carta o ricevute dall\'osservatore: distanza e direzione le ricava l\'app.</p>'
+        + '<h3>4 · Spara</h3><p>Premi <b>FUOCO</b> stando all\'HQ. Il mortaio arriva da ' + pp.min + ' a ' + pp.max + ' m; il colpo vola 7-19 secondi.</p>'
+        + '<h3>5 · Correggi</h3><p>L\'osservatore riceve dove è caduto il colpo, ad esempio <i>«30 m a nord del bersaglio»</i>. Correggi a buon senso: <b>troppo lungo</b> → togli metri; <b>troppo corto</b> → aggiungi metri; <b>troppo a destra o a sinistra</b> → cambia di qualche grado la direzione. Ogni tubo ha un po\' di dispersione: due colpi uguali non cadono mai nello stesso punto.</p>'
+        + '<h3>Sul campo</h3><p>Entro <b>' + R.letale + ' m</b> dall\'impatto i telefoni suonano e vibrano: sei colpito, torna al punto di rientro (vale anche per i compagni). Entro <b>' + R.vicino + ' m</b>: «colpi vicini, al riparo». Le basi principali sono protette.</p>';
+      f.appendChild(bottone('Ho capito', 'accent big', function () { chiudiFoglio(); }));
+    });
+  }
   // pannello del mortaio: rifornimenti, chiamata di fuoco, tiro. Uguale per partita e prova (ctx decide cosa succede)
   function durata(sec) { return sec < 60 ? sec + ' secondi' : Math.round(sec / 60) + ' minuti'; }
   function pannelloMortaio(box, ctx) {
@@ -775,8 +801,8 @@
       if (box.contains(document.activeElement) && document.activeElement.matches('input,textarea')) return;
       var s = ctx.stato(), R = s.regole, now = ctx.ora(), zona = ctx.zona();
       box.innerHTML = '';
-      var testa = el('div', 'mort-testa'); testa.appendChild(el('b', null, ctx.prova ? 'Mortaio · prova' : 'Mortaio'));
-      var bi = el('button', 'mort-i', 'i'); bi.type = 'button'; bi.title = 'Come funziona'; bi.onclick = infoMortaio; testa.appendChild(bi);
+      var testa = el('div', 'mort-testa'); testa.appendChild(el('b', null, (ctx.prova ? 'Mortaio · prova' : 'Mortaio') + (ctx.modo === 'semplice' ? ' · semplificato' : '')));
+      var bi = el('button', 'mort-i', 'i'); bi.type = 'button'; bi.title = 'Come funziona'; bi.onclick = function () { infoMortaio(ctx.modo); }; testa.appendChild(bi);
       box.appendChild(testa);
       var tabs = el('div', 'schede');
       [['rif', 'HQ'], ['oss', 'Chiama il fuoco'], ['tiro', 'Mortaio']].forEach(function (x) {
@@ -810,7 +836,8 @@
         cont.appendChild(el('p', 'hint', 'Manda al mortaio dove sparare. Il nemico non vede le richieste.'));
         var ci = el('input'); ci.value = sel.coord; ci.placeholder = '32T 375310 4983462'; ci.className = 'mono'; ci.oninput = function () { sel.coord = ci.value; };
         cont.appendChild(campoForm('Coordinate UTM del bersaglio', ci));
-        cont.appendChild(bottone('⌖ Scegli sulla mappa', '', function () { ctx.scegli(function (ll) { sel.coord = utmDi(ll.lat, ll.lon); disegna(); }); }));
+        if (ctx.modo !== 'semplice' || ctx.prova) cont.appendChild(bottone('⌖ Scegli sulla mappa' + (ctx.modo === 'semplice' ? ' (solo in prova)' : ''), '', function () { ctx.scegli(function (ll) { sel.coord = utmDi(ll.lat, ll.lon); disegna(); }); }));
+        else cont.appendChild(el('small', 'hint', 'Le coordinate si leggono sulla carta di carta: nella versione semplificata non si prendono dalla mappa del telefono.'));
         var ti = el('input'); ti.value = sel.testo; ti.placeholder = 'es. 4 fucilieri dietro il muretto'; ti.oninput = function () { sel.testo = ti.value; };
         cont.appendChild(campoForm('Cosa c\'è', ti));
         cont.appendChild(bottone('Invia al mortaio', 'accent big', function () {
@@ -842,41 +869,81 @@
           km.appendChild(el('small', 'eti', 'MISSIONE')); km.appendChild(rs); km.appendChild(el('b', 'mono', utmDi(mis.lat, mis.lon)));
           if (ctx.soluzione && P0) {
             var mm = M.misura(P0, mis), al = [0, 1, 2, 3].map(function (cc) { var a = M.alzoPer(Math.round(mm.dist), cc); return a ? 'C' + cc + ' ' + a : null; }).filter(Boolean);
-            km.appendChild(el('small', 'mort-sol', 'Soluzione (solo in prova): ' + Math.round(mm.dist) + ' m · deriva ' + Math.round(mm.mil) + ' · alzo ' + (al.join(' / ') || 'fuori portata')));
+            km.appendChild(el('small', 'mort-sol', ctx.modo === 'semplice' ? 'Soluzione (solo in prova): ' + Math.round(mm.dist) + ' m · direzione ' + Math.round(mm.mil * 360 / 6400) + '°' : 'Soluzione (solo in prova): ' + Math.round(mm.dist) + ' m · deriva ' + Math.round(mm.mil) + ' · alzo ' + (al.join(' / ') || 'fuori portata')));
           }
           cont.appendChild(km);
         } else cont.appendChild(el('p', 'hint', 'Nessuna richiesta di fuoco: la manda un osservatore dalla scheda «Chiama il fuoco».'));
-        function quadrante(nome, chiave, max, nota) {
-          var w = el('div', 'mort-dial-w'); var h = el('div', 'mort-dn'); h.appendChild(el('b', null, nome)); h.appendChild(el('span', null, nota)); w.appendChild(h);
-          var d = el('div', 'mort-dial'), v = ('0000' + sel[chiave]).slice(-4);
-          [1000, 100, 10, 1].forEach(function (pas, i) {
-            var c = el('div', 'mort-dig');
-            var su = el('button', null, '▲'); su.type = 'button'; su.onclick = function () { sel[chiave] = (sel[chiave] + pas) % (max + 1); disegna(); };
-            var giu = el('button', null, '▼'); giu.type = 'button'; giu.onclick = function () { sel[chiave] = (sel[chiave] - pas + max + 1) % (max + 1); disegna(); };
-            c.appendChild(su); c.appendChild(el('b', null, v[i])); c.appendChild(giu); d.appendChild(c);
+        var tiroOra = null;
+        if (ctx.modo === 'semplice') {
+          // versione semplificata: distanza e direzione, oppure le coordinate lette sulla carta. Il resto lo calcola l'app.
+          var pp = M.portata(), sm = el('div', 'mort-seg');
+          [['dd', 'Distanza e direzione'], ['co', 'Coordinate']].forEach(function (o) { sm.appendChild(bottone(o[1], (sel.sm || 'dd') === o[0] ? 'on' : '', function () { sel.sm = o[0]; disegna(); })); });
+          cont.appendChild(sm);
+          var esito = el('div', 'carta mort-calc');
+          function calcola() {
+            var dist, gradi;
+            if ((sel.sm || 'dd') === 'dd') { dist = parseFloat(sel.dist); gradi = parseFloat(sel.dir); if (!(dist > 0) || isNaN(gradi)) return { err: 'Scrivi distanza e direzione' }; }
+            else {
+              var ll = leggiCoord(sel.coordT, ctx.campo); if (!ll) return { err: 'Scrivi le coordinate UTM del bersaglio' };
+              if (!P0 || P0.lat == null) return { err: 'Posizione del mortaio sconosciuta' };
+              var m0 = M.misura(P0, ll); dist = m0.dist; gradi = m0.mil * 360 / 6400;
+            }
+            var t = M.tiroPer(dist, gradi);
+            return t ? t : { err: 'Fuori portata: il mortaio arriva da ' + pp.min + ' a ' + pp.max + ' m' };
+          }
+          function aggiornaEsito() {
+            var t = calcola(); esito.innerHTML = '';
+            if (t.err) { esito.appendChild(el('small', 'hint', t.err)); return; }
+            esito.appendChild(el('b', null, Math.round(t.dist) + ' m · direzione ' + Math.round(t.deriva * 360 / 6400) + '°'));
+            esito.appendChild(el('small', 'ok', 'Pronto: il colpo arriva in ' + Math.round(t.volo) + ' secondi'));
+          }
+          if ((sel.sm || 'dd') === 'dd') {
+            var di = el('input'); di.type = 'number'; di.inputMode = 'numeric'; di.min = 0; di.placeholder = 'es. 350'; di.value = sel.dist || ''; di.oninput = function () { sel.dist = di.value; aggiornaEsito(); };
+            var gi = el('input'); gi.type = 'number'; gi.inputMode = 'numeric'; gi.min = 0; gi.max = 359; gi.placeholder = 'es. 45'; gi.value = sel.dir || ''; gi.oninput = function () { sel.dir = gi.value; aggiornaEsito(); };
+            var due = el('div', 'tre'); due.appendChild(campoForm('Distanza (m)', di)); due.appendChild(campoForm('Direzione (gradi)', gi)); cont.appendChild(due);
+            cont.appendChild(el('small', 'hint', 'Dal mortaio verso il bersaglio. Direzione con la bussola: nord 0, est 90, sud 180, ovest 270.'));
+          } else {
+            var ci2 = el('input'); ci2.className = 'mono'; ci2.placeholder = '32T 375310 4983462'; ci2.value = sel.coordT || ''; ci2.oninput = function () { sel.coordT = ci2.value; aggiornaEsito(); };
+            cont.appendChild(campoForm('Coordinate UTM del bersaglio', ci2));
+            cont.appendChild(el('small', 'hint', 'Leggile sulla carta di carta o dalla richiesta dell\'osservatore: non si prendono dalla mappa del telefono.'));
+          }
+          cont.appendChild(esito); aggiornaEsito();
+          tiroOra = function () { var t = calcola(); return t.err ? null : t; };
+        } else {
+          function quadrante(nome, chiave, max, nota) {
+            var w = el('div', 'mort-dial-w'); var h = el('div', 'mort-dn'); h.appendChild(el('b', null, nome)); h.appendChild(el('span', null, nota)); w.appendChild(h);
+            var d = el('div', 'mort-dial'), v = ('0000' + sel[chiave]).slice(-4);
+            [1000, 100, 10, 1].forEach(function (pas, i) {
+              var c = el('div', 'mort-dig');
+              var su = el('button', null, '▲'); su.type = 'button'; su.onclick = function () { sel[chiave] = (sel[chiave] + pas) % (max + 1); disegna(); };
+              var giu = el('button', null, '▼'); giu.type = 'button'; giu.onclick = function () { sel[chiave] = (sel[chiave] - pas + max + 1) % (max + 1); disegna(); };
+              c.appendChild(su); c.appendChild(el('b', null, v[i])); c.appendChild(giu); d.appendChild(c);
+            });
+            w.appendChild(d); return w;
+          }
+          cont.appendChild(quadrante('DERIVA', 'deriva', 6399, 'millesimi · 0-6399'));
+          cont.appendChild(quadrante('ALZO', 'alzo', 1600, 'millesimi · ' + M.ALZO_MIN + '-' + M.ALZO_MAX));
+          var bl = M.balistica(sel.alzo, sel.carica);
+          var hc = el('div', 'mort-dn'); hc.appendChild(el('b', null, 'CARICA')); hc.appendChild(el('span', null, bl ? 'tempo di volo ' + Math.round(bl.volo) + ' s' : 'alzo fuori dai limiti del tubo')); cont.appendChild(hc);
+          var sg = el('div', 'mort-seg');
+          [0, 1, 2, 3].forEach(function (cc) { sg.appendChild(bottone(String(cc), sel.carica === cc ? 'on' : '', function () { sel.carica = cc; disegna(); })); });
+          cont.appendChild(sg);
+          var tv = el('details', 'carta mort-tav'); tv.open = !!sel.tavola; tv.ontoggle = function () { sel.tavola = tv.open; };
+          tv.appendChild(el('summary', null, 'Tavola di tiro'));
+          var tb = el('table'), th = el('tr'); ['m', 'C0', 'C1', 'C2', 'C3'].forEach(function (x) { th.appendChild(el('th', null, x)); }); tb.appendChild(th);
+          M.tavola(100, 750, 25).forEach(function (rw) {
+            var tr = el('tr'); tr.appendChild(el('td', null, String(rw.m)));
+            rw.alzi.forEach(function (a) { var td = el('td'); if (a) { td.appendChild(document.createTextNode(String(a.alzo))); td.appendChild(el('small', null, Math.round(a.volo) + 's')); } else td.textContent = '—'; tr.appendChild(td); });
+            tb.appendChild(tr);
           });
-          w.appendChild(d); return w;
+          tv.appendChild(tb); cont.appendChild(tv);
+          tiroOra = function () { var b0 = M.balistica(sel.alzo, sel.carica); return b0 ? { deriva: sel.deriva, alzo: sel.alzo, carica: sel.carica, volo: b0.volo } : null; };
         }
-        cont.appendChild(quadrante('DERIVA', 'deriva', 6399, 'millesimi · 0-6399'));
-        cont.appendChild(quadrante('ALZO', 'alzo', 1600, 'millesimi · ' + M.ALZO_MIN + '-' + M.ALZO_MAX));
-        var bl = M.balistica(sel.alzo, sel.carica);
-        var hc = el('div', 'mort-dn'); hc.appendChild(el('b', null, 'CARICA')); hc.appendChild(el('span', null, bl ? 'tempo di volo ' + Math.round(bl.volo) + ' s' : 'alzo fuori dai limiti del tubo')); cont.appendChild(hc);
-        var sg = el('div', 'mort-seg');
-        [0, 1, 2, 3].forEach(function (cc) { sg.appendChild(bottone(String(cc), sel.carica === cc ? 'on' : '', function () { sel.carica = cc; disegna(); })); });
-        cont.appendChild(sg);
-        var tv = el('details', 'carta mort-tav'); tv.open = !!sel.tavola; tv.ontoggle = function () { sel.tavola = tv.open; };
-        tv.appendChild(el('summary', null, 'Tavola di tiro'));
-        var tb = el('table'), th = el('tr'); ['m', 'C0', 'C1', 'C2', 'C3'].forEach(function (x) { th.appendChild(el('th', null, x)); }); tb.appendChild(th);
-        M.tavola(100, 750, 25).forEach(function (rw) {
-          var tr = el('tr'); tr.appendChild(el('td', null, String(rw.m)));
-          rw.alzi.forEach(function (a) { var td = el('td'); if (a) { td.appendChild(document.createTextNode(String(a.alzo))); td.appendChild(el('small', null, Math.round(a.volo) + 's')); } else td.textContent = '—'; tr.appendChild(td); });
-          tb.appendChild(tr);
-        });
-        tv.appendChild(tb); cont.appendChild(tv);
         var attesa = mo.ultimo ? mo.ultimo + R.cadenza * 1000 - now : 0, qui = allHq;
         var bf = bottone(attesa > 0 ? 'Ricarica il tubo · ' + Math.ceil(attesa / 1000) + ' s' : 'FUOCO', 'mort-fuoco', function () {
-          if (!bl) { toast('Alzo fuori dai limiti: tra ' + M.ALZO_MIN + ' e ' + M.ALZO_MAX); return; }
-          ctx.scrivi({ tipo: 'fuoco', pt: mo.pt, deriva: sel.deriva, alzo: sel.alzo, carica: sel.carica, rif: sel.missione || null }).then(function () { toast('Colpo partito · arrivo tra ' + Math.round(bl.volo) + ' s'); });
+          var t = tiroOra();
+          if (!t) { toast(ctx.modo === 'semplice' ? 'Controlla distanza e direzione (o le coordinate)' : 'Alzo fuori dai limiti: tra ' + M.ALZO_MIN + ' e ' + M.ALZO_MAX); return; }
+          ctx.scrivi({ tipo: 'fuoco', pt: mo.pt, deriva: t.deriva, alzo: t.alzo, carica: t.carica, rif: sel.missione || null }).then(function () { toast('Colpo partito · arrivo tra ' + Math.round(t.volo) + ' s'); });
         });
         bf.disabled = attesa > 0 || scorta < R.colpo || !qui;
         cont.appendChild(bf);
@@ -926,10 +993,11 @@
     if (!P('conflitti')) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
     var campi = D.campi.filter(function (c) { return c.geo; });
     if (!campi.length) { app.appendChild(el('p', 'hint', 'Serve una cartina con le coordinate (georeferenziata).')); return; }
-    var cid = id || campi[0].id;
-    var cs = select(campi.map(function (c) { return [c.id, c.nome]; }), cid); cs.onchange = function () { sostituisci('mortaioProva', cs.value); };
-    app.appendChild(campoForm('Cartina', cs));
-    app.appendChild(el('p', 'hint', 'Simulazione: niente arriva ai giocatori. I controlli di posizione sono disattivati e tutto è accelerato: rifornimenti ogni 10 secondi, costruzione in 5. Per provare il colpo: aspetta i rifornimenti, costruisci il mortaio all\'HQ, manda una richiesta toccando la mappa, imposta deriva, alzo e carica e spara.'));
+    var parti = String(id || '').split('~'), cid = parti[0] || campi[0].id, modoP = parti[1] === 'semplice' ? 'semplice' : 'realistico';
+    var cs = select(campi.map(function (c) { return [c.id, c.nome]; }), cid); cs.onchange = function () { sostituisci('mortaioProva', cs.value + '~' + modoP); };
+    var vs = select([['realistico', 'Realistico'], ['semplice', 'Semplificato']], modoP); vs.onchange = function () { sostituisci('mortaioProva', cid + '~' + vs.value); };
+    var due = el('div', 'tre'); due.appendChild(campoForm('Cartina', cs)); due.appendChild(campoForm('Versione', vs)); app.appendChild(due);
+    app.appendChild(el('p', 'hint', 'Simulazione: niente arriva ai giocatori. I controlli di posizione sono disattivati e tutto è accelerato: rifornimenti ogni 10 secondi, costruzione in 5. Per provare il colpo: aspetta i rifornimenti, costruisci il mortaio all\'HQ, manda una richiesta toccando la mappa, ' + (modoP === 'semplice' ? 'scrivi distanza e direzione (o le coordinate)' : 'imposta deriva, alzo e carica') + ' e spara.'));
     var mapBox = el('div', 'all-mappa mort-mappa'); app.appendChild(mapBox);
     var panBox = el('div', 'mort-pan'); app.appendChild(panBox);
     conCampo(cid, mapBox, function (cm0) {
@@ -937,20 +1005,20 @@
       if (!cm.punti.some(function (p) { return p.tipo === 'mob' && p.fazione === team; })) panBox.appendChild(el('p', 'hint avviso', 'In questa cartina manca la base principale blu: segnala nell\'editor per provare il mortaio.'));
       var own = {}; cm.punti.forEach(function (p) { own[p.id] = p.fazione || null; });
       // in prova tutto più veloce: rifornimenti ogni 10 secondi, costruzione in 5
-      var cPrv = { regole: { mortaio: { costruzione: 5, periodo: 10, reddito: 300 } } }, t0 = Date.now();
+      var cPrv = { mortaio: modoP, regole: { mortaio: { costruzione: 5, periodo: 10, reddito: 300 } } }, t0 = Date.now();
       function st() { return window.AC_MORT.stato(cPrv, cm.punti, eventi, Date.now(), own, t0); }
       var g0 = { inizio: Date.now() + 864e5, durata: 60, fazioni: [{ team: 'blu', mob: null, partenza: [] }, { team: 'rossa', mob: null, partenza: [] }] };
       var v = F.vista(mapBox, { g: g0, campo: cm, team: null, colori: COLORI, nomi: {}, ora: Date.now, anteprima: true, mobile: true,
         segni: function () { return segniMortaio(st(), team, cm.punti, Date.now(), true); },
         onTocco: function (lat, lon) { if (scegliCb) { var f0 = scegliCb; scegliCb = null; mapBox.classList.remove('scegli'); f0({ lat: lat, lon: lon }); } else toast('Per indicare un bersaglio: «Chiama il fuoco» → «Scegli sulla mappa»'); } });
       var pan = pannelloMortaio(panBox, {
-        prova: true, soluzione: true, campo: cm, punti: cm.punti, team: team, uid: uid, ora: Date.now, zona: function () { return null; }, owner: function () { return own; }, puoCostruire: true,
+        prova: true, soluzione: true, modo: modoP, campo: cm, punti: cm.punti, team: team, uid: uid, ora: Date.now, zona: function () { return null; }, owner: function () { return own; }, puoCostruire: true,
         stato: st,
         scrivi: function (e) { e.uid = uid; e.team = team; e.t = Date.now(); eventi.push(e); pan.aggiorna(); v.ridisegna(); return Promise.resolve(); },
         scegli: function (cb) { scegliCb = cb; mapBox.classList.add('scegli'); mapBox.scrollIntoView({ behavior: 'smooth' }); toast('Tocca il bersaglio sulla mappa'); }
       });
       var ant = el('div', 'riga2'); ant.appendChild(bottone('Anteprima: telefono colpito', '', function () { allarmeColpito(9, true); }));
-      ant.appendChild(bottone('Come funziona', '', infoMortaio)); app.appendChild(ant);
+      ant.appendChild(bottone('Come funziona', '', function () { infoMortaio(cPrv.mortaio); })); app.appendChild(ant);
       var giro = setInterval(function () {
         var s = st();
         s.colpi.forEach(function (cp) { if (!visti[cp.id] && cp.arrivo <= Date.now()) { visti[cp.id] = true; suonoImpatto(false); var q = s.richieste.filter(function (r) { return r.id === cp.rif; })[0]; toast(q ? 'Osservatore: ' + window.AC_MORT.scarto(cp, q) : 'Colpo arrivato'); pan.aggiorna(); } });
@@ -2072,6 +2140,9 @@
         ? 'Un solo team: chi è in attacco gioca con il comandante automatico, i difensori ricevono dal comandante automatico il loro posto sul telefono. La difesa vince se allo scadere l\'attacco non ha preso i punti chiave.'
         : 'Due fazioni, uno o più team per parte.';
     }
+    // mortaio: versione scelta da chi organizza (per ora vale nelle prove)
+    var morSel = select([['realistico', 'Realistico: deriva, alzo, carica e tavola di tiro'], ['semplice', 'Semplificato: distanza e direzione (costa di più)']], c.mortaio === 'semplice' ? 'semplice' : 'realistico');
+    form.appendChild(campoForm('Mortaio', morSel));
     // comandanti
     form.appendChild(el('h3', 'sez', 'Comandanti'));
     var cmB = el('select'), cmR = el('select');
@@ -2144,7 +2215,7 @@
           { id: 'rossa', nome: nR.value.trim() || 'Rossa', team: modo === 'addestramento' ? team : team.filter(function (t) { return fazioneDi[t] === 'rossa'; }), mob: base.rossa, partenza: partenza.rossa }
         ],
         team: team, fazioneDi: fazioneDi, comandanti: { blu: cmB.value || 'ia', rossa: modo === 'addestramento' && !pv ? 'ia' : (cmR.value || 'ia') },
-        modo: modo, fazioneUtente: fazioneUtente, nomiGioc: nomiGioc,
+        modo: modo, mortaio: morSel.value, fazioneUtente: fazioneUtente, nomiGioc: nomiGioc,
         mappaDa: pv || mSel.value === '' ? null : mezzanotte(ini) - Number(mSel.value) * GIORNO,
         parcheggio: { testo: pT.value.trim(), mapsUrl: pU.value.trim(), da: pv || pSel.value === '' ? null : mezzanotte(ini) - Number(pSel.value) * GIORNO },
         regole: c.regole || null

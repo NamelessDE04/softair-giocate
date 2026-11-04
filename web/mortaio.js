@@ -15,7 +15,20 @@
   var CARICHE = [45, 65, 80, 95];          // velocità alla bocca (m/s) per carica 0..3
   var ALZO_MIN = 800, ALZO_MAX = 1530, G = 9.81, MIL = 2 * Math.PI / 6400;
 
-  function regole(c) { return Object.assign({}, REGOLE, (c && c.regole && c.regole.mortaio) || {}); }
+  // versione semplificata (la sceglie l'organizzatore): si danno distanza e direzione, o le coordinate lette sulla carta,
+  // e alzo e carica li calcola l'app. Più comoda, quindi costa di più.
+  var SEMPLICE = { costo: 2200, colpo: 100 };
+  function semplice(c) { return !!(c && c.mortaio === 'semplice'); }
+  function regole(c) { return Object.assign({}, REGOLE, semplice(c) ? SEMPLICE : {}, (c && c.regole && c.regole.mortaio) || {}); }
+  // tiro calcolato dall'app: la carica più bassa che arriva, tiro curvo. direzione in gradi (0 = nord, 90 = est)
+  function tiroPer(dist, gradi) {
+    for (var c = 0; c < CARICHE.length; c++) {
+      var a = alzoPer(dist, c);
+      if (a != null) return { carica: c, alzo: a, deriva: ((gradi % 360) + 360) % 360 * 6400 / 360, volo: balistica(a, c).volo, dist: dist };
+    }
+    return null;
+  }
+  function portata() { return { min: Math.ceil(balistica(ALZO_MAX, 0).gittata), max: Math.floor(balistica(ALZO_MIN, CARICHE.length - 1).gittata) }; }
   // alzo (millesimi) e carica -> gittata (m) e tempo di volo (s); fuori dai limiti del tubo: null
   function balistica(alzo, carica) {
     var v = CARICHE[carica]; if (v == null || alzo < ALZO_MIN || alzo > ALZO_MAX) return null;
@@ -116,5 +129,5 @@
     return 'colpo caduto ' + Math.round(m.dist) + ' m a ' + versoDi(m.mil) + ' del bersaglio';
   }
 
-  window.AC_MORT = { REGOLE: REGOLE, CARICHE: CARICHE, ALZO_MIN: ALZO_MIN, ALZO_MAX: ALZO_MAX, regole: regole, balistica: balistica, alzoPer: alzoPer, tavola: tavola, misura: misura, sposta: sposta, versoDi: versoDi, impatto: impatto, stato: stato, hqDi: hqDi, scarto: scarto };
+  window.AC_MORT = { REGOLE: REGOLE, CARICHE: CARICHE, ALZO_MIN: ALZO_MIN, ALZO_MAX: ALZO_MAX, regole: regole, balistica: balistica, alzoPer: alzoPer, tavola: tavola, misura: misura, sposta: sposta, versoDi: versoDi, impatto: impatto, stato: stato, hqDi: hqDi, scarto: scarto, semplice: semplice, tiroPer: tiroPer, portata: portata };
 })();

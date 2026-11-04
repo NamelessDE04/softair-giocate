@@ -704,3 +704,5 @@ main > .btn.big { margin-bottom: 6px; }
 .sim-pan .riga2 { margin: 4px 0; }
 .btn.piccolo.s-blu { background: var(--blu); border-color: var(--blu); color: #fff; }
 .btn.piccolo.s-rossa { background: var(--rossa); border-color: var(--rossa); color: #fff; }
+.mort-calc { display: grid; gap: 2px; } .mort-calc b { font-size: 20px; }
+.mort-seg .btn { font-family: var(--txt); }
