@@ -706,3 +706,24 @@ main > .btn.big { margin-bottom: 6px; }
 .btn.piccolo.s-rossa { background: var(--rossa); border-color: var(--rossa); color: #fff; }
 .mort-calc { display: grid; gap: 2px; } .mort-calc b { font-size: 20px; }
 .mort-seg .btn { font-family: var(--txt); }
+
+/* banco bandiere (debug, volutamente grezzo) */
+.banco{font-size:14px}
+.banco-st{font-family:ui-monospace,monospace;font-size:12px;padding:6px 8px;border-radius:6px;margin:6px 0}
+.banco-st.on{background:#123a1a;color:#9f9}.banco-st.off{background:#3a1212;color:#f99}
+.banco-bt{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:6px 0}
+.banco-bt .btn{flex:0 0 auto}
+.banco .mini{padding:4px 8px;font-size:12px;min-height:0}
+.banco-cmd{display:flex;gap:6px;margin:6px 0}.banco-cmd input{flex:1;font-family:ui-monospace,monospace}
+.banco-tab{overflow-x:auto}
+.banco-tab table{border-collapse:collapse;font-family:ui-monospace,monospace;font-size:12px;width:100%}
+.banco-tab th,.banco-tab td{border:1px solid #444;padding:2px 4px;text-align:left;white-space:nowrap}
+.banco-tab tr.vecchia td{opacity:.45}
+.banco-tab td.tags{white-space:normal}
+.banco-tab .tags span{display:inline-block;margin:1px;padding:0 4px;border-radius:3px}
+.banco-tab .tags .in.blu{background:#2f7fd6;color:#fff}.banco-tab .tags .in.rossa{background:#d23a2c;color:#fff}
+.banco-tab .tags .out{border:1px dashed #777;opacity:.7}
+.banco-inol{border:1px solid #444;border-radius:6px;padding:8px;margin:10px 0}
+.banco-chk{display:inline-flex;align-items:center;gap:4px;font-size:13px}
+.banco-log{background:#000;color:#9f9;font-family:ui-monospace,monospace;font-size:11px;height:320px;overflow:auto;padding:6px;white-space:pre-wrap;word-break:break-all;margin:4px 0 20px}
+.banco-chk input{width:auto;height:auto;margin:0}.banco-chk{white-space:nowrap}

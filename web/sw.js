@@ -1,5 +1,5 @@
 /* Service worker: l'app funziona anche senza connessione. */
-var CACHE = 'airsoft-conflict-v34';
+var CACHE = 'airsoft-conflict-v35';
 var FILES = [
   './', 'index.html', 'app.css', 'app.js', 'db.js', 'qr.js', 'vendor/jsQR.js', 'utm.js', 'mappe.js', 'fazioni.js', 'pcs.js', 'dmz.js', 'mortaio.js', 'config.js', 'manifest.webmanifest',
   'img/logo.png', 'img/icon-192.png', 'img/icon-512.png', 'img/icon-maskable-512.png', 'img/apple-touch-icon.png'
@@ -33,6 +33,8 @@ self.addEventListener('fetch', function (e) {
   if (url.origin !== location.origin) return;
   // pagine di servizio dell'accesso Google (/__/auth/...): mai intercettate né salvate
   if (url.pathname.indexOf('/__/') === 0) return;
+  // firmware delle bandiere: sempre dal server, mai in cache (sono file grossi)
+  if (url.pathname.indexOf('/firmware/') === 0) return;
   // file dell'app: rete prima (così gli aggiornamenti arrivano), cache se offline
   // sempre verificata col server (no-cache), così pagina e script restano della stessa versione
   e.respondWith(fetch(req, { cache: 'no-cache' }).then(function (res) {

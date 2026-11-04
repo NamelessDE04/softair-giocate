@@ -13,6 +13,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # firmware delle bandiere (T-Beam): compilato qui e pubblicato in /firmware/ per caricarlo dal browser
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('bandiera/platformio.ini') }}
+      - name: Firmware bandiere
+        continue-on-error: true
+        run: |
+          pip install -q platformio
+          cd bandiera
+          OUT=../web/firmware/bin; mkdir -p $OUT
+          VER=$(grep -o 'define VERSIONE "[^"]*"' src/main.cpp | cut -d'"' -f2)
+          PK=~/.platformio/packages
+          for e in bandiera hq tag; do
+            pio run -e $e
+            B=.pio/build/$e
+            python $PK/tool-esptoolpy/esptool.py --chip esp32 merge_bin -o $OUT/$e.bin --flash_mode dio --flash_freq 40m --flash_size 4MB \
+              0x1000 $B/bootloader.bin 0x8000 $B/partitions.bin 0xe000 $PK/framework-arduinoespressif32/tools/partitions/boot_app0.bin 0x10000 $B/firmware.bin
+            printf '{"name":"Airsoft Conflict %s","version":"%s","new_install_prompt_erase":true,"builds":[{"chipFamily":"ESP32","parts":[{"path":"%s.bin","offset":0}]}]}' "$e" "$VER" "$e" > $OUT/$e.json
+          done
+          echo "{\"versione\":\"$VER\",\"quando\":\"$(date -u +%Y-%m-%dT%H:%MZ)\",\"commit\":\"${GITHUB_SHA::7}\"}" > $OUT/build.json
+          ls -la $OUT
+      - name: ESP Web Tools (per caricare il firmware dal browser)
+        continue-on-error: true
+        run: |
+          cd "$RUNNER_TEMP" && npm pack esp-web-tools@10 && tar xzf esp-web-tools-*.tgz
+          mkdir -p "$GITHUB_WORKSPACE/web/firmware/ewt" && cp -r package/dist/web/* "$GITHUB_WORKSPACE/web/firmware/ewt/"
+          ls "$GITHUB_WORKSPACE/web/firmware/ewt" | head
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-tbeam
+          path: web/firmware/bin/
+          if-no-files-found: ignore
+
       - name: Chiave Firebase mancante
         if: env.HAS_KEY != 'true'
         run: echo "::warning::Aggiungi il segreto FIREBASE_SERVICE_ACCOUNT per pubblicare su softair-giocate.web.app"

@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.28';
+  var VERSIONE = '0.29';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -97,7 +97,7 @@
     app.innerHTML = ''; window.scrollTo(0, 0);
     $('pieno').hidden = true; $('pieno').innerHTML = '';
     document.body.classList.remove('a-pieno');
-    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva, dmz: pagDmz, dmzModifica: pagDmzModifica, dmzLive: pagDmzLive, mortaioProva: pagMortaioProva }[c.v];
+    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva, dmz: pagDmz, dmzModifica: pagDmzModifica, dmzLive: pagDmzLive, mortaioProva: pagMortaioProva, banco: pagBanco }[c.v];
     (r || home)(c.p);
   }
   function aPieno() { document.body.classList.add('a-pieno'); var p = $('pieno'); p.hidden = false; p.innerHTML = ''; return p; }
@@ -160,13 +160,13 @@
     });
     var all = allenamentiAttivi().filter(function (a) { var r = miaAdesione('a:' + a.id); return P('allenamenti') || !r || r.si || r.dopo; });
     var dz = D.dmz.filter(function (x) { return x.fine > Date.now() - 6 * 3600000 && (x.giocatori || []).indexOf(st.user.uid) >= 0; });
-    if (!inviti.length && !promemoria.length && !all.length && !dz.length) { schermataInvito(); if (P('conflitti')) app.appendChild(cartaBeta()); return; }
+    if (!inviti.length && !promemoria.length && !all.length && !dz.length) { schermataInvito(); if (P('conflitti')) { app.appendChild(cartaBeta()); app.appendChild(cartaBanco()); } return; }
     inviti.forEach(function (c) { app.appendChild(cartaInvito(c)); });
     // conflict e allenamenti in ordine di data
     promemoria.map(function (c) { return { t: c.inizio, el: cartaPromemoria(c) }; }).concat(all.map(function (a) { return { t: a.inizio || 0, el: cartaAllenamento(a) }; }))
       .concat(dz.map(function (x) { return { t: x.inizio, el: cartaDmz(x) }; }))
       .sort(function (x, y) { return x.t - y.t; }).forEach(function (x) { app.appendChild(x.el); });
-    if (P('conflitti')) app.appendChild(cartaBeta());
+    if (P('conflitti')) { app.appendChild(cartaBeta()); app.appendChild(cartaBanco()); }
   }
 
   // funzioni in prova, aperte a tutti: per ora il mortaio
@@ -988,6 +988,203 @@
     nuovi.forEach(function (cp) { var q = s.richieste.filter(function (r) { return r.id === cp.rif && r.uid === uid; })[0]; if (q) toast('Osservatore: ' + window.AC_MORT.scarto(cp, q)); });
   }
   // prova per gli organizzatori: tutto il giro su una cartina vera, senza effetti sul campo
+  function escB(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  // ================= BANCO BANDIERE (debug dell'hardware): collegamento all'HQ (Bluetooth o USB), righe grezze, comandi,
+  // e, se vuoi, i tag visti dalle bandiere mandati come presenze in un conflict di prova
+  var NUS = { s: '6e400001-b5a3-f393-e0a9-e50e24dcca9e', rx: '6e400002-b5a3-f393-e0a9-e50e24dcca9e', tx: '6e400003-b5a3-f393-e0a9-e50e24dcca9e' };
+  var BANCO = { via: null, porta: null, lettore: null, scrittore: null, dev: null, rx: null, righe: [], band: {}, hq: null, tag: null, cb: null,
+    cid: null, cm: null, mappa: {}, attivo: false, ultimoPt: {}, scritti: 0 };
+  function bancoRiga(s, da) {
+    s = String(s).replace(/\s+$/, ''); if (!s) return;
+    var t = new Date(), hh = ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2) + ':' + ('0' + t.getSeconds()).slice(-2);
+    BANCO.righe.push(hh + (da ? ' ' + da + ' ' : ' ') + s); if (BANCO.righe.length > 500) BANCO.righe.splice(0, BANCO.righe.length - 500);
+    if (s.charAt(0) === '{') {
+      try {
+        var j = JSON.parse(s); j._t = Date.now();
+        if (j.bandiera) { BANCO.band[j.bandiera] = j; bancoInoltra(j); }
+        else if (j.hq) BANCO.hq = j;
+        else if (j.tag != null) BANCO.tag = j;
+      } catch (e) { BANCO.righe.push(hh + ' !! JSON non valido: ' + e.message); }
+    }
+    if (BANCO.cb) BANCO.cb();
+  }
+  function bancoLinee() { var buf = ''; return function (pezzo) { buf += pezzo; var i; while ((i = buf.indexOf('\n')) >= 0) { bancoRiga(buf.slice(0, i)); buf = buf.slice(i + 1); } if (buf.length > 4000) { bancoRiga(buf); buf = ''; } }; }
+  function bancoScollega() {
+    var b = BANCO;
+    try { if (b.lettore) b.lettore.cancel(); } catch (e) {}
+    try { if (b.dev && b.dev.gatt.connected) b.dev.gatt.disconnect(); } catch (e) {}
+    b.via = null; b.rx = null; b.scrittore = null;
+    bancoRiga('-- scollegato', '##');
+  }
+  function bancoUsb() {
+    if (!navigator.serial) { toast('USB non disponibile: serve Chrome o Edge su computer'); return; }
+    navigator.serial.requestPort().then(function (porta) {
+      return porta.open({ baudRate: 115200 }).then(function () {
+        BANCO.porta = porta; BANCO.via = 'USB'; bancoRiga('-- collegato via USB', '##');
+        // DTR/RTS a riposo: la scheda non resta in reset
+        return porta.setSignals({ dataTerminalReady: false, requestToSend: false }).catch(function () {}).then(function () {
+          var dec = new TextDecoder(), linee = bancoLinee();
+          BANCO.scrittore = function (txt) { var w = porta.writable.getWriter(); return w.write(new TextEncoder().encode(txt + '\n')).finally(function () { w.releaseLock(); }); };
+          (function leggi() {
+            var r = porta.readable.getReader(); BANCO.lettore = r;
+            (function giro() {
+              r.read().then(function (x) {
+                if (x.done) { r.releaseLock(); porta.close().catch(function () {}); if (BANCO.via === 'USB') bancoScollega(); return; }
+                linee(dec.decode(x.value, { stream: true })); giro();
+              }, function (e) { bancoRiga('-- errore USB: ' + e.message, '##'); try { r.releaseLock(); } catch (e2) {} porta.close().catch(function () {}); BANCO.via = null; if (BANCO.cb) BANCO.cb(); });
+            })();
+          })();
+          if (BANCO.cb) BANCO.cb();
+        });
+      });
+    }).catch(function (e) { if (e && e.name !== 'NotFoundError') errore(e); });
+  }
+  function bancoBle() {
+    if (!navigator.bluetooth) { toast('Bluetooth web non disponibile: serve Chrome su Android o su computer (non iPhone)'); return; }
+    navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'AC-HQ' }], optionalServices: [NUS.s] }).then(function (dev) {
+      BANCO.dev = dev; bancoRiga('-- collego ' + dev.name + '…', '##');
+      dev.addEventListener('gattserverdisconnected', function () { if (BANCO.via === 'BT') { BANCO.via = null; bancoRiga('-- Bluetooth perso (scollegato o fuori portata)', '##'); } });
+      return dev.gatt.connect().then(function (g) { return g.getPrimaryService(NUS.s); }).then(function (s) {
+        return Promise.all([s.getCharacteristic(NUS.tx), s.getCharacteristic(NUS.rx)]);
+      }).then(function (cc) {
+        var dec = new TextDecoder(), linee = bancoLinee();
+        cc[0].addEventListener('characteristicvaluechanged', function (ev) { linee(dec.decode(ev.target.value)); });
+        BANCO.rx = cc[1];
+        BANCO.scrittore = function (txt) {
+          var b = new TextEncoder().encode(txt + '\n'), p = Promise.resolve();
+          for (var i = 0; i < b.length; i += 20) (function (pz) { p = p.then(function () { return cc[1].writeValueWithoutResponse ? cc[1].writeValueWithoutResponse(pz) : cc[1].writeValue(pz); }); })(b.slice(i, i + 20));
+          return p;
+        };
+        return cc[0].startNotifications().then(function () { BANCO.via = 'BT'; bancoRiga('-- collegato via Bluetooth a ' + dev.name, '##'); });
+      });
+    }).catch(function (e) { if (e && e.name !== 'NotFoundError') errore(e); });
+  }
+  function bancoInvia(txt) {
+    txt = String(txt || '').trim(); if (!txt) return;
+    if (!BANCO.scrittore) { toast('Prima collega l\'HQ (o una scheda via USB)'); return; }
+    bancoRiga(txt, '>>');
+    BANCO.scrittore(txt).catch(function (e) { bancoRiga('-- invio non riuscito: ' + e.message, '##'); });
+  }
+  // presenze nel conflict di prova: ogni tag "dentro" una bandiera diventa un pallino sull'area collegata a quella bandiera
+  function bancoInoltra(j) {
+    var b = BANCO, pt = b.mappa[j.bandiera]; if (!b.attivo || !b.cid || !pt || !b.cm) return;
+    var p = (b.cm.punti || []).filter(function (q) { return q.id === pt; })[0]; if (!p) return;
+    var q0 = p.x != null ? { x: p.x, y: p.y } : (b.cm.geo ? { x: b.cm.geo.cx[0] * p.lon + b.cm.geo.cx[1] * p.lat + b.cm.geo.cx[2], y: b.cm.geo.cy[0] * p.lon + b.cm.geo.cy[1] * p.lat + b.cm.geo.cy[2] } : { x: 0, y: 0 });
+    var soglia = j.soglia != null ? j.soglia : -80, dentro = {};
+    (j.tag || []).forEach(function (t, i) { if (t.rssi >= soglia) dentro['sim-tag-' + t.f + '-' + t.n] = t; });
+    Object.keys(dentro).forEach(function (uid, i) {
+      if (b.ultimoPt[uid] === pt) return;
+      var t = dentro[uid]; b.ultimoPt[uid] = pt; b.scritti++;
+      S.scriviEvento(b.cid, { tipo: 'zona', uid: uid, team: t.f, pt: pt, x: q0.x + ((i % 4) - 1.5) * 16, y: q0.y + 22 + Math.floor(i / 4) * 16, sim: true, nome: 'T' + t.n, t: Date.now() })
+        .catch(function (e) { bancoRiga('-- scrittura nel conflict rifiutata: ' + e.message, '##'); });
+    });
+    Object.keys(b.ultimoPt).forEach(function (uid) {
+      if (b.ultimoPt[uid] !== pt || dentro[uid]) return;
+      delete b.ultimoPt[uid]; b.scritti++;
+      var f = uid.split('-')[2];
+      S.scriviEvento(b.cid, { tipo: 'zona', uid: uid, team: f, pt: null, sim: true, via: true, t: Date.now() }).catch(function () {});
+    });
+  }
+  function bancoSvuota() {
+    var b = BANCO; if (!b.cid) return;
+    Object.keys(b.ultimoPt).forEach(function (uid) { S.scriviEvento(b.cid, { tipo: 'zona', uid: uid, team: uid.split('-')[2], pt: null, sim: true, via: true, t: Date.now() }).catch(function () {}); });
+    b.ultimoPt = {}; toast('Pallini dei tag tolti');
+  }
+  function pagBanco() {
+    testata('Banco bandiere · debug');
+    if (!P('conflitti')) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
+    var b = BANCO, box = el('div', 'banco'); app.appendChild(box);
+    var testa = el('div', 'banco-st'); box.appendChild(testa);
+    var bt = el('div', 'banco-bt'); box.appendChild(bt);
+    bt.appendChild(bottone('Collega HQ · Bluetooth', '', bancoBle));
+    bt.appendChild(bottone('Collega · USB', '', bancoUsb));
+    bt.appendChild(bottone('Scollega', '', function () { bancoScollega(); disegna(); }));
+    var fw = el('a', 'btn', 'Carica firmware ↗'); fw.href = '/firmware/'; fw.target = '_blank'; bt.appendChild(fw);
+    var cmdF = el('form', 'banco-cmd'), cmdI = el('input'); cmdI.placeholder = 'comando, es. cmd tutte info'; cmdI.autocomplete = 'off'; cmdI.autocapitalize = 'off';
+    var ok = el('button', 'btn', 'Invia'); ok.type = 'submit'; cmdF.appendChild(cmdI); cmdF.appendChild(ok); box.appendChild(cmdF);
+    cmdF.onsubmit = function (e) { e.preventDefault(); bancoInvia(cmdI.value); cmdI.value = ''; };
+    var rap = el('div', 'banco-bt'); box.appendChild(rap);
+    [['info', 'info'], ['tutte info', 'cmd tutte info'], ['tutte test', 'cmd tutte test'], ['tutte reset', 'cmd tutte reset'], ['tutte invia', 'cmd tutte invia'], ['soglia…', null], ['tempo…', null]].forEach(function (x) {
+      rap.appendChild(bottone(x[0], 'mini', function () {
+        if (x[1]) { bancoInvia(x[1]); return; }
+        var k = x[0].replace('…', ''), v = prompt(k === 'soglia' ? 'Soglia in dBm per tutte le bandiere (es. -75; più vicino a 0 = area più piccola)' : 'Secondi per conquistare (es. 60)');
+        if (v) bancoInvia('cmd tutte ' + k + ' ' + v.trim());
+      }));
+    });
+    var tab = el('div', 'banco-tab'); box.appendChild(tab);
+    // invio al conflict di prova
+    var inol = el('div', 'banco-inol'); box.appendChild(inol);
+    inol.appendChild(el('b', null, 'Presenze nel conflict di prova'));
+    inol.appendChild(el('p', 'hint', 'I tag dentro una bandiera diventano pallini sull\'area scelta (come i pallini di "Simula"): così si vede la conquista nell\'app. Solo conflict di prova. La conquista dell\'app è calcolata dall\'app, quella della bandiera dalla bandiera: per ora sono separate.'));
+    var prove = D.conflitti.filter(function (c) { return c.prova; });
+    var selC = select([['', '— nessuno —']].concat(prove.map(function (c) { return [c.id, c.nome || c.titolo || c.id]; })), b.cid || '');
+    inol.appendChild(campoForm('Conflict', selC));
+    var mapBox = el('div'); inol.appendChild(mapBox);
+    var att = el('label', 'banco-chk'), chk = el('input'); chk.type = 'checkbox'; chk.checked = b.attivo; att.appendChild(chk); att.appendChild(document.createTextNode(' manda le presenze')); inol.appendChild(att);
+    chk.onchange = function () { b.attivo = chk.checked; if (!b.attivo) bancoSvuota(); };
+    inol.appendChild(bottone('Togli i pallini dei tag', 'mini', bancoSvuota));
+    var info = el('small', 'hint'); inol.appendChild(info);
+    function caricaCampo() {
+      mapBox.innerHTML = ''; b.cm = null;
+      var c = prove.filter(function (x) { return x.id === b.cid; })[0]; if (!c) return;
+      conCampo(c.campo, mapBox, function (cm) { b.cm = cm; disegnaMappa(); });
+    }
+    function disegnaMappa() {
+      mapBox.innerHTML = ''; if (!b.cm) return;
+      var opz = [['', '—']].concat((b.cm.punti || []).filter(function (p) { return p.tipo !== 'mob'; }).map(function (p) { return [p.id, p.nome || p.id]; }));
+      var ids = Object.keys(b.band); if (!ids.length) mapBox.appendChild(el('p', 'hint', 'Quando arriva una bandiera, qui scegli a quale area corrisponde.'));
+      ids.forEach(function (id) { var s = select(opz, b.mappa[id] || ''); s.onchange = function () { b.mappa[id] = s.value || null; }; mapBox.appendChild(campoForm('Bandiera ' + id, s)); });
+      mapBox.dataset.n = ids.length;
+    }
+    selC.onchange = function () { bancoSvuota(); b.cid = selC.value || null; caricaCampo(); };
+    if (b.cid) caricaCampo();
+    var logT = el('div', 'banco-bt'); box.appendChild(logT);
+    logT.appendChild(el('b', null, 'Righe grezze'));
+    logT.appendChild(bottone('Copia log', 'mini', function () { navigator.clipboard.writeText(b.righe.join('\n')).then(function () { toast('Log copiato'); }, errore); }));
+    logT.appendChild(bottone('Pulisci', 'mini', function () { b.righe = []; disegna(); }));
+    var solo = el('label', 'banco-chk'), soloC = el('input'); soloC.type = 'checkbox'; solo.appendChild(soloC); solo.appendChild(document.createTextNode(' nascondi JSON')); logT.appendChild(solo);
+    var pre = el('pre', 'banco-log'); box.appendChild(pre);
+    soloC.onchange = function () { disegna(); };
+    function eta(t) { var s = Math.round((Date.now() - t) / 1000); return s < 120 ? s + ' s' : Math.round(s / 60) + ' min'; }
+    function disegna() {
+      testa.textContent = (b.via ? 'COLLEGATO via ' + b.via : 'non collegato') + (b.hq ? ' · HQ ' + b.hq.hq + ' pacchetti ' + b.hq.pacchetti + ' scartati ' + b.hq.scartati + ' (' + eta(b.hq._t) + ' fa)' : '') +
+        (b.tag ? ' · tag finto #' + b.tag.tag + ' ' + b.tag.f : '') + (b.scritti ? ' · eventi scritti ' + b.scritti : '');
+      testa.className = 'banco-st ' + (b.via ? 'on' : 'off');
+      var ids = Object.keys(b.band).sort(), h = '';
+      if (!ids.length) h = '<p class="hint">Nessuna bandiera ricevuta finora.</p>';
+      else {
+        h = '<table><tr><th>band.</th><th>da</th><th>B</th><th>R</th><th>area</th><th>conq.</th><th>sogl.</th><th>batt</th><th>LoRa</th><th>GPS</th></tr>';
+        ids.forEach(function (id) {
+          var j = b.band[id], vecchia = Date.now() - j._t > 60000;
+          h += '<tr' + (vecchia ? ' class="vecchia"' : '') + '><td><b>' + escB(id) + '</b> #' + j.seq + '</td><td>' + eta(j._t) + '</td><td>' + j.blu + '</td><td>' + j.rossi + '</td><td>' + (j.owner || '–') + '</td><td>' +
+            (j.contesa ? 'CONTESA' : j.conq ? j.conq + ' ' + j.pct + '%' : '–') + '</td><td>' + j.soglia + '</td><td>' + (j.batt === 255 ? 'USB' : j.batt + '%') + '</td><td>' +
+            (j.rssiLora != null ? j.rssiLora + ' dBm / ' + j.snr : 'USB') + '</td><td>' + (j.lat ? j.lat.toFixed(5) + ',' + j.lon.toFixed(5) : (j.gps ? 'ok' : 'no')) + '</td></tr>';
+          h += '<tr><td colspan="10" class="tags">' + ((j.tag || []).map(function (t) { return '<span class="' + (t.rssi >= j.soglia ? 'in' : 'out') + ' ' + t.f + '">#' + t.n + ' ' + t.f + ' ' + t.rssi + '</span>'; }).join(' ') || 'nessun tag sentito') + '</td></tr>';
+        });
+        h += '</table>';
+      }
+      tab.innerHTML = h;
+      if (b.cm && String(mapBox.dataset.n) !== String(ids.length)) disegnaMappa();
+      info.textContent = b.attivo ? (b.cid ? 'Attivo: ' + Object.keys(b.ultimoPt).length + ' tag sulle aree' : 'Scegli un conflict') : '';
+      var giu = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+      pre.textContent = (soloC.checked ? b.righe.filter(function (r) { return r.indexOf(' {') < 0; }) : b.righe).slice(-250).join('\n');
+      if (giu) pre.scrollTop = pre.scrollHeight;
+    }
+    var prossimo = null;
+    b.cb = function () { if (prossimo) return; prossimo = setTimeout(function () { prossimo = null; disegna(); }, 300); };
+    var timer = setInterval(disegna, 2000);
+    disegna();
+    var prima = chiusura; chiusura = function () { clearInterval(timer); b.cb = null; if (prima) prima(); };
+  }
+  function cartaBanco() {
+    var k = el('button', 'carta beta'); k.type = 'button';
+    var t = el('div', 'pm-testa'); t.appendChild(el('span', 'pm-eti', 'BETA')); k.appendChild(t);
+    var r0 = el('div', 'beta-r'); r0.appendChild(el('span', 'beta-ic', '⚑'));
+    var tx = el('div'); tx.appendChild(el('h3', null, 'Banco bandiere')); tx.appendChild(el('small', null, 'Debug delle bandiere LoRa: collegamento all\'HQ, conteggi, tag, comandi, firmware.')); r0.appendChild(tx);
+    k.appendChild(r0);
+    k.onclick = function () { vai('banco'); };
+    return k;
+  }
   function pagMortaioProva(id) {
     testata('Mortaio · BETA');
     if (!P('conflitti')) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }

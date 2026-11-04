@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Firmware T-Beam</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#111;color:#ddd;margin:0;padding:16px;max-width:760px}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:16px;margin:22px 0 6px;color:#fc6}
+.r{border:1px solid #333;border-radius:6px;padding:10px 12px;margin:8px 0;background:#1a1a1a}
+code,pre{font-family:ui-monospace,monospace;background:#000;color:#9f9;padding:1px 4px;border-radius:3px}
+pre{padding:8px;overflow:auto;font-size:13px}
+.k{color:#888;font-size:13px}a{color:#7bf}
+esp-web-install-button button{font-size:15px;padding:8px 14px;cursor:pointer}
+</style>
+<script type="module" src="ewt/install-button.js"></script>
+</head><body>
+<h1>Airsoft Conflict · firmware T-Beam</h1>
+<div class="k" id="build">versione: …</div>
+
+<p>Serve <b>Chrome o Edge su computer</b> (Windows, Mac, Linux) e il cavo USB del T-Beam. Collega il T-Beam, premi il tasto, scegli la porta (di solito <code>CP210x</code>, <code>CH9102</code> o <code>USB Serial</code>) e conferma. Se la porta non compare: driver
+<a href="https://www.wch-ic.com/downloads/CH343SER_EXE.html">CH9102</a> o <a href="https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers">CP210x</a>.
+Dopo il caricamento, nella stessa finestra c'è "Logs &amp; Console" per vedere cosa scrive la scheda e mandare comandi.</p>
+
+<div class="r"><b>Bandiera</b> — conta i tag, fa la conquista (luce sul pin 13, cicalino sul pin 14), manda tutto via LoRa all'HQ.<br>
+<esp-web-install-button manifest="bin/bandiera.json"></esp-web-install-button></div>
+<div class="r"><b>HQ</b> — riceve le bandiere via LoRa; l'app si collega all'HQ via Bluetooth (Android) o USB (computer) dalla pagina <i>Banco bandiere</i>.<br>
+<esp-web-install-button manifest="bin/hq.json"></esp-web-install-button></div>
+<div class="r"><b>Tag finto</b> — un T-Beam che fa finta di essere il tag di un giocatore. Pulsante centrale: corto = cambia fazione (blu/rossa), lungo = numero +1.<br>
+<esp-web-install-button manifest="bin/tag.json"></esp-web-install-button></div>
+<p class="k">Se il tasto non compare: questo browser non può scrivere sulla porta USB (serve Chrome/Edge su computer, non telefono, non Safari/Firefox).</p>
+
+<h2>Prova al banco (3 T-Beam)</h2>
+<pre>1. Carica: uno "HQ", uno "Bandiera", uno o più "Tag finto".
+2. Accendi la bandiera: giro di colori e due bip all'avvio (se c'è la striscia LED / cicalino).
+3. Il tag sul display dice BLU #n; vicino alla bandiera il display della bandiera mostra B1 R0.
+4. Dopo 60 s (tempo di prova) la bandiera è conquistata dai blu: luce blu fissa, bip lungo.
+5. Premi il tasto del tag: diventa ROSSO -> la bandiera inizia la riconquista.
+6. Due tag di colori diversi vicini = CONTESA, conquista ferma.
+7. Allontana il tag (o comando "pot 0" sul tag) per tarare la soglia.</pre>
+
+<h2>Comandi (Console USB, o dall'app via HQ con "cmd &lt;id|tutte&gt; ...")</h2>
+<pre>BANDIERA  info · soglia -75 · tempo 60 · luce 120 · muto · buzzer (inverte il segnale)
+          reset (area neutra) · fazione 1|2|0 · test (luce e cicalino 4 s) · invia · riavvia
+HQ        info · cmd tutte info · cmd A1B2 soglia -70 · riavvia
+TAG       f 1|2 · n 12 · pot 0-7 (da -12 a +9 dBm) · info · riavvia</pre>
+<p class="k">Le impostazioni restano salvate sulla scheda anche da spenta. Al ricaricamento del firmware si può scegliere di cancellare tutto.</p>
+<p><a href="../">← torna all'app</a></p>
+<script>
+fetch('bin/build.json',{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){document.getElementById('build').textContent='versione '+j.versione+' · compilata '+j.quando+' · '+j.commit}).catch(function(){document.getElementById('build').textContent='firmware non ancora compilato'});
+</script>
+</body></html>
