@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.31';
+  var VERSIONE = '0.32';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -147,7 +147,10 @@
   $('btnMenu').onclick = menu;
 
   // ================= HOME
+  // pagine di debug tolte dalla home: si aprono con l'indirizzo …/#banco o …/#prova
+  var apriNascosta = { '#banco': 'banco', '#prova': 'provaTbeam' }[location.hash] || null;
   function home() {
+    if (apriNascosta) { var v = apriNascosta; apriNascosta = null; history.replaceState(null, '', location.pathname); setTimeout(function () { vai(v); }, 0); }
     var st = S.stato(), me = st.me;
     if (!me.callsign) return sceltaCallsign();
     var lista = attivi(), inviti = [], promemoria = [];
@@ -160,13 +163,13 @@
     });
     var all = allenamentiAttivi().filter(function (a) { var r = miaAdesione('a:' + a.id); return P('allenamenti') || !r || r.si || r.dopo; });
     var dz = D.dmz.filter(function (x) { return x.fine > Date.now() - 6 * 3600000 && (x.giocatori || []).indexOf(st.user.uid) >= 0; });
-    if (!inviti.length && !promemoria.length && !all.length && !dz.length) { schermataInvito(); if (S.stato().dev) app.appendChild(cartaProvaTbeam()); if (P('conflitti')) { app.appendChild(cartaBeta()); app.appendChild(cartaBanco()); } return; }
+    if (!inviti.length && !promemoria.length && !all.length && !dz.length) { schermataInvito(); if (P('conflitti')) app.appendChild(cartaBeta()); return; }
     inviti.forEach(function (c) { app.appendChild(cartaInvito(c)); });
     // conflict e allenamenti in ordine di data
     promemoria.map(function (c) { return { t: c.inizio, el: cartaPromemoria(c) }; }).concat(all.map(function (a) { return { t: a.inizio || 0, el: cartaAllenamento(a) }; }))
       .concat(dz.map(function (x) { return { t: x.inizio, el: cartaDmz(x) }; }))
       .sort(function (x, y) { return x.t - y.t; }).forEach(function (x) { app.appendChild(x.el); });
-    if (S.stato().dev) app.appendChild(cartaProvaTbeam()); if (P('conflitti')) { app.appendChild(cartaBeta()); app.appendChild(cartaBanco()); }
+    if (P('conflitti')) app.appendChild(cartaBeta());
   }
 
   // funzioni in prova, aperte a tutti: per ora il mortaio
