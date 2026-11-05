@@ -1,13 +1,16 @@
 /* Airsoft Conflict — previsioni del tempo per un evento, confrontando più modelli meteo.
    Dati: Open-Meteo (gratuito, senza chiave), che dà accesso ai modelli dei servizi meteo nazionali:
-   ECMWF (europeo), ICON (Germania), GFS (USA), Météo-France, ItaliaMeteo-ARPAE ICON-2I, MeteoSwiss ICON-CH2.
+   pensato per il Piemonte: più peso ai modelli ad alta risoluzione che coprono il Nord-Ovest e vedono bene Alpi e valli
+   (ItaliaMeteo-ARPAE ICON-2I 2,2 km, MeteoSwiss ICON-CH1 1 km e CH2 2 km, Météo-France AROME/ARPEGE, ICON-D2/EU),
+   più ECMWF, il miglior modello globale, che regge anche a una-due settimane. Niente GFS: troppo grossolano per le valli.
    Ogni modello si chiede a parte: se uno non risponde o non copre quella data, si usano gli altri.
    Il risultato è un "consenso": temperatura mediana, quanti modelli danno pioggia, raffiche, e quanto vanno d'accordo. */
 (function () {
   'use strict';
+  // [modello, nome, peso]: i modelli locali contano di più (coprono solo i primi giorni: oltre, restano quelli che ci arrivano)
   var MODELLI = [
-    ['ecmwf_ifs025', 'ECMWF'], ['icon_seamless', 'ICON'], ['gfs_seamless', 'GFS'],
-    ['meteofrance_seamless', 'Météo-France'], ['italia_meteo_arpae_icon_2i', 'ItaliaMeteo'], ['meteoswiss_icon_ch2', 'MeteoSwiss']
+    ['italia_meteo_arpae_icon_2i', 'ItaliaMeteo', 3], ['meteoswiss_icon_ch1', 'MeteoSwiss 1 km', 3], ['meteoswiss_icon_ch2', 'MeteoSwiss', 2.5],
+    ['meteofrance_seamless', 'Météo-France', 2], ['icon_seamless', 'ICON', 2], ['ecmwf_ifs025', 'ECMWF', 2]
   ];
   var ORIZZONTE = 15 * 86400000;   // oltre ~15 giorni nessun modello è affidabile
   var VALIDO = 3600000;            // previsione in cache per un'ora
@@ -16,6 +19,13 @@
   function leggi(k) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch (e) { return null; } }
   function scrivi(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
   function giorno(t) { var d = new Date(t); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  // mediana pesata: v = [[valore, peso], ...]
+  function medianaP(v) {
+    v = v.slice().sort(function (x, y) { return x[0] - y[0]; });
+    var tot = v.reduce(function (s, x) { return s + x[1]; }, 0), acc = 0;
+    for (var i = 0; i < v.length; i++) { acc += v[i][1]; if (acc >= tot / 2) return v[i][0]; }
+    return null;
+  }
   function mediana(a) { a = a.slice().sort(function (x, y) { return x - y; }); var n = a.length; return n ? (n % 2 ? a[(n - 1) / 2] : (a[n / 2 - 1] + a[n / 2]) / 2) : null; }
 
   // coordinate dell'evento: centro della cartina del campo, altrimenti il nome del luogo cercato su OpenStreetMap
@@ -52,7 +62,7 @@
       if (!ore.length) return null;
       var tt = ore.map(function (o) { return o.temp; }), cod = ore.map(function (o) { return o.codice; });
       return {
-        nome: m[1], tMin: Math.min.apply(null, tt), tMax: Math.max.apply(null, tt),
+        nome: m[1], peso: m[2], tMin: Math.min.apply(null, tt), tMax: Math.max.apply(null, tt),
         pioggia: ore.reduce(function (s, o) { return s + o.pioggia; }, 0),
         orePioggia: ore.filter(function (o) { return o.pioggia >= 0.2; }).length,
         raffica: Math.max.apply(null, ore.map(function (o) { return o.raffica; })),
@@ -65,10 +75,11 @@
 
   function consenso(rr) {
     var n = rr.length; if (!n) return null;
+    var P = rr.reduce(function (s, r) { return s + (r.peso || 1); }, 0), peso = function (f) { return rr.filter(f).reduce(function (s, r) { return s + (r.peso || 1); }, 0); };
     var piovono = rr.filter(function (r) { return r.pioggia >= 1; }), mm = piovono.map(function (r) { return r.pioggia; });
-    var quota = piovono.length / n, maggioranza = function (f) { return rr.filter(f).length > n / 2; };
-    var tMin = mediana(rr.map(function (r) { return r.tMin; })), tMax = mediana(rr.map(function (r) { return r.tMax; }));
-    var raffica = mediana(rr.map(function (r) { return r.raffica; })), nuvole = mediana(rr.map(function (r) { return r.nuvole; }));
+    var quota = peso(function (r) { return r.pioggia >= 1; }) / P, maggioranza = function (f) { return peso(f) > P / 2; };
+    var mp = function (k) { return medianaP(rr.map(function (r) { return [r[k], r.peso || 1]; })); };
+    var tMin = mp('tMin'), tMax = mp('tMax'), raffica = mp('raffica'), nuvole = mp('nuvole');
     var icona = maggioranza(function (r) { return r.neve; }) ? '🌨' : quota >= 0.5 ? (maggioranza(function (r) { return r.temporale; }) ? '⛈' : '🌧')
       : maggioranza(function (r) { return r.nebbia; }) ? '🌫' : quota > 0 ? '🌦' : nuvole > 70 ? '☁' : nuvole > 30 ? '⛅' : '☀';
     var cielo = quota === 0 ? 'asciutto' : quota < 0.34 ? 'pioggia poco probabile' : quota < 0.67 ? 'possibile pioggia' : 'pioggia probabile';
