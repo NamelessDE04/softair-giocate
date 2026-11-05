@@ -737,3 +737,9 @@ main > .btn.big { margin-bottom: 6px; }
 .p3-storia span{font-family:ui-monospace,monospace;font-size:11px;opacity:.7}
 .p3-aiuto{margin:6px 0}.p3-aiuto summary{cursor:pointer;font-weight:700}
 .p3-aiuto pre{white-space:pre-wrap;font-size:11px;background:#000;color:#ddd;padding:6px;border-radius:4px}
+/* previsioni meteo nelle carte */
+.meteo{margin:8px 0 4px;padding:6px 8px;border-radius:6px;background:rgba(255,255,255,.05);font-size:14px;text-align:left}
+.meteo.spento{opacity:.6;font-size:12px}
+.meteo-r{display:flex;align-items:center;gap:8px}
+.meteo-ic{font-size:22px;line-height:1}
+.meteo small{display:block;opacity:.6;font-size:11px;margin-top:2px}

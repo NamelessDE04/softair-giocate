@@ -1,7 +1,7 @@
 /* Service worker: l'app funziona anche senza connessione. */
-var CACHE = 'airsoft-conflict-v38';
+var CACHE = 'airsoft-conflict-v39';
 var FILES = [
-  './', 'index.html', 'app.css', 'app.js', 'db.js', 'qr.js', 'vendor/jsQR.js', 'utm.js', 'mappe.js', 'fazioni.js', 'pcs.js', 'dmz.js', 'mortaio.js', 'config.js', 'manifest.webmanifest',
+  './', 'index.html', 'app.css', 'app.js', 'db.js', 'qr.js', 'vendor/jsQR.js', 'utm.js', 'mappe.js', 'fazioni.js', 'pcs.js', 'dmz.js', 'mortaio.js', 'meteo.js', 'config.js', 'manifest.webmanifest',
   'img/logo.png', 'img/icon-192.png', 'img/icon-512.png', 'img/icon-maskable-512.png', 'img/apple-touch-icon.png'
 ];
 

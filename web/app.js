@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.32';
+  var VERSIONE = '0.33';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -272,6 +272,7 @@
     });
     k.appendChild(orari);
     k.appendChild(el('div', 'pm-luogo', '⌖ ' + (c.luogo || 'Luogo da definire')));
+    if (fs !== 'finito' && window.AC_METEO) k.appendChild(AC_METEO.riquadro(c));
     if (f) { var ch = el('span', 'faz-chip', 'SEI CON I ' + nomeFaz(c, f).toUpperCase()); ch.style.background = COLORI[f]; k.appendChild(ch); }
     k.appendChild(el('span', 'pm-apri', 'Tocca per info, fazioni e cartina ›'));
     k.onclick = function () { vai('conflitto', c.id); };
@@ -2234,6 +2235,7 @@
     [['RITROVO', a.ritrovo], ['INIZIO', a.inizio], ['FINE', a.fine]].forEach(function (o) { if (!o[1]) return; var d = el('div'); d.appendChild(el('small', null, o[0])); d.appendChild(el('b', null, ora(o[1]))); orari.appendChild(d); });
     k.appendChild(orari);
     k.appendChild(el('div', 'pm-luogo', '⌖ ' + (a.luogo || 'Luogo da definire')));
+    if (window.AC_METEO) k.appendChild(AC_METEO.riquadro(a));
     k.appendChild(el('span', 'pm-apri', 'Tocca per mappa e argomenti ›'));
     k.onclick = function () { vai('allenamento', a.id); };
     return k;
