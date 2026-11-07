@@ -620,7 +620,12 @@
           cx -= dx; cy -= dy; giu = { x: e.clientX, y: e.clientY }; disegna();
         });
         vp.addEventListener('pointerup', function (e) {
-          if (giu && !mosso) { var r0 = vp.getBoundingClientRect(); sel0 = geo(cx - vp.clientWidth / 2 + e.clientX - r0.left, cy - vp.clientHeight / 2 + e.clientY - r0.top, z); disegna(); }
+          if (giu && !mosso) {
+            var r0 = vp.getBoundingClientRect(); sel0 = geo(cx - vp.clientWidth / 2 + e.clientX - r0.left, cy - vp.clientHeight / 2 + e.clientY - r0.top, z); disegna();
+            // il punto cliccato diventa subito il centro (anche se poi si preme Anteprima o Prendi questa zona senza "Usa questo centro")
+            centro.value = utmTesto(sel0.lat, sel0.lon); geoScelta.centro = centro.value; centro.classList.remove('errato');
+            msg.className = 'ed-txt muto'; msg.textContent = 'Centro aggiornato: ' + centro.value;
+          }
           giu = null;
         });
         vp.addEventListener('wheel', function (e) { e.preventDefault(); var r0 = vp.getBoundingClientRect(); zoom(e.deltaY < 0 ? 1 : -1, e.clientX - r0.left, e.clientY - r0.top); }, { passive: false });
@@ -695,12 +700,12 @@
       }
       var riga = el('div', 'ed-riga');
       riga.appendChild(btn('Anteprima', '', function () {
-        var z = zona(); if (!z) return;
+        chiudiAnteprima(); var z = zona(); if (!z) return;
         msg.className = 'ed-txt muto'; msg.textContent = 'Preparo l\'anteprima…';
         piano(geoScelta, z, LATO).then(function (p) { mostraAnteprima(p); msg.textContent = 'Anteprima sulla cartina: se ti piace premi "Prendi questa zona".'; }, errore);
       }));
       var vai = btn(c.img ? 'Sostituisci con questa zona' : 'Prendi questa zona', 'accent', function () {
-        var z = zona(); if (!z) return;
+        chiudiAnteprima(); var z = zona(); if (!z) return;
         vai.disabled = true; msg.className = 'ed-txt muto'; msg.textContent = 'Collegamento ai servizi…';
         piano(geoScelta, z, LATO).then(function (p) {
           return componi(p, function (n, tot) { msg.textContent = 'Scarico la cartina… ' + n + '/' + tot; });
