@@ -758,3 +758,9 @@ main > .btn.big { margin-bottom: 6px; }
 .ed-simb-b.on { border-color: #ffd23f; background: rgba(255,210,63,.12); }
 .ed-simb-cat { margin-bottom: 4px; }
 .ed-simb-sel { border: 1px solid rgba(255,210,63,.4); border-radius: 10px; padding: 8px 10px; margin: 8px 0; }
+/* finestra sopra l'editor (es. stampa) */
+.ed-modale { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.ed-modale-box { background: #171a12; border: 1px solid rgba(255,255,255,.15); border-radius: 14px; padding: 18px 20px; width: min(520px, 100%); max-height: 90vh; overflow: auto; }
+.ed-modale-box h3 { margin: 0 0 6px; }
+.ed-modale-box .campo { display: block; margin: 10px 0; }
+.ed-modale-box .ed-riga { margin-top: 12px; gap: 10px; }

@@ -557,6 +557,7 @@
       side.appendChild(stato());
       var foot = el('div', 'ed-foot');
       foot.appendChild(btn('Salva cartina', 'accent', salva));
+      if (c.img && c.geo && window.AC_STAMPA) foot.appendChild(btn('⎙ PDF navigazione', '', finestraStampa));
       if (c.id && opts.onElimina) foot.appendChild(btn('Elimina', 'pericolo', function () {
         if (!confirm('Eliminare la cartina "' + (c.nome || '') + '"? I conflict che la usano resteranno senza mappa.')) return;
         opts.onElimina(c).then(function () { modificato = false; opts.onChiudi(); }, function (e) { alert('Errore: ' + (e.message || e)); });
@@ -1015,6 +1016,45 @@
         body.appendChild(gr);
       });
       body.appendChild(el('small', 'ed-txt muto', c.segni.length + (c.segni.length === 1 ? ' simbolo' : ' simboli') + ' sulla cartina'));
+    }
+    // ---------- cartina da navigazione: scelte e stampa (PDF dal browser)
+    var sceltaStampa = { formato: 'A4', orient: 'auto', scala: 0, decl: '+3° E', aree: true, simboli: true, sentieri: true };
+    function finestraStampa() {
+      ricalcola();
+      var ov = el('div', 'ed-modale'), bx = el('div', 'ed-modale-box'); ov.appendChild(bx); document.body.appendChild(ov);
+      ov.onclick = function (e) { if (e.target === ov) ov.remove(); };
+      bx.appendChild(el('h3', null, 'Cartina da navigazione (PDF)'));
+      bx.appendChild(el('p', 'ed-txt muto', 'Griglia UTM ogni 100 m, scala, nord, datum WGS 84; sul secondo foglio l\'elenco dei waypoint con UTM, MGRS e lat/lon. Usa le modifiche attuali, anche non salvate.'));
+      var tit = el('input'); tit.value = sceltaStampa.titolo || c.nome || ''; bx.appendChild(campoF('Titolo', tit));
+      var due = el('div', 'due');
+      var fm = el('select'); ['A4', 'A3'].forEach(function (v) { var x = el('option', null, v); x.value = v; fm.appendChild(x); }); fm.value = sceltaStampa.formato;
+      var orr = el('select'); [['auto', 'Automatico'], ['v', 'Verticale'], ['o', 'Orizzontale']].forEach(function (v) { var x = el('option', null, v[1]); x.value = v[0]; orr.appendChild(x); }); orr.value = sceltaStampa.orient;
+      due.appendChild(campoF('Formato', fm)); due.appendChild(campoF('Orientamento', orr)); bx.appendChild(due);
+      var sca = el('select'); bx.appendChild(campoF('Scala', sca));
+      function scale() {
+        var o = { formato: fm.value, orient: orr.value }, l = window.AC_STAMPA.scalePossibili(c, o); sca.innerHTML = '';
+        var x0 = el('option', null, 'Automatica (1:' + (l[0] || '?').toLocaleString('it-IT') + ', la più grande che ci sta)'); x0.value = 0; sca.appendChild(x0);
+        l.slice(1).forEach(function (v) { var x = el('option', null, '1:' + v.toLocaleString('it-IT')); x.value = v; sca.appendChild(x); });
+        sca.value = l.indexOf(sceltaStampa.scala) > 0 ? sceltaStampa.scala : 0;
+      }
+      fm.onchange = orr.onchange = scale; scale();
+      var dc = el('input'); dc.value = sceltaStampa.decl; dc.placeholder = 'es. +3° E (vuoto = non indicare)';
+      bx.appendChild(campoF('Declinazione magnetica', dc));
+      bx.appendChild(el('small', 'ed-txt muto', 'In Piemonte nel 2026 è circa +3° Est: verifica il valore aggiornato (es. calcolatore NOAA) o con la bussola su un punto noto.'));
+      var ch = el('div', 'ed-usi');
+      [['aree', 'Aree numerate'], ['simboli', 'Simboli'], ['sentieri', 'Sentieri']].forEach(function (o) {
+        var b = btn((sceltaStampa[o[0]] ? '✓ ' : '') + o[1], 'chip' + (sceltaStampa[o[0]] ? ' on' : ''), function () { sceltaStampa[o[0]] = !sceltaStampa[o[0]]; b.textContent = (sceltaStampa[o[0]] ? '✓ ' : '') + o[1]; b.classList.toggle('on', sceltaStampa[o[0]]); });
+        ch.appendChild(b);
+      });
+      bx.appendChild(campoF('Cosa mettere', ch));
+      var rB = el('div', 'ed-riga');
+      rB.appendChild(btn('Crea il PDF', 'accent', function () {
+        Object.assign(sceltaStampa, { titolo: tit.value.trim(), formato: fm.value, orient: orr.value, scala: +sca.value, decl: dc.value.trim() });
+        window.AC_STAMPA.apri(c, sceltaStampa);
+      }));
+      rB.appendChild(btn('Chiudi', '', function () { ov.remove(); }));
+      bx.appendChild(rB);
+      bx.appendChild(el('small', 'ed-txt muto', 'Si apre una nuova finestra: premi "Stampa / Salva PDF", scegli "Salva come PDF", margini "Nessuno" e scala 100%, così la scala sulla carta è esatta.'));
     }
     function pLink(body) {
       body.appendChild(el('p', 'ed-txt', 'Due aree collegate sono nella stessa rete radio: si può conquistare un\'area solo se è collegata a una già tenuta. Clicca un\'area, poi le aree da collegare; cliccando di nuovo un collegamento esistente lo togli.'));
