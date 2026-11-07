@@ -1024,7 +1024,7 @@
       var ov = el('div', 'ed-modale'), bx = el('div', 'ed-modale-box'); ov.appendChild(bx); document.body.appendChild(ov);
       ov.onclick = function (e) { if (e.target === ov) ov.remove(); };
       bx.appendChild(el('h3', null, 'Cartina da navigazione (PDF)'));
-      bx.appendChild(el('p', 'ed-txt muto', 'Griglia UTM ogni 100 m, scala, nord, datum WGS 84; sul secondo foglio l\'elenco dei waypoint con UTM, MGRS e lat/lon. Usa le modifiche attuali, anche non salvate.'));
+      bx.appendChild(el('p', 'ed-txt muto', 'Cartina pulita con griglia UTM ogni 100 m, coordinate ai bordi, nord, scala e datum; sul secondo foglio le aree operative con le coordinate. Usa le modifiche attuali, anche non salvate.'));
       var tit = el('input'); tit.value = sceltaStampa.titolo || c.nome || ''; bx.appendChild(campoF('Titolo', tit));
       var due = el('div', 'due');
       var fm = el('select'); ['A4', 'A3'].forEach(function (v) { var x = el('option', null, v); x.value = v; fm.appendChild(x); }); fm.value = sceltaStampa.formato;
@@ -1038,18 +1038,15 @@
         sca.value = l.indexOf(sceltaStampa.scala) > 0 ? sceltaStampa.scala : 0;
       }
       fm.onchange = orr.onchange = scale; scale();
-      var dc = el('input'); dc.value = sceltaStampa.decl; dc.placeholder = 'es. +3° E (vuoto = non indicare)';
-      bx.appendChild(campoF('Declinazione magnetica', dc));
-      bx.appendChild(el('small', 'ed-txt muto', 'In Piemonte nel 2026 è circa +3° Est: verifica il valore aggiornato (es. calcolatore NOAA) o con la bussola su un punto noto.'));
       var ch = el('div', 'ed-usi');
-      [['aree', 'Aree numerate'], ['simboli', 'Simboli'], ['sentieri', 'Sentieri']].forEach(function (o) {
+      [['aree', 'Aree operative'], ['simboli', 'Simboli'], ['sentieri', 'Sentieri']].forEach(function (o) {
         var b = btn((sceltaStampa[o[0]] ? '✓ ' : '') + o[1], 'chip' + (sceltaStampa[o[0]] ? ' on' : ''), function () { sceltaStampa[o[0]] = !sceltaStampa[o[0]]; b.textContent = (sceltaStampa[o[0]] ? '✓ ' : '') + o[1]; b.classList.toggle('on', sceltaStampa[o[0]]); });
         ch.appendChild(b);
       });
       bx.appendChild(campoF('Cosa mettere', ch));
       var rB = el('div', 'ed-riga');
       rB.appendChild(btn('Crea il PDF', 'accent', function () {
-        Object.assign(sceltaStampa, { titolo: tit.value.trim(), formato: fm.value, orient: orr.value, scala: +sca.value, decl: dc.value.trim() });
+        Object.assign(sceltaStampa, { titolo: tit.value.trim(), formato: fm.value, orient: orr.value, scala: +sca.value });
         window.AC_STAMPA.apri(c, sceltaStampa);
       }));
       rB.appendChild(btn('Chiudi', '', function () { ov.remove(); }));

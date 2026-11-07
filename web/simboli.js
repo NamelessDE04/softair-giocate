@@ -59,6 +59,10 @@
     var s = PER_ID[id]; if (!s) return '';
     opts = opts || {};
     var k = r / 13, out = '<g transform="translate(' + x.toFixed(1) + ' ' + y.toFixed(1) + ')">';
+    if (opts.chiaro) {   // per la stampa: quadratino bianco, bordo e icona neri
+      out += '<rect x="' + (-r) + '" y="' + (-r) + '" width="' + (2 * r) + '" height="' + (2 * r) + '" rx="' + (r * .25) + '" fill="#fff" stroke="#000" stroke-width="' + (r * .12) + '"/>';
+      return out + '<g transform="scale(' + (k * .85).toFixed(3) + ')">' + s.disegno.replace(/#fff/g, '#000').replace(/#ffcf5a|#ff6b5e/g, '#000') + '</g></g>';
+    }
     if (opts.sel) out += '<circle r="' + (r + 6 * (opts.k || k)) + '" fill="none" stroke="#ffd23f" stroke-width="' + (3 * (opts.k || k)) + '"/>';
     out += '<circle r="' + r + '" fill="#12150e" fill-opacity=".9" stroke="' + s.cat.colore + '" stroke-width="' + (2.2 * k) + '"/>';
     out += '<g transform="scale(' + (k * .85).toFixed(3) + ')">' + s.disegno + '</g></g>';
