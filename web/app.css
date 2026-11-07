@@ -743,3 +743,11 @@ main > .btn.big { margin-bottom: 6px; }
 .meteo-r{display:flex;align-items:center;gap:8px}
 .meteo-ic{font-size:22px;line-height:1}
 .meteo small{display:block;opacity:.6;font-size:11px;margin-top:2px}
+/* editor: sentieri disegnati a mano */
+.ed-map.ed-penna { cursor: crosshair; }
+.ed-traccia input { flex: 1; min-width: 0; }
+.ed-tr-tipo { font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px; }
+.ed-tr-tipo.gps { background: #ff9f1c; color: #111; }
+.ed-tr-tipo.mano { background: #7ee08a; color: #111; }
+.ed-tr-vis { font-size: 12px; padding: 4px 8px; min-height: 0; white-space: nowrap; }
+.ed-tr-vis.off { opacity: .6; }

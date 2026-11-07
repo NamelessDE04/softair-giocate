@@ -304,6 +304,8 @@
     var c = opts.campo ? JSON.parse(JSON.stringify(opts.campo)) : { id: null, nome: '', w: 0, h: 0, img: '', geo: null, mPerPx: null, controllo: [], punti: [], link: [] };
     c.controllo = c.controllo || []; c.punti = c.punti || []; c.link = c.link || []; c.tracce = c.tracce || [];
     var imgNuova = null, modificato = false, tab = c.img ? 'aree' : 'cartina', sel = null, selCp = null, linkDa = null, zonaPred = 32;
+    // penna per ricalcare i sentieri a mano: tratto in corso (pixel) e storia per annullare
+    var penna = false, tratto = null, storiaPenna = [];
     box.innerHTML = '';
     var root = el('div', 'ed'); box.appendChild(root);
     var mapBox = el('div', 'ed-map'), inner = el('div', 'ed-inner'), img = new Image(), svgNS = 'http://www.w3.org/2000/svg', svg = document.createElementNS(svgNS, 'svg');
@@ -339,6 +341,40 @@
       trs.forEach(function (tr) { c.tracce.push({ id: idNuovo(), nome: tr.nome, pts: tr.pts }); });
       cambiato();
     }
+    // ---------- sentieri disegnati a mano: un tratto continuo; se parte vicino alla fine (o all'inizio) di un sentiero a mano, lo prolunga
+    function fineTratto(pts) {
+      if (!c.geo) { disegna(); return; }
+      if (pts.length < 2) { disegna(); return; }
+      // ammorbidisce il tratto (Chaikin, 2 passaggi) e lo porta in coordinate
+      for (var it = 0; it < 2; it++) {
+        var o = [pts[0]];
+        for (var i = 0; i < pts.length - 1; i++) { var a = pts[i], b = pts[i + 1]; o.push({ x: .75 * a.x + .25 * b.x, y: .75 * a.y + .25 * b.y }, { x: .25 * a.x + .75 * b.x, y: .25 * a.y + .75 * b.y }); }
+        o.push(pts[pts.length - 1]); pts = o;
+      }
+      var ll = semplifica(pts.map(function (q) { var g = U.daPixel(c.geo, q.x, q.y); return [g.lat, g.lon]; }), 0.8);
+      var R = 14 / sc, p0 = pts[0], unito = null;
+      c.tracce.forEach(function (tr) {
+        if (unito || !tr.mano || !tr.pts.length) return;
+        var fine = U.aPixel(c.geo, tr.pts[tr.pts.length - 1][0], tr.pts[tr.pts.length - 1][1]), ini = U.aPixel(c.geo, tr.pts[0][0], tr.pts[0][1]);
+        if (Math.hypot(fine.x - p0.x, fine.y - p0.y) < R) unito = { tr: tr, rov: false };
+        else if (Math.hypot(ini.x - p0.x, ini.y - p0.y) < R) unito = { tr: tr, rov: true };
+      });
+      if (unito) {
+        storiaPenna.push({ id: unito.tr.id, pts: unito.tr.pts.slice() });
+        if (unito.rov) unito.tr.pts = ll.slice().reverse().concat(unito.tr.pts.slice(1));
+        else unito.tr.pts = unito.tr.pts.concat(ll.slice(1));
+      } else {
+        var n = c.tracce.filter(function (t) { return t.mano; }).length + 1, nuovo = { id: idNuovo(), nome: 'Sentiero ' + n, pts: ll, mano: true };
+        c.tracce.push(nuovo); storiaPenna.push({ id: nuovo.id, nuovo: true });
+      }
+      modificato = true; disegna(); pannello();
+    }
+    function annullaTratto() {
+      var u = storiaPenna.pop(); if (!u) return;
+      var i = c.tracce.findIndex(function (t) { return t.id === u.id; }); if (i < 0) return;
+      if (u.nuovo) c.tracce.splice(i, 1); else c.tracce[i].pts = u.pts;
+      modificato = true; disegna(); pannello();
+    }
     function apriGps() { if (!c.geo) { alert('Prima la cartina deve essere georeferenziata (scheda 2 Coordinate, o presa dal web).'); return; } fileGps.click(); }
 
     // ---------- georeferenziazione e coordinate dei punti
@@ -368,7 +404,9 @@
     function raggioPx(p) { return c.mPerPx ? (p.raggio || 30) / c.mPerPx : 18 / sc; }
     var drag = null;
     mapBox.addEventListener('pointerdown', function (e) {
-      if (!c.img || e.button > 0 || e.target.closest('.ed-zoom')) return;
+      if (!c.img || e.target.closest('.ed-zoom')) return;
+      if (penna && e.button === 0 && !e.shiftKey) { mapBox.setPointerCapture(e.pointerId); tratto = [aImmagine(e)]; return; }
+      if (e.button > 0 && !penna) return;
       mapBox.setPointerCapture(e.pointerId);
       var q = aImmagine(e), cosa = null;
       if (tab === 'aree') { var p = puntoSotto(q); if (p) cosa = { tipo: 'punto', p: p }; }
@@ -376,6 +414,7 @@
       drag = { x: e.clientX, y: e.clientY, tx: tx, ty: ty, cosa: cosa, mosso: false };
     });
     mapBox.addEventListener('pointermove', function (e) {
+      if (tratto) { var qp = aImmagine(e), ult = tratto[tratto.length - 1]; if (Math.hypot(qp.x - ult.x, qp.y - ult.y) * sc > 3) { tratto.push(qp); disegna(); } return; }
       if (!drag) { if (c.img) { var q0 = aImmagine(e); aggiornaAiuto(q0); } return; }
       var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (Math.hypot(dx, dy) > 4) drag.mosso = true;
@@ -388,11 +427,14 @@
       } else { tx = drag.tx + dx; ty = drag.ty + dy; applica(); }
     });
     mapBox.addEventListener('pointerup', function (e) {
+      if (tratto) { var tr0 = tratto; tratto = null; fineTratto(tr0); return; }
       var d = drag; drag = null; if (!d) return;
       if (d.mosso) { if (d.cosa) cambiato(); return; }
+      if (penna) return;
       clic(aImmagine(e));
     });
     mapBox.addEventListener('wheel', function (e) { e.preventDefault(); var r = mapBox.getBoundingClientRect(); zoomA(e.deltaY < 0 ? 1.15 : 1 / 1.15, e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+    mapBox.addEventListener('contextmenu', function (e) { if (penna) e.preventDefault(); });
     mapBox.addEventListener('dragover', function (e) { e.preventDefault(); });
     mapBox.addEventListener('drop', function (e) { e.preventDefault(); if (e.dataTransfer.files[0]) caricaImmagine(e.dataTransfer.files[0]); });
 
@@ -428,7 +470,8 @@
       modificato = true;
     }
     function aggiornaAiuto(q) {
-      var t = { cartina: 'Trascina per spostarti, rotella per lo zoom', geo: 'Clicca un incrocio della griglia (o un punto noto) e scrivi le sue coordinate', aree: 'Clicca un punto vuoto per creare un\'area · trascina un\'area per spostarla', link: linkDa ? 'Clicca l\'area da collegare (o scollegare) · clic sul vuoto per finire' : 'Clicca la prima area, poi quelle da collegare' }[tab];
+      var t = penna ? 'Penna: tieni premuto e ricalca il sentiero · tasto destro o Maiusc+trascina per spostarti · parti dalla fine di un sentiero per prolungarlo' : { cartina: 'Trascina per spostarti, rotella per lo zoom', geo: 'Clicca un incrocio della griglia (o un punto noto) e scrivi le sue coordinate', aree: 'Clicca un punto vuoto per creare un\'area · trascina un\'area per spostarla', link: linkDa ? 'Clicca l\'area da collegare (o scollegare) · clic sul vuoto per finire' : 'Clicca la prima area, poi quelle da collegare' }[tab];
+      if (penna) mapBox.classList.add('ed-penna'); else mapBox.classList.remove('ed-penna');
       var pos = '';
       if (c.geo && q && q.x >= 0 && q.y >= 0 && q.x <= c.w && q.y <= c.h) { var ll = U.daPixel(c.geo, q.x, q.y); pos = ' · ' + utmTesto(ll.lat, ll.lon); }
       aiuto.textContent = t + pos;
@@ -440,9 +483,15 @@
       var k = 1 / sc, s = '';
       if (c.geo) c.tracce.forEach(function (tr) {
         var d = tr.pts.map(function (p, i) { var q = U.aPixel(c.geo, p[0], p[1]); return (i ? 'L' : 'M') + q.x.toFixed(1) + ' ' + q.y.toFixed(1); }).join('');
-        s += '<path d="' + d + '" fill="none" stroke="#000" stroke-opacity=".45" stroke-width="' + (6 * k) + '" stroke-linejoin="round"/>';
-        s += '<path d="' + d + '" fill="none" stroke="#ff9f1c" stroke-width="' + (3 * k) + '" stroke-dasharray="' + (8 * k) + ' ' + (5 * k) + '" stroke-linejoin="round"/>';
+        if (tr.nascosta) {   // traccia GPS nascosta ai giocatori: qui resta come guida, sottile
+          s += '<path d="' + d + '" fill="none" stroke="#ff9f1c" stroke-opacity=".55" stroke-width="' + (1.6 * k) + '" stroke-dasharray="' + (3 * k) + ' ' + (4 * k) + '" stroke-linejoin="round"/>';
+          return;
+        }
+        s += '<path d="' + d + '" fill="none" stroke="#000" stroke-opacity=".45" stroke-width="' + (6 * k) + '" stroke-linejoin="round" stroke-linecap="round"/>';
+        if (tr.mano) s += '<path d="' + d + '" fill="none" stroke="#7ee08a" stroke-width="' + (3.2 * k) + '" stroke-linejoin="round" stroke-linecap="round"/>';
+        else s += '<path d="' + d + '" fill="none" stroke="#ff9f1c" stroke-width="' + (3 * k) + '" stroke-dasharray="' + (8 * k) + ' ' + (5 * k) + '" stroke-linejoin="round"/>';
       });
+      if (tratto && tratto.length > 1) s += '<path d="' + tratto.map(function (q, i) { return (i ? 'L' : 'M') + q.x.toFixed(1) + ' ' + q.y.toFixed(1); }).join('') + '" fill="none" stroke="#7ee08a" stroke-width="' + (3.2 * k) + '" stroke-linejoin="round" stroke-linecap="round"/>';
       c.link.forEach(function (l) {
         var a = c.punti.filter(function (p) { return p.id === l[0]; })[0], b = c.punti.filter(function (p) { return p.id === l[1]; })[0];
         if (!a || !b) return;
@@ -529,14 +578,30 @@
         body.appendChild(el('p', 'ed-txt muto', 'Lo stile cambia solo la mappa che vedono i giocatori nell\'app; qui nell\'editor resta la cartina originale.'));
       }
       if (c.img) {
-        body.appendChild(el('h4', 'ed-tit', 'Sentieri da tracce GPS'));
-        body.appendChild(el('p', 'ed-txt', 'Cammina il percorso con il GPS (o un\'app come Gaia, OsmAnd, Wikiloc) e importa la traccia: compare come sentiero sulla mappa di gioco.'));
-        body.appendChild(btn('Importa traccia (GPX, KML)…', '', apriGps));
+        body.appendChild(el('h4', 'ed-tit', 'Sentieri'));
+        body.appendChild(el('p', 'ed-txt', 'Importa la traccia GPS di quando hai camminato il percorso, poi ricalcala con la penna: i sentieri disegnati sono puliti, e la traccia GPS la nascondi ai giocatori.'));
+        var rS = el('div', 'ed-riga');
+        rS.appendChild(btn('Importa traccia (GPX, KML)…', '', apriGps));
+        var bP = btn(penna ? '✎ Penna attiva · fine' : '✎ Disegna sentieri', penna ? 'accent' : '', function () {
+          if (!c.geo) { alert('Prima la cartina deve essere georeferenziata (scheda 2 Coordinate, o presa dal web).'); return; }
+          penna = !penna; tratto = null; aggiornaAiuto(); pannello();
+        });
+        rS.appendChild(bP);
+        if (storiaPenna.length) rS.appendChild(btn('↶ Annulla tratto', '', annullaTratto));
+        body.appendChild(rS);
+        if (penna) body.appendChild(el('p', 'ed-txt muto', 'Tieni premuto e ricalca. Per spostare la mappa: tasto destro (o Maiusc) e trascina; la rotella fa lo zoom. Se parti dalla fine di un sentiero disegnato, lo prolunghi.'));
         c.tracce.forEach(function (tr, i) {
-          var r0 = el('div', 'ed-riga'), n = el('input'); n.value = tr.nome; n.oninput = function () { tr.nome = n.value; modificato = true; };
-          r0.appendChild(n); r0.appendChild(btn('✕', 'icon', function () { c.tracce.splice(i, 1); cambiato(); }));
+          var r0 = el('div', 'ed-riga ed-traccia'), n = el('input'); n.value = tr.nome; n.oninput = function () { tr.nome = n.value; modificato = true; };
+          r0.appendChild(el('span', 'ed-tr-tipo ' + (tr.mano ? 'mano' : 'gps'), tr.mano ? '✎' : 'GPS'));
+          r0.appendChild(n);
+          var occhio = btn(tr.nascosta ? '◌ nascosta' : '● visibile', 'ed-tr-vis' + (tr.nascosta ? ' off' : ''), function () { tr.nascosta = !tr.nascosta; modificato = true; disegna(); pannello(); });
+          occhio.title = 'Visibile o nascosta nella mappa dei giocatori (qui resta sempre come guida)';
+          r0.appendChild(occhio);
+          r0.appendChild(btn('✕', 'icon', function () { if (!confirm('Eliminare "' + (tr.nome || 'sentiero') + '"?')) return; c.tracce.splice(i, 1); cambiato(); }));
           body.appendChild(r0);
         });
+        if (c.tracce.some(function (t) { return !t.mano && !t.nascosta; }) && c.tracce.some(function (t) { return t.mano; }))
+          body.appendChild(btn('Nascondi tutte le tracce GPS', '', function () { c.tracce.forEach(function (t) { if (!t.mano) t.nascosta = true; }); modificato = true; disegna(); pannello(); }));
       }
       body.appendChild(el('h4', 'ed-tit', 'Dal web, già georeferenziata'));
       var centro = el('input'); centro.placeholder = '32T 375000 4983000 oppure 44.99, 7.41';
@@ -938,7 +1003,7 @@
           usi: p.usi || { conflict: true, allenamento: true, pcs: true, dmz: true },
           nomi: { blu: (p.nomi && p.nomi.blu || '').trim() || null, rossa: (p.nomi && p.nomi.rossa || '').trim() || null } }; }),
         link: c.link.map(function (l) { return [l[0], l[1]]; }),
-        tracce: c.tracce.map(function (tr) { return { id: tr.id, nome: (tr.nome || '').trim() || 'Sentiero', pts: tr.pts.map(function (p) { return { la: p[0], lo: p[1] }; }) }; }),
+        tracce: c.tracce.map(function (tr) { return { id: tr.id, nome: (tr.nome || '').trim() || 'Sentiero', mano: !!tr.mano, nascosta: !!tr.nascosta, pts: tr.pts.map(function (p) { return { la: p[0], lo: p[1] }; }) }; }),
         tema: c.tema || 'seppia',
         parti: c.parti || 0, imgVer: c.imgVer || null, aggiornato: Date.now()
       };

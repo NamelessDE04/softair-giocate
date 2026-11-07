@@ -486,7 +486,7 @@
     var _tracce = null;
     function tracceD() {
       if (_tracce) return _tracce;
-      _tracce = !campo.geo ? [] : (campo.tracce || []).map(function (tr) {
+      _tracce = !campo.geo ? [] : (campo.tracce || []).filter(function (tr) { return !tr.nascosta; }).map(function (tr) {
         return tr.pts.map(function (p, i) { var q = px(campo, p[0], p[1]); return (i ? 'L' : 'M') + q.x.toFixed(1) + ' ' + q.y.toFixed(1); }).join('');
       });
       return _tracce;
