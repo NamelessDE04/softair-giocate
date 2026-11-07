@@ -403,6 +403,11 @@
         s += '<path d="' + d + '" fill="none" stroke="#000" stroke-opacity=".4" stroke-width="' + (5 * k) + '" stroke-linejoin="round" stroke-linecap="round"/>';
         s += '<path d="' + d + '" fill="none" stroke="#e9dcb8" stroke-opacity=".9" stroke-width="' + (2.2 * k) + '" stroke-dasharray="' + (7 * k) + ' ' + (4 * k) + '" stroke-linejoin="round" stroke-linecap="round"/>';
       });
+      // simboli messi sulla cartina dall'editor
+      if (window.AC_SIMB) (campo.segni || []).forEach(function (g) {
+        var q = g.lat != null && campo.geo ? px(campo, g.lat, g.lon) : { x: g.x, y: g.y };
+        s += window.AC_SIMB.svg(g.sym, q.x, q.y, 12 * (g.dim || 1) * k, { k: k, nome: g.nome });
+      });
       // collegamenti: grigi tratteggiati; pieni se entrambi i capi sono della stessa fazione; tratteggio colorato in movimento se ne tiene uno solo
       (opts.allenamento ? [] : campo.link).forEach(function (l) {
         var a = punto(campo, l[0]), b = punto(campo, l[1]); if (!a || !b) return;

@@ -302,10 +302,12 @@
   /* opts: { campo (completo o null), onSalva(campo, imgNuova) -> Promise<campo>, onElimina(campo) -> Promise, onChiudi() } */
   function apri(box, opts) {
     var c = opts.campo ? JSON.parse(JSON.stringify(opts.campo)) : { id: null, nome: '', w: 0, h: 0, img: '', geo: null, mPerPx: null, controllo: [], punti: [], link: [] };
-    c.controllo = c.controllo || []; c.punti = c.punti || []; c.link = c.link || []; c.tracce = c.tracce || [];
+    c.controllo = c.controllo || []; c.punti = c.punti || []; c.link = c.link || []; c.tracce = c.tracce || []; c.segni = c.segni || [];
     var imgNuova = null, modificato = false, tab = c.img ? 'aree' : 'cartina', sel = null, selCp = null, linkDa = null, zonaPred = 32;
     // penna per ricalcare i sentieri a mano: tratto in corso (pixel) e storia per annullare
     var penna = false, tratto = null, storiaPenna = [];
+    // simboli: quello scelto nella palette e quello selezionato sulla cartina
+    var simbScelto = 'taglia', selSegno = null;
     box.innerHTML = '';
     var root = el('div', 'ed'); box.appendChild(root);
     var mapBox = el('div', 'ed-map'), inner = el('div', 'ed-inner'), img = new Image(), svgNS = 'http://www.w3.org/2000/svg', svg = document.createElementNS(svgNS, 'svg');
@@ -382,6 +384,11 @@
       var cps = c.controllo.filter(function (p) { return p.lat != null; });
       var g = U.georef(cps);
       c.geo = g ? { cx: g.cx, cy: g.cy } : null; c.mPerPx = g ? g.mPerPx : null; c._err = g ? g : null;
+      c.segni.forEach(function (p) {
+        if (!c.geo) { if (p.fonte !== 'coord') { p.lat = null; p.lon = null; } return; }
+        if (p.fonte === 'coord' && p.lat != null) { var q = U.aPixel(c.geo, p.lat, p.lon); p.x = q.x; p.y = q.y; }
+        else if (p.x != null) { var ll = U.daPixel(c.geo, p.x, p.y); p.lat = ll.lat; p.lon = ll.lon; }
+      });
       c.punti.forEach(function (p) {
         if (!c.geo) { if (p.fonte !== 'coord') { p.lat = null; p.lon = null; } return; }
         if (p.fonte === 'coord' && p.lat != null) { var q = U.aPixel(c.geo, p.lat, p.lon); p.x = q.x; p.y = q.y; }
@@ -399,6 +406,7 @@
     function applica() { inner.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(' + sc + ')'; disegna(); }
     function zoomA(f, cx, cy) { var ns = Math.max(.05, Math.min(8, sc * f)); tx = cx - (cx - tx) * ns / sc; ty = cy - (cy - ty) * ns / sc; sc = ns; applica(); }
     function aImmagine(e) { var r = mapBox.getBoundingClientRect(); return { x: (e.clientX - r.left - tx) / sc, y: (e.clientY - r.top - ty) / sc }; }
+    function segnoSotto(q) { var R = 16 / sc; return c.segni.filter(function (g) { return Math.hypot(g.x - q.x, g.y - q.y) < R * (g.dim || 1); }).slice(-1)[0]; }
     function puntoSotto(q) { var R = 16 / sc; return c.punti.filter(function (p) { return Math.hypot(p.x - q.x, p.y - q.y) < Math.max(R, raggioPx(p) * .8); })[0]; }
     function cpSotto(q) { var R = 14 / sc; return c.controllo.filter(function (p) { return Math.hypot(p.x - q.x, p.y - q.y) < R; })[0]; }
     function raggioPx(p) { return c.mPerPx ? (p.raggio || 30) / c.mPerPx : 18 / sc; }
@@ -411,6 +419,7 @@
       var q = aImmagine(e), cosa = null;
       if (tab === 'aree') { var p = puntoSotto(q); if (p) cosa = { tipo: 'punto', p: p }; }
       if (tab === 'geo') { var cp = cpSotto(q); if (cp) cosa = { tipo: 'cp', p: cp }; }
+      if (tab === 'segni') { var sg = segnoSotto(q); if (sg) cosa = { tipo: 'segno', p: sg }; }
       drag = { x: e.clientX, y: e.clientY, tx: tx, ty: ty, cosa: cosa, mosso: false };
     });
     mapBox.addEventListener('pointermove', function (e) {
@@ -422,6 +431,7 @@
       if (drag.cosa) {
         var q = aImmagine(e); drag.cosa.p.x = q.x; drag.cosa.p.y = q.y;
         if (drag.cosa.tipo === 'punto') { drag.cosa.p.fonte = 'mappa'; sel = drag.cosa.p.id; }
+        else if (drag.cosa.tipo === 'segno') { drag.cosa.p.fonte = 'mappa'; selSegno = drag.cosa.p.id; }
         else selCp = drag.cosa.p;
         modificato = true; disegna();
       } else { tx = drag.tx + dx; ty = drag.ty + dy; applica(); }
@@ -455,6 +465,12 @@
           c.punti.push(p); sel = p.id; cambiato(); setTimeout(function () { var n = side.querySelector('.ed-nome-punto'); if (n) { n.focus(); n.select(); } }, 30); return;
         }
         disegna(); pannello();
+      } else if (tab === 'segni') {
+        var g = segnoSotto(q);
+        if (g) selSegno = g.id;
+        else if (selSegno) selSegno = null;
+        else { g = { id: idNuovo(), sym: simbScelto, x: q.x, y: q.y, dim: 1, nome: '', fonte: 'mappa', usi: { conflict: true, allenamento: true, pcs: true, dmz: true } }; c.segni.push(g); selSegno = g.id; cambiato(); return; }
+        disegna(); pannello();
       } else if (tab === 'link') {
         var p2 = puntoSotto(q);
         if (!p2) { linkDa = null; disegna(); pannello(); return; }
@@ -470,7 +486,7 @@
       modificato = true;
     }
     function aggiornaAiuto(q) {
-      var t = penna ? 'Penna: tieni premuto e ricalca il sentiero · tasto destro o Maiusc+trascina per spostarti · parti dalla fine di un sentiero per prolungarlo' : { cartina: 'Trascina per spostarti, rotella per lo zoom', geo: 'Clicca un incrocio della griglia (o un punto noto) e scrivi le sue coordinate', aree: 'Clicca un punto vuoto per creare un\'area · trascina un\'area per spostarla', link: linkDa ? 'Clicca l\'area da collegare (o scollegare) · clic sul vuoto per finire' : 'Clicca la prima area, poi quelle da collegare' }[tab];
+      var t = penna ? 'Penna: tieni premuto e ricalca il sentiero · tasto destro o Maiusc+trascina per spostarti · parti dalla fine di un sentiero per prolungarlo' : { cartina: 'Trascina per spostarti, rotella per lo zoom', geo: 'Clicca un incrocio della griglia (o un punto noto) e scrivi le sue coordinate', aree: 'Clicca un punto vuoto per creare un\'area · trascina un\'area per spostarla', link: linkDa ? 'Clicca l\'area da collegare (o scollegare) · clic sul vuoto per finire' : 'Clicca la prima area, poi quelle da collegare', segni: selSegno ? 'Trascina il simbolo per spostarlo · clic sul vuoto per deselezionarlo' : 'Scegli un simbolo nella palette e clicca sulla cartina per metterlo' }[tab];
       if (penna) mapBox.classList.add('ed-penna'); else mapBox.classList.remove('ed-penna');
       var pos = '';
       if (c.geo && q && q.x >= 0 && q.y >= 0 && q.x <= c.w && q.y <= c.h) { var ll = U.daPixel(c.geo, q.x, q.y); pos = ' · ' + utmTesto(ll.lat, ll.lon); }
@@ -499,6 +515,7 @@
         s += '<line ' + xy + ' stroke="#000" stroke-opacity=".5" stroke-width="' + (7 * k) + '" stroke-linecap="round"/>';
         s += '<line ' + xy + ' stroke="#f1ece0" stroke-width="' + (3 * k) + '" stroke-dasharray="' + (10 * k) + ' ' + (8 * k) + '" stroke-linecap="round"/>';
       });
+      if (window.AC_SIMB) c.segni.forEach(function (g) { s += window.AC_SIMB.svg(g.sym, g.x, g.y, 13 * (g.dim || 1) * k, { k: k, sel: tab === 'segni' && g.id === selSegno, nome: g.nome }); });
       c.punti.forEach(function (p) {
         var r = Math.max(raggioPx(p), 14 * k), on = p.id === sel || p.id === linkDa;
         var fc = conFazione(p.tipo) && COLF[p.fazione], col = fc || (p.tipo === 'chiave' ? '#ffe08a' : '#cfcab8');
@@ -529,14 +546,14 @@
       head.appendChild(btn('✕', 'icon', chiudi));
       side.appendChild(head);
       var tabs = el('div', 'ed-tabs');
-      [['cartina', '1 Cartina'], ['geo', '2 Coordinate'], ['aree', '3 Aree'], ['link', '4 Collegamenti']].forEach(function (t) {
-        var b = btn(t[1], tab === t[0] ? 'on' : '', function () { tab = t[0]; sel = null; selCp = null; linkDa = null; disegna(); pannello(); aggiornaAiuto(); });
+      [['cartina', '1 Cartina'], ['geo', '2 Coordinate'], ['aree', '3 Aree'], ['link', '4 Collegamenti'], ['segni', '5 Simboli']].forEach(function (t) {
+        var b = btn(t[1], tab === t[0] ? 'on' : '', function () { tab = t[0]; sel = null; selCp = null; linkDa = null; selSegno = null; disegna(); pannello(); aggiornaAiuto(); });
         if (!c.img && t[0] !== 'cartina') b.disabled = true;
         tabs.appendChild(b);
       });
       side.appendChild(tabs);
       var body = el('div', 'ed-body'); side.appendChild(body);
-      ({ cartina: pCartina, geo: pGeo, aree: pAree, link: pLink })[tab](body, focusCoord);
+      ({ cartina: pCartina, geo: pGeo, aree: pAree, link: pLink, segni: pSegni })[tab](body, focusCoord);
       side.appendChild(stato());
       var foot = el('div', 'ed-foot');
       foot.appendChild(btn('Salva cartina', 'accent', salva));
@@ -812,6 +829,7 @@
     function applicaGeoportale(r) {
       // le aree esistenti restano dove sono nel mondo reale: si ricalcolano dalle loro coordinate
       c.punti.forEach(function (p) { if (p.lat != null) p.fonte = 'coord'; });
+      c.segni.forEach(function (p) { if (p.lat != null) p.fonte = 'coord'; });
       c.w = r.w; c.h = r.h; c.img = r.d; imgNuova = r.d; miniProm = null;
       c.controllo = r.angoli.map(function (a) { return { x: a.x, y: a.y, lat: a.lat, lon: a.lon, testo: utmTesto(a.lat, a.lon) }; });
       img.onload = function () { adatta(); };
@@ -958,6 +976,46 @@
       }));
       body.appendChild(az);
     }
+    function pSegni(body) {
+      var SB = window.AC_SIMB; if (!SB) return;
+      var g = c.segni.filter(function (x) { return x.id === selSegno; })[0];
+      body.appendChild(el('p', 'ed-txt', g ? 'Simbolo selezionato: toccando un altro simbolo della palette lo cambi.' : 'Scegli un simbolo e clicca sulla cartina per metterlo. Trascinalo per spostarlo.'));
+      if (g) {
+        var box = el('div', 'ed-simb-sel');
+        box.appendChild(el('h4', 'ed-tit', (SB.PER_ID[g.sym] || {}).nome || 'Simbolo'));
+        var n = el('input'); n.placeholder = 'Scritta sotto (facoltativa), es. "Taglia: Lupo"'; n.value = g.nome || '';
+        n.oninput = function () { g.nome = n.value; modificato = true; disegna(); };
+        box.appendChild(campoF('Scritta', n));
+        var d = el('select'); [[1, 'Piccolo'], [1.4, 'Medio'], [1.8, 'Grande']].forEach(function (o) { var x = el('option', null, o[1]); x.value = o[0]; d.appendChild(x); });
+        d.value = String(g.dim || 1); d.onchange = function () { g.dim = +d.value; modificato = true; disegna(); };
+        box.appendChild(campoF('Dimensione', d));
+        g.usi = g.usi || { conflict: true, allenamento: true, pcs: true, dmz: true };
+        var us = el('div', 'ed-usi');
+        [['conflict', 'Conflict'], ['allenamento', 'Allenamenti'], ['pcs', 'PCS'], ['dmz', 'DMZ']].forEach(function (o) {
+          us.appendChild(btn((g.usi[o[0]] ? '✓ ' : '') + o[1], 'chip' + (g.usi[o[0]] ? ' on' : ''), function () { g.usi[o[0]] = !g.usi[o[0]]; modificato = true; pannello(); }));
+        });
+        box.appendChild(campoF('Si vede in', us));
+        if (g.lat != null) box.appendChild(el('small', 'ed-txt muto', utmTesto(g.lat, g.lon)));
+        var rB = el('div', 'ed-riga');
+        rB.appendChild(btn('Elimina simbolo', 'pericolo', function () { c.segni = c.segni.filter(function (x) { return x.id !== g.id; }); selSegno = null; cambiato(); }));
+        rB.appendChild(btn('Fatto', '', function () { selSegno = null; disegna(); pannello(); }));
+        box.appendChild(rB);
+        body.appendChild(box);
+      }
+      SB.CATEGORIE.forEach(function (cat) {
+        body.appendChild(el('h4', 'ed-tit ed-simb-cat', cat.nome)).style.color = cat.colore;
+        var gr = el('div', 'ed-simb');
+        cat.simboli.forEach(function (sb) {
+          var on = g ? g.sym === sb[0] : simbScelto === sb[0];
+          var b = el('button', 'ed-simb-b' + (on ? ' on' : '')); b.type = 'button'; b.title = sb[1];
+          b.innerHTML = SB.icona(sb[0], 34); b.appendChild(el('span', null, sb[1]));
+          b.onclick = function () { simbScelto = sb[0]; if (g) { g.sym = sb[0]; modificato = true; disegna(); } pannello(); };
+          gr.appendChild(b);
+        });
+        body.appendChild(gr);
+      });
+      body.appendChild(el('small', 'ed-txt muto', c.segni.length + (c.segni.length === 1 ? ' simbolo' : ' simboli') + ' sulla cartina'));
+    }
     function pLink(body) {
       body.appendChild(el('p', 'ed-txt', 'Due aree collegate sono nella stessa rete radio: si può conquistare un\'area solo se è collegata a una già tenuta. Clicca un\'area, poi le aree da collegare; cliccando di nuovo un collegamento esistente lo togli.'));
       if (linkDa) { var a = c.punti.filter(function (p) { return p.id === linkDa; })[0]; body.appendChild(el('p', 'ed-txt ok', 'Da: ' + (a ? a.nome : ''))); }
@@ -977,7 +1035,7 @@
       leggiFile(f).then(function (r) {
         if (c.w && (c.w !== r.w || c.h !== r.h)) {
           var sx = r.w / c.w, sy = r.h / c.h;
-          c.punti.forEach(function (p) { p.x *= sx; p.y *= sy; }); c.controllo.forEach(function (p) { p.x *= sx; p.y *= sy; });
+          c.punti.forEach(function (p) { p.x *= sx; p.y *= sy; }); c.controllo.forEach(function (p) { p.x *= sx; p.y *= sy; }); c.segni.forEach(function (p) { p.x *= sx; p.y *= sy; });
         }
         c.w = r.w; c.h = r.h; c.img = r.d; imgNuova = r.d; img.src = r.d; miniProm = null;
         if (!c.nome && f.name) c.nome = f.name.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ');
@@ -1004,6 +1062,7 @@
           nomi: { blu: (p.nomi && p.nomi.blu || '').trim() || null, rossa: (p.nomi && p.nomi.rossa || '').trim() || null } }; }),
         link: c.link.map(function (l) { return [l[0], l[1]]; }),
         tracce: c.tracce.map(function (tr) { return { id: tr.id, nome: (tr.nome || '').trim() || 'Sentiero', mano: !!tr.mano, nascosta: !!tr.nascosta, pts: tr.pts.map(function (p) { return { la: p[0], lo: p[1] }; }) }; }),
+        segni: c.segni.map(function (g) { return { id: g.id, sym: g.sym, x: g.x, y: g.y, lat: g.lat == null ? null : g.lat, lon: g.lon == null ? null : g.lon, fonte: g.fonte || 'mappa', dim: g.dim || 1, nome: (g.nome || '').trim() || null, usi: g.usi || { conflict: true, allenamento: true, pcs: true, dmz: true } }; }),
         tema: c.tema || 'seppia',
         parti: c.parti || 0, imgVer: c.imgVer || null, aggiornato: Date.now()
       };

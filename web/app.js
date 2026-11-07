@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.36';
+  var VERSIONE = '0.37';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -2100,7 +2100,7 @@
   function perCategoria(cm, cat) {
     var punti = (cm.punti || []).filter(function (p) { return !p.usi || p.usi[cat] !== false; }), ids = {};
     punti.forEach(function (p) { ids[p.id] = 1; });
-    return Object.assign({}, cm, { punti: punti, link: (cm.link || []).filter(function (l) { return ids[l[0]] && ids[l[1]]; }) });
+    return Object.assign({}, cm, { punti: punti, link: (cm.link || []).filter(function (l) { return ids[l[0]] && ids[l[1]]; }), segni: (cm.segni || []).filter(function (g) { return !g.usi || g.usi[cat] !== false; }) });
   }
   function pagAllenamento(id) {
     var a = D.allenamenti.filter(function (x) { return x.id === id; })[0]; var dove = app;
