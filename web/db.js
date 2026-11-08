@@ -291,6 +291,8 @@
     var dati = JSON.parse(JSON.stringify(c)); var cid = dati.id; delete dati.id;
     return db.collection('conflitti').doc(cid).set(dati);
   };
+  // a partita finita chi organizza registra il vincitore (per la carta "evento concluso")
+  api.vincitoreConflitto = function (cid, v) { return db.collection('conflitti').doc(cid).update({ vincitore: v }); };
   api.eliminaConflitto = function (cid) { return db.collection('conflitti').doc(cid).delete(); };
   api.ascoltaBacheca = function (cid, cb) {
     return db.collection('conflitti/' + cid + '/bacheca').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); });

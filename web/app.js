@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.49';
+  var VERSIONE = '0.50';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -191,7 +191,7 @@
     // conflict e allenamenti in ordine di data
     promemoria.map(function (c) { return { t: c.inizio, el: cartaPromemoria(c) }; }).concat(all.map(function (a) { return { t: a.inizio || 0, el: cartaAllenamento(a) }; }))
       .concat(dz.map(function (x) { return { t: x.inizio, el: cartaDmz(x) }; }))
-      .sort(function (x, y) { return x.t - y.t; }).forEach(function (x) { app.appendChild(x.el); });
+      .sort(function (x, y) { var cx = x.el.classList.contains('concluso'), cy = y.el.classList.contains('concluso'); return cx !== cy ? (cx ? 1 : -1) : x.t - y.t; }).forEach(function (x) { app.appendChild(x.el); });   // i conclusi in fondo
     if (P('conflitti')) app.appendChild(cartaBeta());
   }
 
@@ -269,6 +269,15 @@
     return r;
   }
 
+  // evento concluso: carta bassa, grigia e sbarrata con solo data e vincitore; la apre solo chi organizza
+  function cartaConclusa(tipo, titolo, quando, vincitore, apri) {
+    var k = el('button', 'carta promemoria concluso corta'); k.type = 'button';
+    var t = el('div', 'pm-testa'); t.appendChild(el('span', 'pm-eti', tipo + ' CONCLUSO')); t.appendChild(el('span', 'pm-tra', quando ? dataBreve(quando) : '')); k.appendChild(t);
+    k.appendChild(el('h3', null, titolo));
+    if (vincitore) k.appendChild(el('div', 'pm-vince', '🏆 ' + vincitore));
+    if (apri) k.onclick = apri; else k.disabled = true;
+    return k;
+  }
   function cartaPromemoria(c) {
     var k = el('button', 'carta promemoria'); k.type = 'button';
     var f = mieFaz(c), fs = fase(c);
@@ -284,6 +293,7 @@
       k.onclick = function () { vai('conflitto', c.id); };
       return k;
     }
+    if (fs === 'finito') return cartaConclusa('EVENTO', c.titolo, c.inizio, c.vincitore ? 'Vince ' + nomeFaz(c, c.vincitore) : '', P('conflitti') ? function () { vai('conflitto', c.id); } : null);
     testa.appendChild(el('span', 'pm-eti', fs === 'live' ? '● IN CORSO' : fs === 'finito' ? 'CONCLUSO' : 'RENDEZVOUS'));
     testa.appendChild(el('span', 'pm-tra', fs === 'live' || fs === 'finito' ? '' : traQuanto(c.inizio)));
     k.appendChild(testa);
@@ -666,6 +676,7 @@
       segni: function () { return f && mortOn ? segniMortaio(statoMort().s, f, puntiG, Date.now(), false) : []; },
       gps: !!f, qr: !!f, comandante: comandante, presenze: P('presenze'),
       onZona: function (pt) { S.scriviEvento(c.id, { tipo: 'zona', uid: st.user.uid, team: f, pt: pt || null, t: Date.now() }); },
+      onFine: function (v) { if (!c.prova && P('conflitti') && c.vincitore === undefined) { c.vincitore = v || ''; S.vincitoreConflitto(c.id, v || '').catch(function () {}); } },
       onOrdine: function (pt, azione, testo) { S.scriviEvento(c.id, { tipo: 'ordine', uid: st.user.uid, team: f, pt: pt, azione: azione, testo: testo, t: Date.now() }); },
       onMenu: function () {
         if (!tendina.hidden) { tendina.hidden = true; return; }
@@ -2158,6 +2169,7 @@
   }
   function pagDmzLive(id) { var x = dmzDi(id); if (!x) return pagDmz(id); schermoDmz(x, (x.squadraDi || {})[S.stato().user.uid] || null); }
   function cartaDmz(x) {
+    if (Date.now() >= x.fine) return cartaConclusa('DMZ', x.titolo || 'DMZ', x.inizio, '', P('conflitti') || S.stato().dev ? function () { vai('dmz', x.id); } : null);
     var k = el('button', 'carta promemoria dmz'); k.type = 'button';
     var testa = el('div', 'pm-testa'); testa.appendChild(el('span', 'pm-eti', 'DMZ')); testa.appendChild(el('span', 'pm-tra', Date.now() >= x.inizio ? 'IN CORSO' : traQuanto(x.inizio))); k.appendChild(testa);
     k.appendChild(el('h3', null, x.titolo || 'DMZ'));
@@ -2311,6 +2323,7 @@
   function cartaAllenamento(a) {
     var k = el('button', 'carta promemoria verde'); k.type = 'button';
     var fa = faseAll(a), testa = el('div', 'pm-testa');
+    if (fa === 'finito') return cartaConclusa('ALLENAMENTO', a.titolo || 'Allenamento', a.inizio, '', P('allenamenti') ? function () { vai('allenamento', a.id); } : null);
     testa.appendChild(el('span', 'pm-eti', fa === 'finito' ? 'ALLENAMENTO CONCLUSO' : fa === 'live' ? '● ALLENAMENTO IN CORSO' : 'ALLENAMENTO'));
     if (a.inizio && fa === 'prima') testa.appendChild(el('span', 'pm-tra', traQuanto(a.inizio))); k.appendChild(testa);
     k.appendChild(el('h3', null, a.titolo || 'Allenamento'));
@@ -2320,14 +2333,6 @@
     k.appendChild(orari);
     k.appendChild(el('div', 'pm-luogo', '⌖ ' + (a.luogo || 'Luogo da definire')));
     if (window.AC_METEO && fa !== 'finito') k.appendChild(AC_METEO.riquadro(a));
-    // concluso: carta in grigio e sbarrata; la apre solo chi organizza
-    if (fa === 'finito') {
-      k.classList.add('concluso');
-      if (!P('allenamenti')) { k.disabled = true; return k; }
-      k.appendChild(el('span', 'pm-apri', 'Concluso · tocca per rivederlo ›'));
-      k.onclick = function () { vai('allenamento', a.id); };
-      return k;
-    }
     k.appendChild(el('span', 'pm-apri', 'Tocca per mappa e argomenti ›'));
     k.onclick = function () { vai('allenamento', a.id); };
     return k;

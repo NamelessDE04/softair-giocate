@@ -505,11 +505,13 @@
     }
 
     // --- barre, stato, ordini, avvisi
+    var fineDetta = false;
     function aggiorna(evs) {
       if (evs) eventi = evs;
       var now = opts.ora();
       st = stato(g, campo, ante ? [] : eventi, ante ? g.inizio : now);
       if (ante) { disegna(); return; }
+      if (st.finita && opts.onFine && !fineDetta) { fineDetta = true; opts.onFine(st.vincitore || null); }
       var fine = g.inizio + g.durata * 60000;
       var fz = g.fazioni, A = fz[0], B = fz[1];
       // in alto: tempo trascorso e rimanente
