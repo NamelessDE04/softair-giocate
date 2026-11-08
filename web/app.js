@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.45';
+  var VERSIONE = '0.46';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -349,6 +349,7 @@
       adm.appendChild(bottone('+ Nuovo post', '', function () { editorPost(c, null); }));
       adm.appendChild(bottone('📻 Maglia radio', '', function () { vai('radio', c.id); }));
       if (c.campo) adm.appendChild(bottone('📍 Chi posa i QR', '', function () { abilitaPosa(c); }));
+      if (c.campo && (campoMeta(c.campo) || {}).geo) adm.appendChild(bottone('🗺 Cartina PDF', '', function () { pdfCartina(c.campo); }));
       if (c.prova) adm.appendChild(bottone('↺ Ricomincia la partita da zero', '', function () {
         if (!confirm('Far ripartire la partita adesso? Aree, rifornimenti e mortai tornano come all\'inizio.')) return;
         var x = JSON.parse(JSON.stringify(c)); x.provaDa = Date.now(); S.salvaConflitto(x).then(function () { toast('Partita ripartita'); }, errore);
@@ -461,6 +462,11 @@
     apri(schedaScelta[chiave] || voci[0][0]);
   }
   // presenze per team: chi viene, chi no, chi non ha ancora risposto (solo organizzatori)
+  // esporta la cartina così com'è (sola lettura): carica l'immagine e apre le scelte di stampa
+  function pdfCartina(id) {
+    toast('Carico la cartina…');
+    S.caricaCampo(id).then(function (c) { window.AC_MAPPE.stampa(c); }, errore);
+  }
   // chi organizza abilita alcuni giocatori del conflict a posare i QR del campo (fino a 6 ore dopo la fine)
   function abilitaPosa(c) {
     var stop = null;
@@ -1702,7 +1708,7 @@
       ['allenamenti', '◎', 'Allenamenti', P('allenamenti')],
       ['team', '⚑', 'Team', P('team')],
       ['giocatori', '☺', 'Giocatori', P('giocatori')],
-      ['cartine', '⌖', 'Cartine', P('mappe')],
+      ['cartine', '⌖', 'Cartine', P('mappe') || P('conflitti')],
       ['pcs', '★', 'Scenari PCS', dev],
       ['dmz', '⇪', 'DMZ', dev],
       ['ruoli', '⚙', 'Ruoli e permessi', dev]
@@ -1752,15 +1758,24 @@
       });
     } else if (sez === 'cartine') {
       testata('Cartine');
+      // da telefono (o senza il permesso di disegnarle) le cartine si possono solo esportare in PDF, così come sono
+      if (!P('mappe') || window.innerWidth < 900) {
+        app.appendChild(el('p', 'hint', 'Tocca una cartina per esportarla in PDF. Per modificarle serve il computer.'));
+        D.campi.filter(function (cm) { return cm.geo; }).sort(function (a, b) { return a.nome.localeCompare(b.nome); }).forEach(function (cm) {
+          riga('📄 ' + cm.nome, (cm.punti || []).length + ' aree · PDF da navigazione', function () { pdfCartina(cm.id); });
+        });
+        if (!D.campi.filter(function (cm) { return cm.geo; }).length) app.appendChild(el('p', 'hint', 'Nessuna cartina con le coordinate.'));
+        return;
+      }
       app.appendChild(bottone('+ Nuova cartina', 'accent big', function () { vai('mappa', null); }));
-      if (window.innerWidth < 900) app.appendChild(el('p', 'hint', 'Le cartine si disegnano meglio dal computer.'));
       D.campi.slice().sort(function (a, b) { return a.nome.localeCompare(b.nome); }).forEach(function (cm) {
         var r = riga(cm.nome, (cm.punti || []).length + ' aree' + (cm.geo ? '' : ' · senza coordinate'), function () { vai('mappa', cm.id); });
         // QR: dietro un tasto discreto
-        var piu = bottone('QR ▾', 'link', function () { az.hidden = !az.hidden; });
+        var piu = bottone('QR / PDF ▾', 'link', function () { az.hidden = !az.hidden; });
         app.appendChild(piu);
         var az = el('div', 'riga-az'); az.hidden = true;
         az.appendChild(bottone('Stampa i QR', 'piccolo', function () { vai('stampaQr', cm.id); }));
+        if (cm.geo) az.appendChild(bottone('PDF cartina', 'piccolo', function () { pdfCartina(cm.id); }));
         az.appendChild(bottone('Posa i QR', 'piccolo', function () { vai('posa', cm.id); }));
         app.appendChild(az);
       });
