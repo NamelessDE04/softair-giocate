@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.48';
+  var VERSIONE = '0.49';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -2320,6 +2320,14 @@
     k.appendChild(orari);
     k.appendChild(el('div', 'pm-luogo', '⌖ ' + (a.luogo || 'Luogo da definire')));
     if (window.AC_METEO && fa !== 'finito') k.appendChild(AC_METEO.riquadro(a));
+    // concluso: carta in grigio e sbarrata; la apre solo chi organizza
+    if (fa === 'finito') {
+      k.classList.add('concluso');
+      if (!P('allenamenti')) { k.disabled = true; return k; }
+      k.appendChild(el('span', 'pm-apri', 'Concluso · tocca per rivederlo ›'));
+      k.onclick = function () { vai('allenamento', a.id); };
+      return k;
+    }
     k.appendChild(el('span', 'pm-apri', 'Tocca per mappa e argomenti ›'));
     k.onclick = function () { vai('allenamento', a.id); };
     return k;
