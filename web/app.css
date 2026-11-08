@@ -789,9 +789,13 @@ main > .btn.big { margin-bottom: 6px; }
 .posa-sw { width: 42px; height: 24px; border-radius: 12px; background: #3a4230; position: relative; flex: none; transition: background .15s; }
 .posa-sw::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #cfcab8; transition: left .15s; }
 .posa-riga.on { border-color: var(--oro); } .posa-riga.on .posa-sw { background: var(--oro); } .posa-riga.on .posa-sw::after { left: 21px; background: #1b2016; }
-/* evento concluso: carta bassa, spenta e sbarrata */
-.carta.promemoria.concluso { filter: grayscale(1); opacity: .55; border-color: var(--linea); padding-top: 10px; padding-bottom: 10px; }
-.carta.promemoria.concluso h3 { font-size: 19px; margin: 4px 0 0; text-decoration: line-through; text-decoration-thickness: 2px; }
-.carta.promemoria.concluso .pm-tra { background: none; color: var(--muto); padding: 0; }
-.carta.promemoria.concluso .pm-vince { margin-top: 4px; font-weight: 700; font-size: 16px; }
-.carta.promemoria.concluso:disabled { cursor: default; }
+/* evento concluso: riga bassa e spenta */
+.carta.concluso { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 8px 12px; margin-bottom: 8px; background: rgba(255,255,255,.025); border: 1px dashed var(--linea); color: var(--muto); opacity: .8; }
+.carta.concluso:disabled { cursor: default; }
+.cc-data { flex: none; width: 44px; text-align: center; border-right: 1px solid var(--linea); padding-right: 10px; line-height: 1; }
+.cc-data b { display: block; font-family: var(--tit); font-size: 24px; color: var(--muto); }
+.cc-data small { font-size: 12px; letter-spacing: .08em; }
+.cc-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.cc-eti { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; }
+.cc-nome { font-size: 18px; font-weight: 700; color: var(--ink); opacity: .6; text-decoration: line-through; text-decoration-thickness: 1.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-vince { flex: none; font-size: 14px; font-weight: 700; color: var(--oro); background: rgba(232,201,106,.1); border: 1px solid rgba(232,201,106,.35); border-radius: 999px; padding: 3px 10px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
