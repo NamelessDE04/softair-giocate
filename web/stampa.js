@@ -94,9 +94,16 @@
     s += '<image href="' + c.img + '" x="0" y="0" width="' + c.w + '" height="' + c.h + '" transform="matrix(' + m + ')" preserveAspectRatio="none"/>';
     // griglia: ogni 100 m sottile, ogni 500 m marcata
     var passo = 100; while (passo * k < 3) passo = passo === 100 ? 200 : passo === 200 ? 500 : passo * 2;
-    var forte = passo < 500 ? 500 : passo * 5, sc = !!o.scuro, gF = sc ? '#f1ece0' : '#000', gD = sc ? '#cfc8b4' : '#555';
-    for (var E = Math.ceil(R.E0 / passo) * passo; E <= R.E1; E += passo) { var mg = E % forte === 0; s += '<line x1="' + f1(X(E)) + '" y1="' + P.fy0 + '" x2="' + f1(X(E)) + '" y2="' + P.fy1 + '" stroke="' + (mg ? gF : gD) + '" stroke-width="' + (mg ? .3 : .12) + '" stroke-opacity="' + (mg ? .9 : .6) + '"/>'; }
-    for (var N = Math.ceil(R.N0 / passo) * passo; N <= R.N1; N += passo) { var mg2 = N % forte === 0; s += '<line x1="' + P.fx0 + '" y1="' + f1(Y(N)) + '" x2="' + P.fx1 + '" y2="' + f1(Y(N)) + '" stroke="' + (mg2 ? gF : gD) + '" stroke-width="' + (mg2 ? .3 : .12) + '" stroke-opacity="' + (mg2 ? .9 : .6) + '"/>'; }
+    var forte = passo < 500 ? 500 : passo * 5, sc = !!o.scuro;
+    // sulla cartina scura il reticolo è chiaro e pieno, con un filo scuro sotto: si legge su ogni sfondo
+    var gF = sc ? '#ffffff' : '#000', gD = sc ? '#f4efe2' : '#555', wF = sc ? .38 : .3, wD = sc ? .2 : .12, oF = sc ? 1 : .9, oD = sc ? .85 : .6;
+    var linea = function (x1, y1, x2, y2, mg) {
+      var q = 'x1="' + f1(x1) + '" y1="' + f1(y1) + '" x2="' + f1(x2) + '" y2="' + f1(y2) + '"';
+      return (sc ? '<line ' + q + ' stroke="#000" stroke-opacity=".55" stroke-width="' + ((mg ? wF : wD) + .25) + '"/>' : '') +
+        '<line ' + q + ' stroke="' + (mg ? gF : gD) + '" stroke-width="' + (mg ? wF : wD) + '" stroke-opacity="' + (mg ? oF : oD) + '"/>';
+    };
+    for (var E = Math.ceil(R.E0 / passo) * passo; E <= R.E1; E += passo) s += linea(X(E), P.fy0, X(E), P.fy1, E % forte === 0);
+    for (var N = Math.ceil(R.N0 / passo) * passo; N <= R.N1; N += passo) s += linea(P.fx0, Y(N), P.fx1, Y(N), N % forte === 0);
     // sentieri
     if (o.sentieri !== false) (c.tracce || []).filter(function (t) { return !t.nascosta; }).forEach(function (t) {
       var d = t.pts.map(function (p, i) { var u = R.utm(p[0], p[1]); return (i ? 'L' : 'M') + f1(X(u.E)) + ' ' + f1(Y(u.N)); }).join('');
@@ -146,8 +153,11 @@
     s += '<rect x="' + P.fx0 + '" y="' + P.fy0 + '" width="' + P.fw + '" height="' + P.fh + '" fill="none" stroke="#000" stroke-width=".35"/>';
     s += '<rect x="' + (P.fx0 + bw) + '" y="' + (P.fy0 + bw) + '" width="' + (P.fw - 2 * bw) + '" height="' + (P.fh - 2 * bw) + '" fill="none" stroke="#000" stroke-width=".2"/>' + cb;
     // coordinate complete sulle linee marcate: in alto l'Est, a sinistra il Nord (in verticale)
-    for (var E2 = Math.ceil(R.E0 / forte) * forte; E2 <= R.E1; E2 += forte) s += '<text x="' + f1(X(E2)) + '" y="' + (P.fy0 - 1.8) + '" font-size="3.2" text-anchor="middle" fill="#000">' + etE(E2) + '</text>';
-    for (var N2 = Math.ceil(R.N0 / forte) * forte; N2 <= R.N1; N2 += forte) s += '<text transform="translate(' + (P.fx0 - 2) + ' ' + f1(Y(N2)) + ') rotate(-90)" font-size="3.2" text-anchor="middle" fill="#000">' + etN(N2) + '</text>';
+    // se c'è spazio si scrive la coordinata di ogni linea del reticolo, altrimenti solo di quelle marcate
+    var ogniEt = passo * k >= 17 ? passo : forte;
+    for (var E2 = Math.ceil(R.E0 / ogniEt) * ogniEt; E2 <= R.E1; E2 += ogniEt) if (X(E2) > P.fx0 + 7 && X(E2) < P.fx1 - 7) s += '<text x="' + f1(X(E2)) + '" y="' + (P.fy0 - 1.8) + '" font-size="3.2" text-anchor="middle" fill="#000"' + (E2 % forte === 0 ? ' font-weight="700"' : '') + '>' + etE(E2) + '</text>';
+    for (var N2 = Math.ceil(R.N0 / ogniEt) * ogniEt; N2 <= R.N1; N2 += ogniEt) if (Y(N2) > P.fy0 + 7 && Y(N2) < P.fy1 - 7) s += '<text transform="translate(' + (P.fx0 - 2) + ' ' + f1(Y(N2)) + ') rotate(-90)" font-size="3.2" text-anchor="middle" fill="#000"' + (N2 % forte === 0 ? ' font-weight="700"' : '') + '>' + etN(N2) + '</text>';
+    if (o.fondo && o.fondo.crediti) s += '<text x="' + P.fx0 + '" y="' + (P.fy1 + 5) + '" font-size="2.6" fill="#444">Cartografia: ' + esc(o.fondo.crediti) + '</text>';
     s += '<text x="' + P.fx1 + '" y="' + (P.fy1 + 5) + '" font-size="3" text-anchor="end" fill="#000">WGS 84 / UTM zone ' + R.zona + (R.nord ? 'N' : 'S') + '</text>';
     s += '</svg>';
     return s;
@@ -177,7 +187,7 @@
       '.barra{position:sticky;top:0;background:#222;color:#fff;padding:8px 12px;font-size:14px;display:flex;gap:12px;align-items:center;z-index:2}.barra button{font-size:14px;padding:6px 14px;cursor:pointer}' +
       '@media print{html,body{background:#fff}.foglio{margin:0}.barra{display:none!important}}';
     var html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>' + esc((o.titolo || c.nome || 'Cartina') + ' · scala 1:' + R.S) + '</title><style>' + css + '</style></head><body>' +
-      '<div class="barra"><button onclick="window.print()">Stampa / Salva PDF</button><span>Formato ' + (o.formato || 'A4') + ' ' + (P.or === 'v' ? 'verticale' : 'orizzontale') + ' · scala 1:' + migl(R.S) + ' · nella stampa scegli "Salva come PDF", margini "Nessuno" e scala 100%.</span></div>' +
+      '<div class="barra"><button onclick="window.print()">Stampa / Salva PDF</button><span>Formato ' + (o.formato || 'A4') + ' ' + (P.or === 'v' ? 'verticale' : 'orizzontale') + ' · scala 1:' + migl(R.S) + ' · nella stampa scegli "Salva come PDF", margini "Nessuno" e scala 100%.' + (o.avvisoFondo ? ' <b style="color:#ffb347">⚠ ' + esc(o.avvisoFondo) + '</b>' : '') + '</span></div>' +
       '<div class="foglio">' + foglio1(R, WP) + '</div><div class="foglio">' + foglio2(R, WP) + '</div></body></html>';
     var w = o.finestra || window.open('', '_blank');
     if (!w) { alert('Il browser ha bloccato la nuova finestra: consenti i popup per questo sito e riprova.'); return; }

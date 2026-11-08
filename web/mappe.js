@@ -208,7 +208,7 @@
     var cr = el('span', 'ed-ante-cr', p.crediti); fr.appendChild(cr);
   }
   // cartina finale su canvas, pezzo per pezzo
-  function componi(p, avanzamento) {
+  function componi(p, avanzamento, senzaCrediti) {
     var cv = document.createElement('canvas'); cv.width = p.W; cv.height = p.H;
     var cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0, 0, p.W, p.H);
     var T = 1000, lavori = [];
@@ -233,9 +233,11 @@
       lavori.forEach(function (l, i) { cx.globalAlpha = l.alpha != null ? l.alpha : 1; cx.drawImage(imgs[i], l.x, l.y, l.w, l.h); });
       cx.globalAlpha = 1;
       var W = p.W, H = p.H, cr = p.crediti;
-      cx.font = '600 ' + Math.max(11, Math.round(W / 110)) + 'px sans-serif'; var tw = cx.measureText(cr).width, pad = W / 220, fh = Math.max(11, W / 110);
-      cx.fillStyle = 'rgba(255,255,255,.85)'; cx.fillRect(W - tw - pad * 3, H - fh - pad * 2.4, tw + pad * 3, fh + pad * 2.4);
-      cx.fillStyle = '#222'; cx.textAlign = 'right'; cx.textBaseline = 'bottom'; cx.fillText(cr, W - pad * 1.5, H - pad);
+      if (senzaCrediti) cr = '';
+      if (cr) {
+        cx.font = '600 ' + Math.max(11, Math.round(W / 110)) + 'px sans-serif'; var tw = cx.measureText(cr).width, pad = W / 220, fh = Math.max(11, W / 110);
+        cx.fillStyle = 'rgba(255,255,255,.85)'; cx.fillRect(W - tw - pad * 3, H - fh - pad * 2.4, tw + pad * 3, fh + pad * 2.4);
+        cx.fillStyle = '#222'; cx.textAlign = 'right'; cx.textBaseline = 'bottom'; cx.fillText(cr, W - pad * 1.5, H - pad); }
       var r; try { r = daCanvas(cv); } catch (e) { throw new Error('CORS'); }
       r.angoli = [[0, 0, p.bb[0], p.bb[3]], [W, 0, p.bb[2], p.bb[3]], [W, H, p.bb[2], p.bb[1]], [0, H, p.bb[0], p.bb[1]]].map(function (a) { var ll = daCrs(p.crs, a[2], a[3]); return { x: a[0], y: a[1], lat: ll.lat, lon: ll.lon }; });
       return r;
@@ -1039,7 +1041,8 @@
       var lato = Math.min(3200, Math.round(Math.max(R.P.fw, R.P.fh) * 6));
       var fw = c.fonteWeb || { sfondo: 'otm', satellite: 0, livelli: [] };
       var sc = { sfondo: fw.sfondo === 'bianco' ? 'otm' : fw.sfondo, satellite: fw.satellite || 0, livelli: fw.livelli || [], wmsAltro: fw.wmsAltro || {} };
-      return piano(sc, zona, lato).then(function (p) { return componi(p, avanz); }).then(function (r) { return { d: r.d, w: r.w, h: r.h, angoli: r.angoli }; });
+      var cred = '';
+      return piano(sc, zona, lato).then(function (p) { cred = p.crediti; return componi(p, avanz, true); }).then(function (r) { return { d: r.d, w: r.w, h: r.h, angoli: r.angoli, crediti: cred }; });
     }
     function finestraStampa() {
       ricalcola();
@@ -1088,11 +1091,12 @@
         var avviso = function (t) { try { w.document.body.innerHTML = '<p style="font:16px Arial;padding:20px">' + t + '</p>'; } catch (e) {} };
         w.document.write('<p style="font:16px Arial;padding:20px">Preparo la cartina…</p>');
         var filtro = function (src) { return tema ? window.S40F.applicaTema(src, tema).then(function (u) { return u || src; }, function () { return src; }) : Promise.resolve(src); };
-        var fondo = sceltaStampa.riempi ? fondoStampa(function (n, tot) { avviso('Scarico la cartografia attorno al campo… ' + n + '/' + tot); }).catch(function () { return null; }) : Promise.resolve(null);
+        var avvisoFondo = '';
+        var fondo = sceltaStampa.riempi ? fondoStampa(function (n, tot) { avviso('Scarico la cartografia attorno al campo… ' + n + '/' + tot); }).catch(function (e) { avvisoFondo = 'Cartografia attorno non scaricata (' + ((e && e.message) || 'errore') + '): i bordi restano vuoti'; return null; }) : Promise.resolve(null);
         fondo.then(function (f) {
           return Promise.all([filtro(c.img), f ? filtro(f.d) : null]).then(function (r) {
-            if (f) f = { d: r[1], w: f.w, h: f.h, angoli: f.angoli };
-            window.AC_STAMPA.apri(Object.assign({}, c, { img: r[0] }), Object.assign({}, sceltaStampa, { finestra: w, scuro: !!tema, fondo: f }));
+            if (f) f = { d: r[1], w: f.w, h: f.h, angoli: f.angoli, crediti: f.crediti };
+            window.AC_STAMPA.apri(Object.assign({}, c, { img: r[0] }), Object.assign({}, sceltaStampa, { finestra: w, scuro: !!tema, fondo: f, avvisoFondo: avvisoFondo }));
           });
         }).catch(function () { window.AC_STAMPA.apri(c, Object.assign({}, sceltaStampa, { finestra: w, fondo: null })); });
       }));
