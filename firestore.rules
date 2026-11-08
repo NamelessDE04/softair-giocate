@@ -76,6 +76,8 @@ service cloud.firestore {
         && request.resource.data.get('team', null) == null && request.resource.data.get('ruolo', null) == null;
       allow update: if isDev()
         || (perm('giocatori') && ruoloInvariato() && senzaNomi())
+        // chi organizza abilita i giocatori a posare i QR dal conflict
+        || (perm('conflitti') && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['posaQrFino']))
         // chi elimina un team toglie i giocatori dal team
         || (perm('team') && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['squadra', 'team', 'codice'])
             && request.resource.data.get('team', null) == null)

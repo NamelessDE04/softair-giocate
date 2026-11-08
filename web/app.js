@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.40';
+  var VERSIONE = '0.41';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -125,24 +125,47 @@
   }
   $('velo').onclick = function () { chiudiFoglio(); };
 
+  // menu a tendina sotto il bottone in alto a destra
+  var ICO = {
+    team: '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/>',
+    profilo: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>',
+    organizza: '<path d="M4 6h16M4 12h10M4 18h13"/><circle cx="18" cy="12" r="2.2"/>',
+    esci: '<path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/>'
+  };
+  function chiudiMenu() {
+    var m = $('menuTendina'); if (!m) return;
+    m.classList.remove('su'); $('btnMenu').classList.remove('aperto');
+    document.removeEventListener('keydown', escMenu);
+    setTimeout(function () { m.remove(); var o = $('menuVelo'); if (o) o.remove(); }, 160);
+  }
+  function escMenu(e) { if (e.key === 'Escape') chiudiMenu(); }
   function menu() {
+    if ($('menuTendina')) { chiudiMenu(); return; }
     var st = S.stato(), me = st.me || {};
-    apriFoglio(function (f) {
-      var chi = el('div', 'menu-chi');
-      chi.appendChild(el('b', null, me.callsign || me.nome || (st.user && st.user.email) || ''));
-      var t = teamDi(me.team); chi.appendChild(el('small', null, (t ? t.nome : 'Nessun team') + ' · ' + S.nomeRuolo(st.ruolo)));
-      f.appendChild(chi);
-      var voci = [];
-      if (me.team) voci.push(['Il mio team', function () { vai('team', me.team); }]);
-      voci.push(['Profilo', function () { vai('profilo'); }]);
-      if (posaConsentita()) voci.push(['Posa i QR sul campo', function () { vai('posa'); }]);
-      if (P('prova')) voci.push(['Prova la mappa di gioco', function () { vai('prova'); }]);
-      if (organizza()) voci.push(['Organizza', function () { vai('organizza'); }]);
-      voci.push(['Esci', function () { S.logout(); }]);
-      voci.forEach(function (v) {
-        var b = bottone(v[0], 'voce'); b.onclick = function () { chiudiFoglio(); setTimeout(v[1], 30); }; f.appendChild(b);
-      });
+    var velo = el('div', 'menu-velo'); velo.id = 'menuVelo'; velo.onclick = chiudiMenu; document.body.appendChild(velo);
+    var m = el('div', 'menu-tendina'); m.id = 'menuTendina';
+    var chi = el('div', 'menu-chi');
+    var nome = me.callsign || me.nome || (st.user && st.user.email) || '';
+    chi.appendChild(el('span', 'menu-av', (nome[0] || '?').toUpperCase()));
+    var tx = el('div'); tx.appendChild(el('b', null, nome));
+    var t = teamDi(me.team); tx.appendChild(el('small', null, (t ? t.nome : 'Nessun team') + ' · ' + S.nomeRuolo(st.ruolo)));
+    chi.appendChild(tx); m.appendChild(chi);
+    var voci = [];
+    if (me.team) voci.push(['team', 'Il mio team', function () { vai('team', me.team); }]);
+    voci.push(['profilo', 'Profilo', function () { vai('profilo'); }]);
+    if (organizza()) voci.push(['organizza', 'Organizza', function () { vai('organizza'); }]);
+    voci.push(['esci', 'Esci', function () { S.logout(); }, 'menu-esci']);
+    voci.forEach(function (v) {
+      var b = el('button', 'menu-voce' + (v[3] ? ' ' + v[3] : '')); b.type = 'button';
+      b.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + ICO[v[0]] + '</svg>';
+      b.appendChild(el('span', null, v[1]));
+      b.onclick = function () { chiudiMenu(); setTimeout(v[2], 30); };
+      m.appendChild(b);
     });
+    document.body.appendChild(m);
+    $('btnMenu').classList.add('aperto');
+    document.addEventListener('keydown', escMenu);
+    requestAnimationFrame(function () { m.classList.add('su'); });
   }
   $('btnMenu').onclick = menu;
 
@@ -319,11 +342,13 @@
       r.appendChild(bottone(a && a.si ? 'Non vengo più' : 'Partecipo', a && a.si ? 'piccolo' : 'accent piccolo', function () { S.rispondiInvito(c.id, a && a.si ? 'no' : 'si').then(function () { mostra(); }, errore); }));
       box.appendChild(r);
     }
+    if (c.campo && (S.stato().me.posaQrFino || 0) > Date.now() && fase(c) !== 'finito') box.appendChild(bottone('📍 Posa i QR sul campo', 'accent', function () { vai('posa', c.campo); }));
     if (P('conflitti')) {
       var adm = el('div', 'riga2'); adm.hidden = true;
       adm.appendChild(bottone('Modifica conflict', '', function () { vai('conflittoModifica', c.id); }));
       adm.appendChild(bottone('+ Nuovo post', '', function () { editorPost(c, null); }));
       adm.appendChild(bottone('📻 Maglia radio', '', function () { vai('radio', c.id); }));
+      if (c.campo) adm.appendChild(bottone('📍 Chi posa i QR', '', function () { abilitaPosa(c); }));
       if (c.prova) adm.appendChild(bottone('↺ Ricomincia la partita da zero', '', function () {
         if (!confirm('Far ripartire la partita adesso? Aree, rifornimenti e mortai tornano come all\'inizio.')) return;
         var x = JSON.parse(JSON.stringify(c)); x.provaDa = Date.now(); S.salvaConflitto(x).then(function () { toast('Partita ripartita'); }, errore);
@@ -436,6 +461,39 @@
     apri(schedaScelta[chiave] || voci[0][0]);
   }
   // presenze per team: chi viene, chi no, chi non ha ancora risposto (solo organizzatori)
+  // chi organizza abilita alcuni giocatori del conflict a posare i QR del campo (fino a 6 ore dopo la fine)
+  function abilitaPosa(c) {
+    var stop = null;
+    apriFoglio(function (f) {
+      f.appendChild(el('h3', null, 'Chi posa i QR'));
+      f.appendChild(el('p', 'hint', 'Tocca un giocatore per abilitarlo o toglierlo. Chi è abilitato vede «Posa i QR sul campo» nella pagina del conflict.'));
+      var lista = el('div', 'posa-lista'); f.appendChild(lista);
+      lista.appendChild(el('p', 'hint', 'Caricamento…'));
+      var fino = Math.max(c.fine || 0, Date.now()) + 6 * 3600000;
+      stop = S.ascoltaUtenti(function (ut) {
+        var si = {}; (D.adesioni[c.id] || []).forEach(function (a) { if (a.si && !a.dopo) si[a.id] = 1; });
+        var gioc = ut.filter(function (u) { return si[u.id] || (u.posaQrFino || 0) > Date.now(); })
+          .sort(function (x, y) { return conNome(x).localeCompare(conNome(y)); });
+        lista.innerHTML = '';
+        if (!gioc.length) { lista.appendChild(el('p', 'hint', 'Nessuno ha ancora confermato la presenza.')); return; }
+        gioc.forEach(function (u) {
+          var on = (u.posaQrFino || 0) > Date.now();
+          var r = el('button', 'posa-riga' + (on ? ' on' : '')); r.type = 'button';
+          var tx = el('div'); tx.appendChild(el('b', null, conNome(u)));
+          var t = teamDi(u.team); tx.appendChild(el('small', null, (t ? t.nome : '') + (on ? ' · abilitato fino a ' + dataBreve(u.posaQrFino) + ' ' + ora(u.posaQrFino) : '')));
+          r.appendChild(tx); r.appendChild(el('span', 'posa-sw'));
+          r.onclick = function () {
+            r.disabled = true;
+            S.salvaUtente(u.id, { posaQrFino: on ? null : fino }).then(function () { toast(on ? 'Tolto' : 'Abilitato'); }, function (e) { r.disabled = false; errore(e); });
+          };
+          lista.appendChild(r);
+        });
+      });
+    });
+    var prima = chiusura; chiusura = function () { if (stop) stop(); if (prima) prima(); };
+    var f = $('foglio'), oss = new MutationObserver(function () { if (f.hidden) { if (stop) { stop(); stop = null; } oss.disconnect(); } });
+    oss.observe(f, { attributes: true, attributeFilter: ['hidden'] });
+  }
   function vistaPresenze(box, ades, teams, togli) {
     box.innerHTML = '';
     var att = el('p', 'hint', 'Caricamento dei giocatori…'); box.appendChild(att);
