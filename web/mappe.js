@@ -6,6 +6,7 @@
   var U = window.AC_UTM;
   var TIPI = [['mob', '⚑ Base principale (MOB)'], ['chiave', '★ Punto chiave'], ['base', '● Punto base'], ['torre', '📡 Torre radio']];
   var FAZ = [['blu', 'Fazione blu'], ['rossa', 'Fazione rossa']], COLF = { blu: '#2f7fd6', rossa: '#d23a2c' };
+  var COLORI_AREA = ['#4caf50', '#f2d13a', '#f08a24', '#9c5fc7', '#2bb3b1', '#c2185b', '#5c6bc0', '#8d6e63', '#3f7fbf', '#d9483b', '#7cb342', '#9e9e9e'];
   function conFazione(t) { return t === 'mob'; }
   function simbolo(t) { return t === 'mob' ? '⚑' : t === 'chiave' ? '★' : t === 'torre' ? '📡' : '●'; }
   var LATO = 3000;   // lato massimo dell'immagine salvata (pixel)
@@ -518,7 +519,7 @@
       if (window.AC_SIMB) c.segni.forEach(function (g) { s += window.AC_SIMB.svg(g.sym, g.x, g.y, 13 * (g.dim || 1) * k, { k: k, sel: tab === 'segni' && g.id === selSegno, nome: g.nome }); });
       c.punti.forEach(function (p) {
         var r = Math.max(raggioPx(p), 14 * k), on = p.id === sel || p.id === linkDa;
-        var fc = conFazione(p.tipo) && COLF[p.fazione], col = fc || (p.tipo === 'chiave' ? '#ffe08a' : '#cfcab8');
+        var fc = (conFazione(p.tipo) && COLF[p.fazione]) || (!conFazione(p.tipo) && p.colore), col = fc || (p.tipo === 'chiave' ? '#ffe08a' : '#cfcab8');
         s += '<circle cx="' + p.x + '" cy="' + p.y + '" r="' + r + '" fill="' + (fc || '#9a9a8c') + '" fill-opacity="' + (fc ? .6 : .45) + '" stroke="' + (on ? '#ffd23f' : col) + '" stroke-width="' + ((on ? 5 : 3) * k) + '"/>';
         var sim = p.tipo === 'base' ? '' : simbolo(p.tipo);
         if (sim) s += '<text x="' + p.x + '" y="' + p.y + '" font-size="' + (20 * k) + '" text-anchor="middle" dominant-baseline="central" class="ed-sim" fill="' + (fc ? '#fff' : '#ffe08a') + '">' + sim + '</text>';
@@ -885,6 +886,16 @@
             fz.appendChild(b);
           });
           f.appendChild(campoF('Di quale fazione è', fz));
+        } else {
+          // colore dell'area (cartina stampata ed editor; nel conflict contano i colori delle fazioni)
+          var cl = el('div', 'ed-colori');
+          [''].concat(COLORI_AREA).forEach(function (col) {
+            var b = el('button', 'ed-col' + ((p.colore || '') === col ? ' on' : '')); b.type = 'button';
+            if (col) b.style.background = col; else { b.textContent = 'auto'; b.title = 'Colore automatico'; }
+            b.onclick = function () { if (col) p.colore = col; else delete p.colore; modificato = true; disegna(); pannello(); };
+            cl.appendChild(b);
+          });
+          f.appendChild(campoF('Colore', cl));
         }
         // in quali tipi di giocata compare l'area (la stessa cartina serve per tutti)
         p.usi = p.usi || { conflict: true, allenamento: true, pcs: true, dmz: true };
@@ -1031,6 +1042,11 @@
       var orr = el('select'); [['auto', 'Automatico'], ['v', 'Verticale'], ['o', 'Orizzontale']].forEach(function (v) { var x = el('option', null, v[1]); x.value = v[0]; orr.appendChild(x); }); orr.value = sceltaStampa.orient;
       due.appendChild(campoF('Formato', fm)); due.appendChild(campoF('Orientamento', orr)); bx.appendChild(due);
       var sca = el('select'); bx.appendChild(campoF('Scala', sca));
+      // aspetto: cartina originale o con lo stile (filtro) dell'app
+      var TEMI = (window.S40F && window.S40F.TEMI) || {}, st = el('select');
+      Object.keys(TEMI).forEach(function (kk) { var x = el('option', null, kk === 'originale' ? 'Originale, senza filtro' : 'Come in app: ' + TEMI[kk].nome + (kk === (c.tema || 'seppia') ? ' (stile di questa cartina)' : '')); x.value = kk; st.appendChild(x); });
+      st.value = sceltaStampa.tema || 'originale';
+      bx.appendChild(campoF('Aspetto della cartina', st));
       function scale() {
         var o = { formato: fm.value, orient: orr.value }, l = window.AC_STAMPA.scalePossibili(c, o); sca.innerHTML = '';
         var x0 = el('option', null, 'Automatica (1:' + (l[0] || '?').toLocaleString('it-IT') + ', la più grande che ci sta)'); x0.value = 0; sca.appendChild(x0);
@@ -1046,8 +1062,15 @@
       bx.appendChild(campoF('Cosa mettere', ch));
       var rB = el('div', 'ed-riga');
       rB.appendChild(btn('Crea il PDF', 'accent', function () {
-        Object.assign(sceltaStampa, { titolo: tit.value.trim(), formato: fm.value, orient: orr.value, scala: +sca.value });
-        window.AC_STAMPA.apri(c, sceltaStampa);
+        Object.assign(sceltaStampa, { titolo: tit.value.trim(), formato: fm.value, orient: orr.value, scala: +sca.value, tema: st.value });
+        if (!st.value || st.value === 'originale' || !window.S40F) { window.AC_STAMPA.apri(c, sceltaStampa); return; }
+        // con il filtro: la finestra si apre subito (altrimenti il browser la blocca), la cartina arriva appena pronta
+        var w = window.open('', '_blank');
+        if (!w) { alert('Il browser ha bloccato la nuova finestra: consenti i popup per questo sito e riprova.'); return; }
+        w.document.write('<p style="font:16px Arial;padding:20px">Preparo la cartina con lo stile scelto…</p>');
+        window.S40F.applicaTema(c.img, st.value).then(function (u) {
+          window.AC_STAMPA.apri(Object.assign({}, c, { img: u || c.img }), Object.assign({}, sceltaStampa, { finestra: w, scuro: !!u }));
+        }, function () { window.AC_STAMPA.apri(c, Object.assign({}, sceltaStampa, { finestra: w })); });
       }));
       rB.appendChild(btn('Chiudi', '', function () { ov.remove(); }));
       bx.appendChild(rB);
@@ -1094,7 +1117,7 @@
         id: c.id, nome: c.nome.trim(), w: c.w, h: c.h, geo: c.geo, mPerPx: c.mPerPx,
         controllo: c.controllo.map(function (p) { return { x: p.x, y: p.y, lat: p.lat, lon: p.lon, testo: p.testo || null }; }),
         punti: c.punti.map(function (p) { return { id: p.id, nome: p.nome.trim() || 'Area', tipo: p.tipo, x: p.x, y: p.y, lat: p.lat == null ? null : p.lat, lon: p.lon == null ? null : p.lon, raggio: p.raggio || 30, fonte: p.fonte || 'mappa',
-          fazione: conFazione(p.tipo) ? (p.fazione || null) : null, notaQr: (p.notaQr || '').trim() || null,
+          fazione: conFazione(p.tipo) ? (p.fazione || null) : null, colore: !conFazione(p.tipo) && p.colore ? p.colore : null, notaQr: (p.notaQr || '').trim() || null,
           usi: p.usi || { conflict: true, allenamento: true, pcs: true, dmz: true },
           nomi: { blu: (p.nomi && p.nomi.blu || '').trim() || null, rossa: (p.nomi && p.nomi.rossa || '').trim() || null } }; }),
         link: c.link.map(function (l) { return [l[0], l[1]]; }),

@@ -74,31 +74,31 @@
     s += '<defs><clipPath id="cornice"><rect x="' + P.fx0 + '" y="' + P.fy0 + '" width="' + P.fw + '" height="' + P.fh + '"/></clipPath></defs>';
     // cartina: pixel -> mm
     var m = [A.a * k, -A.b * k, A.c * k, -A.d * k, X(A.e), Y(A.f)].map(function (v) { return v.toFixed(5); }).join(' ');
-    s += '<g clip-path="url(#cornice)"><rect x="' + P.fx0 + '" y="' + P.fy0 + '" width="' + P.fw + '" height="' + P.fh + '" fill="#fff"/>';
+    s += '<g clip-path="url(#cornice)"><rect x="' + P.fx0 + '" y="' + P.fy0 + '" width="' + P.fw + '" height="' + P.fh + '" fill="' + (o.scuro ? '#26201b' : '#fff') + '"/>';
     s += '<image href="' + c.img + '" x="0" y="0" width="' + c.w + '" height="' + c.h + '" transform="matrix(' + m + ')" preserveAspectRatio="none"/>';
     // griglia: ogni 100 m sottile, ogni 500 m marcata
     var passo = 100; while (passo * k < 3) passo = passo === 100 ? 200 : passo === 200 ? 500 : passo * 2;
-    var forte = passo < 500 ? 500 : passo * 5;
-    for (var E = Math.ceil(R.E0 / passo) * passo; E <= R.E1; E += passo) { var mg = E % forte === 0; s += '<line x1="' + f1(X(E)) + '" y1="' + P.fy0 + '" x2="' + f1(X(E)) + '" y2="' + P.fy1 + '" stroke="' + (mg ? '#000' : '#555') + '" stroke-width="' + (mg ? .3 : .12) + '" stroke-opacity="' + (mg ? .9 : .6) + '"/>'; }
-    for (var N = Math.ceil(R.N0 / passo) * passo; N <= R.N1; N += passo) { var mg2 = N % forte === 0; s += '<line x1="' + P.fx0 + '" y1="' + f1(Y(N)) + '" x2="' + P.fx1 + '" y2="' + f1(Y(N)) + '" stroke="' + (mg2 ? '#000' : '#555') + '" stroke-width="' + (mg2 ? .3 : .12) + '" stroke-opacity="' + (mg2 ? .9 : .6) + '"/>'; }
-    // aree operative: cerchi colorati con bordo tratteggiato e nome dentro
-    var ic = 0;
-    WP.aree.forEach(function (x) {
-      var p = x.p, cx = X(x.E), cy = Y(x.N), r = Math.max(2, (p.raggio || 30) * k);
-      var col = p.tipo === 'mob' ? (p.fazione === 'rossa' ? '#d9483b' : '#3f7fbf') : COLORI_AREE[ic++ % COLORI_AREE.length];
-      s += '<circle cx="' + f1(cx) + '" cy="' + f1(cy) + '" r="' + f1(r) + '" fill="' + col + '" fill-opacity=".55" stroke="' + col + '" stroke-width=".45" stroke-dasharray="1.2 .7"/>';
-      s += '<text x="' + f1(cx) + '" y="' + f1(cy + 1.2) + '" font-size="' + (o.formato === 'A3' ? 4 : 3.4) + '" font-weight="700" fill="#333" text-anchor="middle">' + esc(p.nome || '') + '</text>';
-    });
+    var forte = passo < 500 ? 500 : passo * 5, sc = !!o.scuro, gF = sc ? '#f1ece0' : '#000', gD = sc ? '#cfc8b4' : '#555';
+    for (var E = Math.ceil(R.E0 / passo) * passo; E <= R.E1; E += passo) { var mg = E % forte === 0; s += '<line x1="' + f1(X(E)) + '" y1="' + P.fy0 + '" x2="' + f1(X(E)) + '" y2="' + P.fy1 + '" stroke="' + (mg ? gF : gD) + '" stroke-width="' + (mg ? .3 : .12) + '" stroke-opacity="' + (mg ? .9 : .6) + '"/>'; }
+    for (var N = Math.ceil(R.N0 / passo) * passo; N <= R.N1; N += passo) { var mg2 = N % forte === 0; s += '<line x1="' + P.fx0 + '" y1="' + f1(Y(N)) + '" x2="' + P.fx1 + '" y2="' + f1(Y(N)) + '" stroke="' + (mg2 ? gF : gD) + '" stroke-width="' + (mg2 ? .3 : .12) + '" stroke-opacity="' + (mg2 ? .9 : .6) + '"/>'; }
     // sentieri
     if (o.sentieri !== false) (c.tracce || []).filter(function (t) { return !t.nascosta; }).forEach(function (t) {
       var d = t.pts.map(function (p, i) { var u = R.utm(p[0], p[1]); return (i ? 'L' : 'M') + f1(X(u.E)) + ' ' + f1(Y(u.N)); }).join('');
       s += '<path d="' + d + '" fill="none" stroke="#d61fc8" stroke-width=".6" stroke-linejoin="round" stroke-linecap="round"/>';
     });
+    // aree operative: cerchi colorati con bordo tratteggiato e nome dentro
+    var ic = 0;
+    WP.aree.forEach(function (x) {
+      var p = x.p, cx = X(x.E), cy = Y(x.N), r = Math.max(2, (p.raggio || 30) * k);
+      var col = p.tipo === 'mob' ? (p.fazione === 'rossa' ? '#d9483b' : '#3f7fbf') : p.colore || COLORI_AREE[ic++ % COLORI_AREE.length];
+      s += '<circle cx="' + f1(cx) + '" cy="' + f1(cy) + '" r="' + f1(r) + '" fill="' + col + '" fill-opacity=".55" stroke="' + col + '" stroke-width=".45" stroke-dasharray="1.2 .7"/>';
+      s += '<text x="' + f1(cx) + '" y="' + f1(cy + 1.2) + '" font-size="' + (o.formato === 'A3' ? 4 : 3.4) + '" font-weight="700" fill="' + (sc ? '#fff' : '#333') + '" text-anchor="middle"' + (sc ? ' paint-order="stroke" stroke="#000" stroke-width=".6"' : '') + '>' + esc(p.nome || '') + '</text>';
+    });
     // simboli: quadratino bianco con icona nera
     if (window.AC_SIMB) WP.simb.forEach(function (x) {
       var g = x.g, cx = X(x.E), cy = Y(x.N), r = 2.2 * (g.dim || 1);
       s += window.AC_SIMB.svg(g.sym, cx, cy, r, { chiaro: true });
-      if (g.nome) s += '<text x="' + f1(cx + r + .9) + '" y="' + f1(cy + 1.1) + '" font-size="3" font-weight="700" fill="#333">' + esc(g.nome) + '</text>';
+      if (g.nome) s += '<text x="' + f1(cx + r + .9) + '" y="' + f1(cy + 1.1) + '" font-size="3" font-weight="700" fill="' + (sc ? '#fff' : '#333') + '">' + esc(g.nome) + '</text>';
     });
     // nord, scala grafica, scala numerica (dentro la cornice)
     var nx = P.fx1 - 10, ny = P.fy0 + 12;
@@ -163,7 +163,7 @@
     var html = '<!doctype html><html lang="it"><head><meta charset="utf-8"><title>' + esc((o.titolo || c.nome || 'Cartina') + ' · scala 1:' + R.S) + '</title><style>' + css + '</style></head><body>' +
       '<div class="barra"><button onclick="window.print()">Stampa / Salva PDF</button><span>Formato ' + (o.formato || 'A4') + ' ' + (P.or === 'v' ? 'verticale' : 'orizzontale') + ' · scala 1:' + migl(R.S) + ' · nella stampa scegli "Salva come PDF", margini "Nessuno" e scala 100%.</span></div>' +
       '<div class="foglio">' + foglio1(R, WP) + '</div><div class="foglio">' + foglio2(R, WP) + '</div></body></html>';
-    var w = window.open('', '_blank');
+    var w = o.finestra || window.open('', '_blank');
     if (!w) { alert('Il browser ha bloccato la nuova finestra: consenti i popup per questo sito e riprova.'); return; }
     w.document.open(); w.document.write(html); w.document.close();
     return R;
