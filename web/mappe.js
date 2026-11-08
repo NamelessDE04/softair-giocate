@@ -1102,7 +1102,7 @@
   }
 
   // ---------- cartina da navigazione: scelte e stampa (PDF dal browser)
-  var sceltaStampa = { formato: 'A4', orient: 'auto', scala: 0, inquadra: 'tutta', bordi: null, decl: '+3° E', aree: true, simboli: true, sentieri: true };
+  var sceltaStampa = { formato: 'A4', orient: 'auto', scala: 0, inquadra: 'tutta', bordi: null, intera: true, decl: '+3° E', aree: true, simboli: true, sentieri: true };
   // cartografia del web che copre tutto il riquadro stampato (stessa fonte con cui è stata fatta la cartina, se si sa)
   function fondoStampa(c, avanz) {
     var R = window.AC_STAMPA.prepara(c, sceltaStampa), mE = (R.E0 + R.E1) / 2, mN = (R.N0 + R.N1) / 2;
@@ -1155,11 +1155,17 @@
     opz = opz.concat([['otm', 'OpenTopoMap'], ['colori', 'Regione Piemonte · BDTRE a colori'], ['bn', 'Regione Piemonte · BDTRE in bianco e nero'], ['sat', 'Foto satellitare'], ['nessuno', 'Lascia i bordi vuoti']]);
     opz.forEach(function (v) { var x = el('option', null, v[1]); x.value = v[0]; bo.appendChild(x); });
     bo.value = (sceltaStampa.per === c.id && sceltaStampa.bordi) || (noto ? 'uguale' : (c.fonteBordi || 'otm'));
-    bx.appendChild(campoF('Fuori dalla cartina, fino alla cornice', bo));
+    bx.appendChild(campoF('Sfondo fino alla cornice', bo));
+    // senza giunte: la cartina viene ridisegnata tutta con lo sfondo scelto, stessi colori, stesse scritte, nessun taglio
+    var lI = el('label', 'spunta'), cbI = el('input'); cbI.type = 'checkbox'; cbI.checked = sceltaStampa.intera !== false;
+    lI.appendChild(cbI); lI.appendChild(el('span', null, 'Nessuna giunta: ridisegna tutta la cartina con questo sfondo'));
+    bx.appendChild(lI);
+    var nI = el('small', 'ed-txt muto', 'Toglila solo se la cartina è un disegno o un\'immagine caricata da file: in quel caso la tua immagine resta al centro e lo sfondo riempie solo i bordi.'); bx.appendChild(nI);
+    var agg = function () { lI.hidden = nI.hidden = bo.value === 'nessuno'; }; bo.onchange = agg; agg();
     if (!noto) bx.appendChild(el('small', 'ed-txt muto', 'Non so con quale sfondo è stata fatta questa cartina: scegli quello uguale' + (opz.modifiche ? ', me lo ricordo per le prossime stampe.' : '.')));
     var rB = el('div', 'ed-riga');
     rB.appendChild(btn('Crea il PDF', 'accent', function () {
-      Object.assign(sceltaStampa, { per: c.id, titolo: tit.value.trim(), formato: fm.value, orient: orr.value, scala: +sca.value, tema: st.value, inquadra: inq.value, bordi: bo.value, riempi: bo.value !== 'nessuno' });
+      Object.assign(sceltaStampa, { per: c.id, titolo: tit.value.trim(), formato: fm.value, orient: orr.value, scala: +sca.value, tema: st.value, inquadra: inq.value, bordi: bo.value, riempi: bo.value !== 'nessuno', intera: cbI.checked });
       if (!noto && bo.value !== 'nessuno') c.fonteBordi = bo.value;
       var tema = st.value && st.value !== 'originale' && window.S40F ? st.value : null;
       if (!tema && !sceltaStampa.riempi) { window.AC_STAMPA.apri(c, Object.assign({}, sceltaStampa, { fondo: null })); return; }
@@ -1172,7 +1178,7 @@
       var avvisoFondo = '';
       var fondo = sceltaStampa.riempi ? fondoStampa(c, function (n, tot) { avviso('Scarico la cartografia attorno al campo… ' + n + '/' + tot); }).catch(function (e) { avvisoFondo = 'Cartografia attorno non scaricata (' + ((e && e.message) || 'errore') + '): i bordi restano vuoti'; return null; }) : Promise.resolve(null);
       fondo.then(function (f) {
-        return Promise.all([filtro(c.img), f ? filtro(f.d) : null]).then(function (r) {
+        return Promise.all([f && sceltaStampa.intera ? c.img : filtro(c.img), f ? filtro(f.d) : null]).then(function (r) {
           if (f) f = { d: r[1], w: f.w, h: f.h, angoli: f.angoli, crediti: f.crediti };
           window.AC_STAMPA.apri(Object.assign({}, c, { img: r[0] }), Object.assign({}, sceltaStampa, { finestra: w, scuro: !!tema, fondo: f, avvisoFondo: avvisoFondo }));
         });

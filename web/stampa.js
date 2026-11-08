@@ -91,7 +91,8 @@
       var mf = [(fa[1].x - fa[0].x) / fw0, (fa[1].y - fa[0].y) / fw0, (fa[3].x - fa[0].x) / fh0, (fa[3].y - fa[0].y) / fh0, fa[0].x, fa[0].y].map(function (v) { return v.toFixed(5); }).join(' ');
       s += '<image href="' + o.fondo.d + '" x="0" y="0" width="' + fw0 + '" height="' + fh0 + '" transform="matrix(' + mf + ')" preserveAspectRatio="none"/>';
     }
-    s += '<image href="' + c.img + '" x="0" y="0" width="' + c.w + '" height="' + c.h + '" transform="matrix(' + m + ')" preserveAspectRatio="none"/>';
+    // cartina «intera»: tutto il riquadro viene dalla cartografia del web, niente giunte tra cartina e bordi
+    if (!(o.fondo && o.intera)) s += '<image href="' + c.img + '" x="0" y="0" width="' + c.w + '" height="' + c.h + '" transform="matrix(' + m + ')" preserveAspectRatio="none"/>';
     // griglia: ogni 100 m sottile, ogni 500 m marcata
     var passo = 100; while (passo * k < 3) passo = passo === 100 ? 200 : passo === 200 ? 500 : passo * 2;
     var forte = passo < 500 ? 500 : passo * 5, sc = !!o.scuro;
