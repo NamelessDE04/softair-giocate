@@ -8,8 +8,9 @@
 (function () {
   'use strict';
   // [modello, nome, peso]: i modelli locali contano di più (coprono solo i primi giorni: oltre, restano quelli che ci arrivano)
+  // ICON-2I è il modello nazionale (accordo LAMI: Aeronautica Militare, Arpae, ARPA Piemonte), quello su cui si basano i loro bollettini: pesa di più
   var MODELLI = [
-    ['italia_meteo_arpae_icon_2i', 'ItaliaMeteo', 3], ['meteoswiss_icon_ch1', 'MeteoSwiss 1 km', 3], ['meteoswiss_icon_ch2', 'MeteoSwiss', 2.5],
+    ['italia_meteo_arpae_icon_2i', 'ItaliaMeteo ICON-2I', 4], ['meteoswiss_icon_ch1', 'MeteoSwiss 1 km', 3], ['meteoswiss_icon_ch2', 'MeteoSwiss', 2.5],
     ['meteofrance_seamless', 'Météo-France', 2], ['icon_seamless', 'ICON', 2], ['ecmwf_ifs025', 'ECMWF', 2]
   ];
   var ORIZZONTE = 15 * 86400000;   // oltre ~15 giorni nessun modello è affidabile
