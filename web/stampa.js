@@ -34,6 +34,16 @@
     // pixel -> UTM (affine: su pochi km l'errore è trascurabile)
     var A = { a: (p1.E - p0.E) / w, b: (p1.N - p0.N) / w, c: (p2.E - p0.E) / h, d: (p2.N - p0.N) / h, e: p0.E, f: p0.N };
     var Es = [p0.E, p1.E, p2.E, p3.E], Ns = [p0.N, p1.N, p2.N, p3.N];
+    // inquadratura stretta: solo aree e simboli, con un margine attorno
+    if (o.inquadra === 'obiettivi') {
+      var og = (c.punti || []).concat(c.segni || []).filter(function (p) { return p.lat != null; }).map(function (p) { return utm(p.lat, p.lon); });
+      if (og.length) {
+        var M = 120, e0 = Math.min.apply(null, og.map(function (u) { return u.E; })) - M, e1 = Math.max.apply(null, og.map(function (u) { return u.E; })) + M;
+        var n0 = Math.min.apply(null, og.map(function (u) { return u.N; })) - M, n1 = Math.max.apply(null, og.map(function (u) { return u.N; })) + M;
+        var mn = 300; if (e1 - e0 < mn) { e0 -= (mn - e1 + e0) / 2; e1 = e0 + mn; } if (n1 - n0 < mn) { n0 -= (mn - n1 + n0) / 2; n1 = n0 + mn; }
+        Es = [e0, e1]; Ns = [n0, n1];
+      }
+    }
     var bb = { e0: Math.min.apply(null, Es), e1: Math.max.apply(null, Es), n0: Math.min.apply(null, Ns), n1: Math.max.apply(null, Ns) };
     var mW = bb.e1 - bb.e0, mH = bb.n1 - bb.n0;
     // impaginazione: margine 8 mm, fascia etichette 7 mm, cartiglio in basso
@@ -75,6 +85,12 @@
     // cartina: pixel -> mm
     var m = [A.a * k, -A.b * k, A.c * k, -A.d * k, X(A.e), Y(A.f)].map(function (v) { return v.toFixed(5); }).join(' ');
     s += '<g clip-path="url(#cornice)"><rect x="' + P.fx0 + '" y="' + P.fy0 + '" width="' + P.fw + '" height="' + P.fh + '" fill="' + (o.scuro ? '#26201b' : '#fff') + '"/>';
+    // fuori dalla cartina del campo: la cartografia del web attorno (stessa fonte), al posto del bianco
+    if (o.fondo && o.fondo.angoli) {
+      var fa = o.fondo.angoli.map(function (a) { var u = R.utm(a.lat, a.lon); return { x: X(u.E), y: Y(u.N) }; }), fw0 = o.fondo.w, fh0 = o.fondo.h;
+      var mf = [(fa[1].x - fa[0].x) / fw0, (fa[1].y - fa[0].y) / fw0, (fa[3].x - fa[0].x) / fh0, (fa[3].y - fa[0].y) / fh0, fa[0].x, fa[0].y].map(function (v) { return v.toFixed(5); }).join(' ');
+      s += '<image href="' + o.fondo.d + '" x="0" y="0" width="' + fw0 + '" height="' + fh0 + '" transform="matrix(' + mf + ')" preserveAspectRatio="none"/>';
+    }
     s += '<image href="' + c.img + '" x="0" y="0" width="' + c.w + '" height="' + c.h + '" transform="matrix(' + m + ')" preserveAspectRatio="none"/>';
     // griglia: ogni 100 m sottile, ogni 500 m marcata
     var passo = 100; while (passo * k < 3) passo = passo === 100 ? 200 : passo === 200 ? 500 : passo * 2;
