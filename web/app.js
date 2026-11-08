@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.47';
+  var VERSIONE = '0.48';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -2189,8 +2189,9 @@
     var lg = el('div', 'conf-luogo'); lg.appendChild(el('span', null, '⌖ ' + (a.luogo || 'Luogo da definire')));
     if (a.luogo || a.mapsUrl) lg.appendChild(link('Apri in Maps', mapsLink(a), 'btn piccolo'));
     hero.appendChild(lg);
+    if (faseAll(a) === 'finito') hero.appendChild(el('div', 'conf-fine', 'ALLENAMENTO CONCLUSO'));
     app.appendChild(hero);
-    if (S.stato().me.team && (a.team || []).indexOf(S.stato().me.team) >= 0) {
+    if (S.stato().me.team && (a.team || []).indexOf(S.stato().me.team) >= 0 && faseAll(a) !== 'finito') {
       var mia = miaAdesione('a:' + a.id);
       if (!mia || mia.dopo) { var rk = el('div', 'carta'); rk.appendChild(el('b', null, 'Ci sarai?')); rk.appendChild(treRisposte(a.id, 'allenamenti', function () { mostra(); })); app.appendChild(rk); }
       else {
@@ -2299,16 +2300,26 @@
     if (vecchio) az.appendChild(bottone('Elimina', 'pericolo', function () { if (confirm('Eliminare l\'allenamento?')) S.eliminaAllenamento(vecchio.id).then(function () { tornaIndietro(2); }, errore); }));
     app.appendChild(az);
   }
+  // prima / in corso / concluso; senza orario di fine vale fino a fine giornata
+  function faseAll(a, now) {
+    now = now || Date.now();
+    var fine = a.fine || (a.inizio ? new Date(a.inizio).setHours(23, 59, 59, 999) : 0);
+    if (fine && now >= fine) return 'finito';
+    if (a.inizio && now >= a.inizio) return 'live';
+    return 'prima';
+  }
   function cartaAllenamento(a) {
     var k = el('button', 'carta promemoria verde'); k.type = 'button';
-    var testa = el('div', 'pm-testa'); testa.appendChild(el('span', 'pm-eti', 'ALLENAMENTO')); if (a.inizio) testa.appendChild(el('span', 'pm-tra', traQuanto(a.inizio))); k.appendChild(testa);
+    var fa = faseAll(a), testa = el('div', 'pm-testa');
+    testa.appendChild(el('span', 'pm-eti', fa === 'finito' ? 'ALLENAMENTO CONCLUSO' : fa === 'live' ? '● ALLENAMENTO IN CORSO' : 'ALLENAMENTO'));
+    if (a.inizio && fa === 'prima') testa.appendChild(el('span', 'pm-tra', traQuanto(a.inizio))); k.appendChild(testa);
     k.appendChild(el('h3', null, a.titolo || 'Allenamento'));
     if (a.inizio) k.appendChild(el('div', 'pm-data', dataBreve(a.inizio)));
     var orari = el('div', 'pm-orari');
     [['RITROVO', a.ritrovo], ['INIZIO', a.inizio], ['FINE', a.fine]].forEach(function (o) { if (!o[1]) return; var d = el('div'); d.appendChild(el('small', null, o[0])); d.appendChild(el('b', null, ora(o[1]))); orari.appendChild(d); });
     k.appendChild(orari);
     k.appendChild(el('div', 'pm-luogo', '⌖ ' + (a.luogo || 'Luogo da definire')));
-    if (window.AC_METEO) k.appendChild(AC_METEO.riquadro(a));
+    if (window.AC_METEO && fa !== 'finito') k.appendChild(AC_METEO.riquadro(a));
     k.appendChild(el('span', 'pm-apri', 'Tocca per mappa e argomenti ›'));
     k.onclick = function () { vai('allenamento', a.id); };
     return k;
