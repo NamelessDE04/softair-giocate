@@ -1032,15 +1032,15 @@
       body.appendChild(el('small', 'ed-txt muto', c.segni.length + (c.segni.length === 1 ? ' simbolo' : ' simboli') + ' sulla cartina'));
     }
     // ---------- cartina da navigazione: scelte e stampa (PDF dal browser)
-    var sceltaStampa = { formato: 'A4', orient: 'auto', scala: 0, inquadra: 'tutta', riempi: true, decl: '+3° E', aree: true, simboli: true, sentieri: true };
+    var sceltaStampa = { formato: 'A4', orient: 'auto', scala: 0, inquadra: 'tutta', bordi: null, decl: '+3° E', aree: true, simboli: true, sentieri: true };
     // cartografia del web che copre tutto il riquadro stampato (stessa fonte con cui è stata fatta la cartina, se si sa)
     function fondoStampa(avanz) {
       var R = window.AC_STAMPA.prepara(c, sceltaStampa), mE = (R.E0 + R.E1) / 2, mN = (R.N0 + R.N1) / 2;
       var ll = U.aLatLon(32, true, mE, mN);
       var zona = { lat: ll.lat, lon: ll.lon, larghezza: R.E1 - R.E0 + 80, altezza: R.N1 - R.N0 + 80 };
       var lato = Math.min(3200, Math.round(Math.max(R.P.fw, R.P.fh) * 6));
-      var fw = c.fonteWeb || { sfondo: 'otm', satellite: 0, livelli: [] };
-      var sc = { sfondo: fw.sfondo === 'bianco' ? 'otm' : fw.sfondo, satellite: fw.satellite || 0, livelli: fw.livelli || [], wmsAltro: fw.wmsAltro || {} };
+      var b = sceltaStampa.bordi, fw = b === 'uguale' && c.fonteWeb ? c.fonteWeb : b === 'sat' ? { sfondo: 'bianco', satellite: 100 } : { sfondo: b || 'otm' };
+      var sc = { sfondo: fw.sfondo, satellite: fw.satellite || 0, livelli: fw.livelli || [], wmsAltro: fw.wmsAltro || {} };
       var cred = '';
       return piano(sc, zona, lato).then(function (p) { cred = p.crediti; return componi(p, avanz, true); }).then(function (r) { return { d: r.d, w: r.w, h: r.h, angoli: r.angoli, crediti: cred }; });
     }
@@ -1075,14 +1075,21 @@
         var b = btn((sceltaStampa[o[0]] ? '✓ ' : '') + o[1], 'chip' + (sceltaStampa[o[0]] ? ' on' : ''), function () { sceltaStampa[o[0]] = !sceltaStampa[o[0]]; b.textContent = (sceltaStampa[o[0]] ? '✓ ' : '') + o[1]; b.classList.toggle('on', sceltaStampa[o[0]]); });
         ch.appendChild(b);
       });
-      [['riempi', 'Riempi i bordi con la cartografia']].forEach(function (o) {
-        var b = btn((sceltaStampa[o[0]] ? '✓ ' : '') + o[1], 'chip' + (sceltaStampa[o[0]] ? ' on' : ''), function () { sceltaStampa[o[0]] = !sceltaStampa[o[0]]; b.textContent = (sceltaStampa[o[0]] ? '✓ ' : '') + o[1]; b.classList.toggle('on', sceltaStampa[o[0]]); });
-        ch.appendChild(b);
-      });
       bx.appendChild(campoF('Cosa mettere', ch));
+      // oltre i bordi della cartina: la mappa vera fino alla cornice, possibilmente con lo stesso sfondo della cartina
+      var nomeSf = function (id) { var x = SFONDI.filter(function (q) { return q.id === id; })[0]; return x ? x.nome : id; };
+      var noto = c.fonteWeb && c.fonteWeb.sfondo, bo = el('select');
+      var opz = [];
+      if (noto) opz.push(['uguale', 'Stesso sfondo della cartina (' + (c.fonteWeb.sfondo === 'bianco' && c.fonteWeb.satellite ? 'foto satellitare' : nomeSf(c.fonteWeb.sfondo).replace(/ \(.*\)$/, '')) + (c.fonteWeb.satellite && c.fonteWeb.sfondo !== 'bianco' ? ' + satellite' : '') + ')']);
+      opz = opz.concat([['otm', 'OpenTopoMap'], ['colori', 'Regione Piemonte · BDTRE a colori'], ['bn', 'Regione Piemonte · BDTRE in bianco e nero'], ['sat', 'Foto satellitare'], ['nessuno', 'Lascia i bordi vuoti']]);
+      opz.forEach(function (v) { var x = el('option', null, v[1]); x.value = v[0]; bo.appendChild(x); });
+      bo.value = sceltaStampa.bordi || (noto ? 'uguale' : (c.fonteBordi || 'otm'));
+      bx.appendChild(campoF('Fuori dalla cartina, fino alla cornice', bo));
+      if (!noto) bx.appendChild(el('small', 'ed-txt muto', 'Non so con quale sfondo è stata fatta questa cartina: scegli quello uguale, me lo ricordo per le prossime stampe.'));
       var rB = el('div', 'ed-riga');
       rB.appendChild(btn('Crea il PDF', 'accent', function () {
-        Object.assign(sceltaStampa, { titolo: tit.value.trim(), formato: fm.value, orient: orr.value, scala: +sca.value, tema: st.value, inquadra: inq.value });
+        Object.assign(sceltaStampa, { titolo: tit.value.trim(), formato: fm.value, orient: orr.value, scala: +sca.value, tema: st.value, inquadra: inq.value, bordi: bo.value, riempi: bo.value !== 'nessuno' });
+        if (!noto && bo.value !== 'nessuno') c.fonteBordi = bo.value;
         var tema = st.value && st.value !== 'originale' && window.S40F ? st.value : null;
         if (!tema && !sceltaStampa.riempi) { window.AC_STAMPA.apri(c, Object.assign({}, sceltaStampa, { fondo: null })); return; }
         // la finestra si apre subito (altrimenti il browser la blocca), la cartina arriva appena pronta
