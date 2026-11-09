@@ -29,7 +29,7 @@
 #error "Scegli l'ambiente bandiera, hq o tag in PlatformIO"
 #endif
 
-#define VERSIONE "0.6"
+#define VERSIONE "0.7"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -238,6 +238,26 @@ int trasmetti(const uint8_t *p, size_t n) {
 #ifdef RUOLO_BANDIERA
 // ================================================================ BANDIERA
 TinyGPSPlus gps;
+// ---- posizione della bandiera: media delle letture buone (HDOP basso, almeno 5 satelliti).
+// Dopo 10 letture buone la posizione è "fissa" e va nel messaggio; se per 20 s di fila il GPS dice che è lontana
+// più di 25 m dalla media, la bandiera è stata spostata: si ricomincia la media e per 10 minuti lo segnala all'HQ.
+#define POS_N 60
+double mLat = 0, mLon = 0; int nPos = 0, fuori = 0; uint32_t spostataDa = 0;
+bool posFissa() { return nPos >= 10; }
+bool spostata() { return spostataDa && millis() - spostataDa < 600000UL; }
+void aggiornaPos() {
+  if (!gps.location.isUpdated()) return;
+  double la = gps.location.lat(), lo = gps.location.lng();
+  if (!gps.hdop.isValid() || gps.hdop.hdop() > 2.5 || gps.satellites.value() < 5) return;
+  if (posFissa()) {
+    double d = TinyGPSPlus::distanceBetween(la, lo, mLat, mLon);
+    if (d > 25) { if (++fuori >= 20) { nPos = 0; fuori = 0; spostataDa = millis(); if (!spostataDa) spostataDa = 1; Serial.println("GPS: bandiera spostata, rifaccio la posizione"); } return; }
+    fuori = 0;
+  }
+  if (nPos < POS_N) { nPos++; mLat += (la - mLat) / nPos; mLon += (lo - mLon) / nPos; }
+  else { mLat += (la - mLat) / POS_N; mLon += (lo - mLon) / POS_N; }
+}
+String gpsTesto() { return posFissa() ? String("GPS fisso") : gps.location.isValid() ? "GPS " + String(nPos) + "/10" : String("GPS --"); }
 Adafruit_NeoPixel led(NUM_LED, PIN_LED, NEO_GRB + NEO_KHZ800);
 struct Tag { uint16_t minor; uint8_t major; float rssi; uint32_t visto; };
 #define MAX_TAG 64
@@ -360,7 +380,7 @@ String jsonStato() {
   String s = "{\"bandiera\":\"" + idTesto(mioId) + "\",\"seq\":" + String(seq) + ",\"blu\":" + String(blu) + ",\"rossi\":" + String(rossi) +
              ",\"owner\":" + jsonFaz(owner) + ",\"conq\":" + jsonFaz(progF) + ",\"pct\":" + String((int)(100 * prog / tempoConq)) +
              ",\"contesa\":" + (contesa ? "true" : "false") + ",\"soglia\":" + String(soglia) + ",\"tempo\":" + String(tempoConq) +
-             ",\"batt\":" + String(batteria()) + ",\"gps\":" + (gps.location.isValid() ? "true" : "false") + ",\"lora\":" + String(statoLoRa) + ",\"tx\":" + String(ultimoTx) + ",\"pmu\":\"" + pmuNome + "\",\"radio\":\"" + chipRadio + "\",\"diag\":\"" + diagnosi + "\",\"tag\":[";
+             ",\"batt\":" + String(batteria()) + ",\"gps\":" + (gps.location.isValid() ? "true" : "false") + ",\"gpsFisso\":" + (posFissa() ? "true" : "false") + ",\"spostata\":" + (spostata() ? "true" : "false") + (posFissa() ? String(",\"lat\":") + String(mLat, 6) + ",\"lon\":" + String(mLon, 6) : String("")) + ",\"lora\":" + String(statoLoRa) + ",\"tx\":" + String(ultimoTx) + ",\"pmu\":\"" + pmuNome + "\",\"radio\":\"" + chipRadio + "\",\"diag\":\"" + diagnosi + "\",\"tag\":[";
   uint32_t ora = millis(); bool primo = true;
   portENTER_CRITICAL(&muxTag);
   for (int i = 0; i < nTag; i++) {
@@ -386,17 +406,18 @@ void invia() {
     n++;
   }
   portEXIT_CRITICAL(&muxTag);
-  int32_t lat = gps.location.isValid() ? (int32_t)(gps.location.lat() * 1e6) : 0;
-  int32_t lon = gps.location.isValid() ? (int32_t)(gps.location.lng() * 1e6) : 0;
+  // nel messaggio solo la posizione media, quando è fissa (0 = non ancora)
+  int32_t lat = posFissa() ? (int32_t)(mLat * 1e6) : 0;
+  int32_t lon = posFissa() ? (int32_t)(mLon * 1e6) : 0;
   seq++;
   p[0] = 'A'; p[1] = 'C'; p[2] = T_STATO; p[3] = mioId >> 8; p[4] = mioId & 0xFF; p[5] = seq;
   p[6] = batteria(); p[7] = blu; p[8] = rossi; p[9] = n;
   memcpy(p + 10, &lat, 4); memcpy(p + 14, &lon, 4);
-  p[18] = owner; p[19] = progF; p[20] = (uint8_t)constrain((int)(100 * prog / tempoConq), 0, 100); p[21] = contesa ? 1 : 0;
+  p[18] = owner; p[19] = progF; p[20] = (uint8_t)constrain((int)(100 * prog / tempoConq), 0, 100); p[21] = (contesa ? 1 : 0) | (posFissa() ? 2 : 0) | (spostata() ? 4 : 0);   // bit: contesa, posizione fissa, spostata
   p[22] = (uint8_t)(int8_t)soglia; p[23] = tempoConq >> 8; p[24] = tempoConq & 0xFF;
   int st = trasmetti(p, TESTA + 4 * n);
   Serial.printf("[%s] invio #%u: blu %u, rossi %u, tag sentiti %u, area %s, GPS %s, batteria %s -> %s\n",
-                idTesto(mioId).c_str(), seq, blu, rossi, n, nomeFaz(owner), gps.location.isValid() ? "ok" : "senza fix",
+                idTesto(mioId).c_str(), seq, blu, rossi, n, nomeFaz(owner), gpsTesto().c_str(),
                 battTesto(p[6]).c_str(), st == RADIOLIB_ERR_NONE ? "inviato" : "ERRORE LoRa");
   Serial.println(jsonStato());
 }
@@ -406,7 +427,7 @@ void aggiornaDisplay() {
   scrivi("BAND " + idTesto(mioId) + " #" + String(seq) + " " + battTesto(batteria()),
          "B" + String(blu) + "  R" + String(rossi),
          riga, statoLoRa ? diagnosi : "Tag sentiti: " + String(nTag) + " soglia " + String(soglia),
-         String(gps.location.isValid() ? "GPS ok " : "GPS -- ") + loraTesto() + (muto ? " MUTO" : ""));
+         gpsTesto() + " " + loraTesto() + (muto ? " MUTO" : ""));
 }
 
 // comandi (da USB o via radio dall'HQ). Risponde con una riga di testo.
@@ -416,6 +437,7 @@ String comando(String c) {
   if (k == "soglia" && v.length()) { soglia = constrain(v.toInt(), -120, -20); salva(); return "soglia " + String(soglia) + " dBm"; }
   if (k == "tempo" && v.length()) { tempoConq = constrain(v.toInt(), 5, 3600); salva(); return "conquista in " + String(tempoConq) + " s"; }
   if (k == "luce" && v.length()) { luce = constrain(v.toInt(), 5, 255); salva(); return "luce " + String(luce); }
+  if (k == "gps") return "GPS: " + String(gps.satellites.value()) + " satelliti, HDOP " + String(gps.hdop.hdop(), 1) + (posFissa() ? ", posizione fissa " + String(mLat, 6) + "," + String(mLon, 6) + " (" + String(nPos) + " letture)" : String(", posizione non ancora fissa (") + String(nPos) + "/10)") + (spostata() ? ", SPOSTATA" : "");
   if (k == "muto") { muto = v.length() ? v.toInt() != 0 : !muto; salva(); return muto ? "cicalino muto" : "cicalino attivo"; }
   if (k == "buzzer") { buzBasso = !buzBasso; salva(); return String("cicalino ") + (buzBasso ? "attivo col segnale basso" : "attivo col segnale alto"); }
   if (k == "reset") { owner = 0; prog = 0; progF = 0; ultimoInvio = 0; return "area neutra"; }
@@ -474,6 +496,7 @@ void setup() {
 
 void loop() {
   while (Serial1.available()) gps.encode(Serial1.read());
+  aggiornaPos();
   String riga; if (leggiRiga(riga)) Serial.println("> " + comando(riga));
   ascoltaRadio();
   int b = pulsante();
@@ -622,10 +645,10 @@ void loop() {
   Band &b = band[i];
   b.id = id; b.batt = p[6]; b.blu = p[7]; b.rossi = p[8]; b.owner = p[18]; b.rssi = rs; b.visto = millis();
   int32_t lat, lon; memcpy(&lat, p + 10, 4); memcpy(&lon, p + 14, 4);
-  char h[360];
-  snprintf(h, sizeof(h), "{\"bandiera\":\"%s\",\"seq\":%u,\"blu\":%u,\"rossi\":%u,\"owner\":%s,\"conq\":%s,\"pct\":%u,\"contesa\":%s,\"soglia\":%d,\"tempo\":%u,\"batt\":%u,\"lat\":%.6f,\"lon\":%.6f,\"rssiLora\":%.0f,\"snr\":%.1f,\"tag\":[",
+  char h[420];
+  snprintf(h, sizeof(h), "{\"bandiera\":\"%s\",\"seq\":%u,\"blu\":%u,\"rossi\":%u,\"owner\":%s,\"conq\":%s,\"pct\":%u,\"contesa\":%s,\"soglia\":%d,\"tempo\":%u,\"batt\":%u,\"lat\":%.6f,\"lon\":%.6f,\"gpsFisso\":%s,\"spostata\":%s,\"rssiLora\":%.0f,\"snr\":%.1f,\"tag\":[",
            idTesto(id).c_str(), p[5], p[7], p[8], jsonFaz(p[18]).c_str(), jsonFaz(p[19]).c_str(), p[20], (p[21] & 1) ? "true" : "false",
-           (int)(int8_t)p[22], (p[23] << 8) | p[24], p[6], lat / 1e6, lon / 1e6, rs, sn);
+           (int)(int8_t)p[22], (p[23] << 8) | p[24], p[6], lat / 1e6, lon / 1e6, (p[21] & 2) ? "true" : "false", (p[21] & 4) ? "true" : "false", rs, sn);
   String out = h;
   int n = min((int)p[9], (int)((len - TESTA) / 4));
   for (int k = 0; k < n; k++) {

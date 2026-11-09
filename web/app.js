@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.51';
+  var VERSIONE = '0.52';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -1222,8 +1222,35 @@
       mapBox.innerHTML = ''; if (!b.cm) return;
       var opz = [['', '—']].concat((b.cm.punti || []).filter(function (p) { return p.tipo !== 'mob'; }).map(function (p) { return [p.id, p.nome || p.id]; }));
       var ids = Object.keys(b.band); if (!ids.length) mapBox.appendChild(el('p', 'hint', 'Quando arriva una bandiera, qui scegli a quale area corrisponde.'));
-      ids.forEach(function (id) { var s = select(opz, b.mappa[id] || ''); s.onchange = function () { b.mappa[id] = s.value || null; }; mapBox.appendChild(campoForm('Bandiera ' + id, s)); });
+      gpsRighe = [];
+      ids.forEach(function (id) {
+        var s = select(opz, b.mappa[id] || ''); s.onchange = function () { b.mappa[id] = s.value || null; aggiornaGps(); }; mapBox.appendChild(campoForm('Bandiera ' + id, s));
+        // posizione dal GPS della bandiera: l'area si sposta dove la bandiera è davvero
+        var r = el('div', 'banco-gps'), t = el('small', 'hint'), bt = bottone('📍 Sposta l\'area qui', 'mini', function () { spostaArea(id); });
+        r.appendChild(t); r.appendChild(bt); mapBox.appendChild(r); gpsRighe.push({ id: id, t: t, bt: bt });
+      });
       mapBox.dataset.n = ids.length;
+      aggiornaGps();
+    }
+    var gpsRighe = [];
+    function areaDi(id) { return b.cm && b.mappa[id] ? (b.cm.punti || []).filter(function (p) { return p.id === b.mappa[id]; })[0] : null; }
+    function aggiornaGps() {
+      gpsRighe.forEach(function (g) {
+        var j = b.band[g.id] || {}, p = areaDi(g.id), fisso = !!(j.gpsFisso && j.lat);
+        var d = fisso && p && p.lat != null ? Math.round(window.AC_UTM ? distM(p.lat, p.lon, j.lat, j.lon) : 0) : null;
+        g.t.textContent = !fisso ? (j.gps ? 'GPS: sto fissando la posizione…' : 'GPS: nessun segnale') :
+          'GPS fisso ' + j.lat.toFixed(5) + ', ' + j.lon.toFixed(5) + (d != null ? ' · ' + d + ' m dall\'area' : '') + (j.spostata ? ' · ⚠ SPOSTATA' : '');
+        g.t.className = 'hint' + ((j.spostata || (d != null && d > 25)) ? ' ko' : '');
+        g.bt.hidden = !(fisso && p && P('mappe') && (d == null || d > 3));
+      });
+    }
+    function distM(a1, o1, a2, o2) { var R = 6371000, r = Math.PI / 180, x = (o2 - o1) * r * Math.cos((a1 + a2) / 2 * r), y = (a2 - a1) * r; return Math.sqrt(x * x + y * y) * R; }
+    function spostaArea(id) {
+      var j = b.band[id], p = areaDi(id); if (!j || !p || !b.cm) return;
+      if (!confirm('Spostare l\'area «' + (p.nome || p.id) + '» dove si trova la bandiera ' + id + '? La cartina viene salvata.')) return;
+      p.lat = j.lat; p.lon = j.lon; p.fonte = 'coord';
+      if (b.cm.geo && window.AC_UTM) { var q = window.AC_UTM.aPixel(b.cm.geo, p.lat, p.lon); p.x = q.x; p.y = q.y; }
+      S.salvaCampo(b.cm, null).then(function () { toast('Area spostata sulla bandiera'); aggiornaGps(); }, errore);
     }
     selC.onchange = function () { bancoSvuota(); b.cid = selC.value || null; caricaCampo(); };
     if (b.cid) caricaCampo();
@@ -1254,6 +1281,7 @@
       }
       tab.innerHTML = h;
       if (b.cm && String(mapBox.dataset.n) !== String(ids.length)) disegnaMappa();
+      else if (b.cm) aggiornaGps();
       info.textContent = b.attivo ? (b.cid ? 'Attivo: ' + Object.keys(b.ultimoPt).length + ' tag sulle aree' : 'Scegli un conflict') : '';
       var giu = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
       pre.textContent = (soloC.checked ? b.righe.filter(function (r) { return r.indexOf(' {') < 0; }) : b.righe).slice(-250).join('\n');

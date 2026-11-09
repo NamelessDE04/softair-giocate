@@ -799,3 +799,5 @@ main > .btn.big { margin-bottom: 6px; }
 .cc-eti { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; }
 .cc-nome { font-size: 18px; font-weight: 700; color: var(--ink); opacity: .6; text-decoration: line-through; text-decoration-thickness: 1.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cc-vince { flex: none; font-size: 14px; font-weight: 700; color: var(--oro); background: rgba(232,201,106,.1); border: 1px solid rgba(232,201,106,.35); border-radius: 999px; padding: 3px 10px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.banco-gps { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: -2px 0 10px; }
+.banco-gps .hint.ko { color: var(--ko); }
