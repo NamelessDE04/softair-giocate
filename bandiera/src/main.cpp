@@ -30,7 +30,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.8.4"
+#define VERSIONE "0.8.5"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -785,6 +785,39 @@ bool leggiIbeacon(NimBLEAdvertisedDevice &d, uint8_t *u, uint16_t &maj, uint16_t
   memcpy(u, m.data() + 4, 16); maj = ((uint8_t)m[20] << 8) | (uint8_t)m[21]; min_ = ((uint8_t)m[22] << 8) | (uint8_t)m[23];
   return true;
 }
+// I CP35 trasmettono a turno piu' pacchetti (iBeacon, Eddystone, nome...): bisogna guardarli uno per uno,
+// non solo l'ultimo ricevuto. Questa tabella raccoglie tutto quello che si sente durante una scansione.
+struct Visto { char mac[18]; char nome[20]; int rssi; bool coll, ib, nostro; uint16_t ma, mi; uint8_t tipo; };
+Visto visti[40]; volatile int nVisti = 0; volatile bool raccogli = false;
+portMUX_TYPE muxV = portMUX_INITIALIZER_UNLOCKED;
+class Raccolta : public NimBLEAdvertisedDeviceCallbacks {
+  void onResult(NimBLEAdvertisedDevice *d) override {
+    if (!raccogli) return;
+    String mac = hexMac(d->getAddress());
+    uint8_t u[16]; uint16_t ma = 0, mi = 0; bool ib = leggiIbeacon(*d, u, ma, mi);
+    bool nostro = ib && !memcmp(u, uuid, 16);
+    std::string nm = d->haveName() ? d->getName() : std::string();
+    bool coll = d->getAdvType() == 0 || d->getAdvType() == 1;
+    portENTER_CRITICAL(&muxV);
+    int i = 0; for (; i < nVisti; i++) if (!strcmp(visti[i].mac, mac.c_str())) break;
+    if (i == nVisti && nVisti < 40) { memset(&visti[i], 0, sizeof(Visto)); strncpy(visti[i].mac, mac.c_str(), 17); visti[i].rssi = -999; visti[i].tipo = d->getAddress().getType(); nVisti++; }
+    if (i < 40) {
+      Visto &v = visti[i];
+      if (d->getRSSI() > v.rssi) v.rssi = d->getRSSI();
+      if (coll) v.coll = true;
+      if (nm.size() && !v.nome[0]) strncpy(v.nome, nm.c_str(), 19);
+      if (ib && (!v.ib || nostro)) { v.ib = true; v.nostro = nostro; v.ma = ma; v.mi = mi; }
+    }
+    portEXIT_CRITICAL(&muxV);
+  }
+};
+void scansiona(int sec) {
+  NimBLEScan *sc = NimBLEDevice::getScan();
+  nVisti = 0; raccogli = true;
+  sc->start(sec, false);
+  raccogli = false; sc->clearResults();
+}
+
 void schermo() {
   // riga grande (max 10 caratteri): il prossimo tag che verra' scritto
   String r2 = autoOn ? String(String(autoFaz == 1 ? "BLU" : "ROSSO") + " #" + String(autoNum)) : String("FERMO");
@@ -860,14 +893,9 @@ bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
   // controllo nell'aria: il tag deve trasmettere UUID, fazione e numero giusti
   stato = "Controllo in onda..."; schermo();
   bool visto = false;
-  NimBLEScan *sc = NimBLEDevice::getScan();
-  for (int giro = 0; giro < 4 && !visto; giro++) {
-    NimBLEScanResults r = sc->start(2, false);
-    for (int i = 0; i < r.getCount() && !visto; i++) {
-      NimBLEAdvertisedDevice d = r.getDevice(i); uint8_t u[16]; uint16_t ma, mi;
-      if (leggiIbeacon(d, u, ma, mi) && !memcmp(u, uuid, 16) && ma == f && mi == n) visto = true;
-    }
-    sc->clearResults();
+  for (int giro = 0; giro < 3 && !visto; giro++) {
+    scansiona(3);
+    for (int i = 0; i < nVisti; i++) if (visti[i].nostro && visti[i].ma == f && visti[i].mi == n) visto = true;
   }
   stato = visto ? "Fatto" : "Scritto, non visto";
   esito(true, mac, f, n, visto ? "" : "il tag potrebbe riavviarsi: ricontrolla con 'elenco'", visto);
@@ -893,39 +921,34 @@ bool programma(NimBLEAddress a, uint8_t f, uint16_t n) {
 
 // il tag più vicino (sopra la soglia "in mano"), collegabile, non ancora fatto in questa sessione
 bool piuVicino(NimBLEAddress &out, bool saltaFatti) {
-  NimBLEScan *sc = NimBLEDevice::getScan();
-  NimBLEScanResults r = sc->start(2, false);
-  int best = -999; bool trovato = false;
-  for (int i = 0; i < r.getCount(); i++) {
-    NimBLEAdvertisedDevice d = r.getDevice(i);
-    if (d.getRSSI() < vicinoDb || d.getRSSI() <= best) continue;
-    if (d.getAdvType() != 0 && d.getAdvType() != 1) continue;   // solo pubblicità "collegabile"
-    String mac = hexMac(d.getAddress()); bool gia = false;
-    for (int k = 0; k < nFatti; k++) if (fatti[k] == mac) gia = true;
+  scansiona(2);
+  int best = -999; String scelto = ""; uint8_t tipo = BLE_ADDR_PUBLIC;
+  for (int i = 0; i < nVisti; i++) {
+    Visto &v = visti[i];
+    if (v.rssi < vicinoDb || v.rssi <= best || !v.coll) continue;
+    bool gia = false; for (int k = 0; k < nFatti; k++) if (fatti[k] == String(v.mac)) gia = true;
     if (gia && saltaFatti) continue;
-    best = d.getRSSI(); out = d.getAddress(); trovato = true;
+    best = v.rssi; scelto = v.mac; tipo = v.tipo;
   }
-  sc->clearResults();
-  return trovato;
+  if (!scelto.length()) return false;
+  out = NimBLEAddress(std::string(scelto.c_str()), tipo);
+  return true;
 }
 
 void elenco() {
-  NimBLEScan *sc = NimBLEDevice::getScan();
-  NimBLEScanResults r = sc->start(4, false);
-  String js = "{\"vicini\":["; bool primo = true; int nostri = 0;
+  scansiona(5);
+  String js = "{\"vicini\":["; int nostri = 0;
   Serial.println("Tag nei dintorni (i nostri hanno l'UUID giusto):");
-  for (int i = 0; i < r.getCount(); i++) {
-    NimBLEAdvertisedDevice d = r.getDevice(i); uint8_t u[16]; uint16_t ma = 0, mi = 0;
-    bool ib = leggiIbeacon(d, u, ma, mi), nostro = ib && !memcmp(u, uuid, 16);
-    if (!ib && d.getRSSI() < vicinoDb) continue;
-    if (nostro) nostri++;
-    String mac = hexMac(d.getAddress());
-    String descr = nostro ? String(String(ma == 1 ? "BLU" : ma == 2 ? "ROSSO" : "?") + " #" + String(mi)) : String(ib ? "iBeacon di altri" : "collegabile, non iBeacon");
-    Serial.printf("  %s  %4d dBm  %s\n", mac.c_str(), d.getRSSI(), descr.c_str());
-    char b[160]; snprintf(b, sizeof(b), "%s{\"mac\":\"%s\",\"rssi\":%d,\"nostro\":%s,\"f\":\"%s\",\"n\":%u}", primo ? "" : ",", mac.c_str(), d.getRSSI(), nostro ? "true" : "false", nostro ? nomeFaz(ma) : "", nostro ? mi : 0);
-    js += b; primo = false;
+  for (int i = 0; i < nVisti; i++) {
+    Visto &v = visti[i];
+    if (!v.ib && v.rssi < vicinoDb) continue;
+    if (v.nostro) nostri++;
+    String descr = v.nostro ? String(String(v.ma == 1 ? "BLU" : v.ma == 2 ? "ROSSO" : "?") + " #" + String(v.mi)) :
+                   v.ib ? String("iBeacon di altri (major " + String(v.ma) + ", minor " + String(v.mi) + ")") : String(v.coll ? "collegabile, non iBeacon" : "non iBeacon");
+    Serial.printf("  %s  %4d dBm  %-10s %s\n", v.mac, v.rssi, v.nome, descr.c_str());
+    char b[200]; snprintf(b, sizeof(b), "%s{\"mac\":\"%s\",\"nome\":\"%s\",\"rssi\":%d,\"nostro\":%s,\"f\":\"%s\",\"n\":%u}", js.endsWith("[") ? "" : ",", v.mac, v.nome, v.rssi, v.nostro ? "true" : "false", v.nostro ? nomeFaz(v.ma) : "", v.nostro ? v.mi : 0);
+    js += b;
   }
-  sc->clearResults();
   Serial.println(js + "]}");
   ultimo = String(nostri) + " tag in onda"; schermo();
 }
@@ -968,6 +991,7 @@ void setup() {
   NimBLEDevice::init("");
   NimBLEDevice::setPower(ESP_PWR_LVL_N0);
   NimBLEScan *sc = NimBLEDevice::getScan(); sc->setActiveScan(true); sc->setInterval(100); sc->setWindow(99);
+  sc->setAdvertisedDeviceCallbacks(new Raccolta(), true);   // true: ogni pacchetto, anche dello stesso tag
   schermo();
   Serial.println("Iniettore pronto. Scrivi 'auto blu 1' e avvicina i tag uno alla volta. 'aiuto' per i comandi.");
   Serial.println("{\"iniettore\":\"pronto\"}");
