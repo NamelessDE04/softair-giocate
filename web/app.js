@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.52';
+  var VERSIONE = '0.53';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -130,7 +130,8 @@
     team: '<path d="M12 3l7 3v5c0 4.5-3 8-7 10-4-2-7-5.5-7-10V6z"/>',
     profilo: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>',
     organizza: '<path d="M4 6h16M4 12h10M4 18h13"/><circle cx="18" cy="12" r="2.2"/>',
-    esci: '<path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/>'
+    esci: '<path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/>',
+    iniettore: '<path d="M18 3l3 3M16.5 4.5l3 3M19 6l-9 9-3-3 9-9M7 12l-4 4M4 15l2 2M10 15l-1 1"/>'
   };
   function chiudiMenu() {
     var m = $('menuTendina'); if (!m) return;
@@ -154,6 +155,7 @@
     if (me.team) voci.push(['team', 'Il mio team', function () { vai('team', me.team); }]);
     voci.push(['profilo', 'Profilo', function () { vai('profilo'); }]);
     if (organizza()) voci.push(['organizza', 'Organizza', function () { vai('organizza'); }]);
+    if (st.dev) voci.push(['iniettore', 'Iniettore', function () { vai('banco'); }]);
     voci.push(['esci', 'Esci', function () { S.logout(); }, 'menu-esci']);
     voci.forEach(function (v) {
       var b = el('button', 'menu-voce' + (v[3] ? ' ' + v[3] : '')); b.type = 'button';
@@ -171,7 +173,7 @@
 
   // ================= HOME
   // pagine di debug tolte dalla home: si aprono con l'indirizzo …/#banco o …/#prova
-  var apriNascosta = { '#banco': 'banco', '#prova': 'provaTbeam' }[location.hash] || null;
+  var apriNascosta = { '#banco': 'banco', '#iniettore': 'banco', '#prova': 'provaTbeam' }[location.hash] || null;
   function home() {
     if (apriNascosta) { var v = apriNascosta; apriNascosta = null; history.replaceState(null, '', location.pathname); setTimeout(function () { vai(v); }, 0); }
     var st = S.stato(), me = st.me;
@@ -1080,7 +1082,8 @@
   // e, se vuoi, i tag visti dalle bandiere mandati come presenze in un conflict di prova
   var NUS = { s: '6e400001-b5a3-f393-e0a9-e50e24dcca9e', rx: '6e400002-b5a3-f393-e0a9-e50e24dcca9e', tx: '6e400003-b5a3-f393-e0a9-e50e24dcca9e' };
   var BANCO = { via: null, porta: null, lettore: null, scrittore: null, dev: null, rx: null, righe: [], band: {}, hq: null, tag: null, cb: null,
-    cid: null, cm: null, mappa: {}, attivo: false, ultimoPt: {}, scritti: 0, storia: [], visto: {}, avvio: null };
+    cid: null, cm: null, mappa: {}, attivo: false, ultimoPt: {}, scritti: 0, storia: [], visto: {}, avvio: null,
+    inj: { fatti: [], auto: null, vicini: null, info: null } };
   function bancoRiga(s, da) {
     s = String(s).replace(/\s+$/, ''); if (!s) return;
     var t = new Date(), hh = ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2) + ':' + ('0' + t.getSeconds()).slice(-2);
@@ -1090,6 +1093,9 @@
         var j = JSON.parse(s); j._t = Date.now();
         if (j.bandiera) { bancoStoria(BANCO.band[j.bandiera], j); BANCO.band[j.bandiera] = j; bancoInoltra(j); }
         else if (j.avvio) BANCO.avvio = j.avvio;
+        else if (j.iniettore) { BANCO.avvio = 'INIETTORE'; if (j.iniettore === 'ok' || j.iniettore === 'errore') BANCO.inj.fatti.unshift(j); else if (j.iniettore === 'info') BANCO.inj.info = j; }
+        else if (j.vicini) { BANCO.avvio = 'INIETTORE'; BANCO.inj.vicini = j.vicini; BANCO.inj.viciniT = Date.now(); }
+        else if (j.auto != null) { BANCO.avvio = 'INIETTORE'; BANCO.inj.auto = j.auto ? j : null; }
         else if (j.risposta) { BANCO.visto.risposta = 1; BANCO.storia.push({ t: Date.now(), testo: 'Risposta via radio da ' + j.risposta + ': ' + j.testo }); }
         else if (j.hq) { BANCO.hq = j; BANCO.avvio = 'HQ'; }
         else if (j.tag != null) { if (!BANCO.avvio) BANCO.avvio = 'TAG'; BANCO.tag = j; }
@@ -1180,7 +1186,7 @@
     b.ultimoPt = {}; toast('Pallini dei tag tolti');
   }
   function pagBanco() {
-    testata('Banco bandiere · debug');
+    testata('Iniettore');
     if (!P('conflitti')) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
     var b = BANCO, box = el('div', 'banco'); app.appendChild(box);
     var testa = el('div', 'banco-st'); box.appendChild(testa);
@@ -1200,6 +1206,42 @@
         if (v) bancoInvia('cmd tutte ' + k + ' ' + v.trim());
       }));
     });
+    // ---- iniezione dei tag veri (T-Beam col programma INIETTORE, via USB)
+    var inj = el('div', 'inj'); box.appendChild(inj);
+    inj.appendChild(el('b', null, '💉 Iniezione tag'));
+    inj.appendChild(el('p', 'hint', 'Serve un T-Beam col programma Iniettore collegato via USB. Scegli fazione e numero di partenza, premi Avvia e avvicina un tag alla volta (appoggiato all\'antenna): lo programma, controlla che trasmetta giusto e passa al numero dopo.'));
+    var injR = el('div', 'inj-r');
+    var injF = select([['blu', 'Blu'], ['rossa', 'Rossa']], 'blu'), injN = el('input'); injN.type = 'number'; injN.min = 1; injN.max = 999; injN.value = 1; injN.className = 'inj-n';
+    var injP = select([['0', '-19,5 dBm'], ['1', '-13,5 dBm'], ['2', '-7 dBm'], ['3', '-3,5 dBm'], ['4', '-1 dBm'], ['5', '+1 dBm'], ['6', '+1,5 dBm'], ['7', '+2,5 dBm']], '4');
+    injR.appendChild(campoForm('Fazione', injF)); injR.appendChild(campoForm('Dal numero', injN)); injR.appendChild(campoForm('Potenza', injP));
+    inj.appendChild(injR);
+    var injB = el('div', 'banco-bt'); inj.appendChild(injB);
+    injB.appendChild(bottone('▶ Avvia', 'accent', function () { bancoInvia('pot ' + injP.value); setTimeout(function () { bancoInvia('auto ' + injF.value + ' ' + (parseInt(injN.value, 10) || 1)); }, 300); }));
+    injB.appendChild(bottone('■ Stop', '', function () { bancoInvia('stop'); }));
+    injB.appendChild(bottone('Solo il più vicino', '', function () { bancoInvia('pot ' + injP.value); setTimeout(function () { bancoInvia('prog ' + injF.value + ' ' + (parseInt(injN.value, 10) || 1)); }, 300); }));
+    injB.appendChild(bottone('Tag in onda', '', function () { bancoInvia('elenco'); }));
+    injB.appendChild(bottone('Password…', 'mini', function () { var v = prompt('Password dei tag (di fabbrica di solito 555555)'); if (v) bancoInvia('pwd ' + v.trim()); }));
+    var injSt = el('div', 'inj-st'); inj.appendChild(injSt);
+    function disegnaInj() {
+      var I = b.inj, h = '';
+      injSt.parentNode.style.display = '';
+      if (I.auto) h += '<p class="inj-auto">In corso: <b>' + (I.auto.f === 'rossa' ? 'ROSSA' : 'BLU') + ' #' + I.auto.n + '</b> · avvicina il prossimo tag</p>';
+      if (I.fatti.length) {
+        h += '<table class="inj-t"><tr><th>Tag</th><th>Esito</th><th>Indirizzo</th></tr>';
+        I.fatti.slice(0, 30).forEach(function (x) {
+          h += '<tr class="' + (x.iniettore === 'ok' ? (x.verificato ? 'ok' : 'forse') : 'ko') + '"><td>' + (x.iniettore === 'ok' ? '<b class="' + x.f + '">' + (x.f === 'rossa' ? 'R' : 'B') + x.n + '</b>' : '—') + '</td><td>' +
+            (x.iniettore === 'ok' ? (x.verificato ? '✓ scritto e visto in onda' : 'scritto, non ancora visto') : '✗ ' + (x.testo || 'errore')) + '</td><td class="m">' + (x.mac || '') + '</td></tr>';
+        });
+        h += '</table>';
+      }
+      if (I.vicini) {
+        var nostri = I.vicini.filter(function (v) { return v.nostro; }).sort(function (a, c) { return (a.f + a.n) > (c.f + c.n) ? 1 : -1; });
+        h += '<p class="hint">Tag nostri in onda (' + nostri.length + '): ' + (nostri.map(function (v) { return '<b class="' + v.f + '">' + (v.f === 'rossa' ? 'R' : 'B') + v.n + '</b> ' + v.rssi; }).join(' · ') || 'nessuno') +
+          ' · altri dispositivi: ' + (I.vicini.length - nostri.length) + '</p>';
+      }
+      injSt.innerHTML = h;
+      if (I.auto && document.activeElement !== injN) { injN.value = I.auto.n; injF.value = I.auto.f; }
+    }
     var tab = el('div', 'banco-tab'); box.appendChild(tab);
     // invio al conflict di prova
     var inol = el('div', 'banco-inol'); box.appendChild(inol);
@@ -1280,6 +1322,7 @@
         h += '</table>';
       }
       tab.innerHTML = h;
+      disegnaInj();
       if (b.cm && String(mapBox.dataset.n) !== String(ids.length)) disegnaMappa();
       else if (b.cm) aggiornaGps();
       info.textContent = b.attivo ? (b.cid ? 'Attivo: ' + Object.keys(b.ultimoPt).length + ' tag sulle aree' : 'Scegli un conflict') : '';
@@ -1418,7 +1461,7 @@
     var k = el('button', 'carta beta'); k.type = 'button';
     var t = el('div', 'pm-testa'); t.appendChild(el('span', 'pm-eti', 'BETA')); k.appendChild(t);
     var r0 = el('div', 'beta-r'); r0.appendChild(el('span', 'beta-ic', '⚑'));
-    var tx = el('div'); tx.appendChild(el('h3', null, 'Banco bandiere')); tx.appendChild(el('small', null, 'Debug delle bandiere LoRa: collegamento all\'HQ, conteggi, tag, comandi, firmware.')); r0.appendChild(tx);
+    var tx = el('div'); tx.appendChild(el('h3', null, 'Iniettore')); tx.appendChild(el('small', null, 'Bandiere LoRa e iniezione dei tag: collegamento all\'HQ, conteggi, tag, comandi, firmware.')); r0.appendChild(tx);
     k.appendChild(r0);
     k.onclick = function () { vai('banco'); };
     return k;

@@ -801,3 +801,14 @@ main > .btn.big { margin-bottom: 6px; }
 .cc-vince { flex: none; font-size: 14px; font-weight: 700; color: var(--oro); background: rgba(232,201,106,.1); border: 1px solid rgba(232,201,106,.35); border-radius: 999px; padding: 3px 10px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .banco-gps { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: -2px 0 10px; }
 .banco-gps .hint.ko { color: var(--ko); }
+/* iniettore: programmazione dei tag veri */
+.inj { border: 1px solid var(--linea); border-radius: 12px; padding: 12px; margin: 12px 0; background: var(--pan2); }
+.inj > b { font-size: 19px; }
+.inj-r { display: grid; grid-template-columns: 1fr 90px 1fr; gap: 8px; margin: 8px 0; }
+.inj-n { width: 100%; }
+.inj-auto { margin: 8px 0; color: var(--oro); }
+.inj-t { width: 100%; border-collapse: collapse; font-size: 15px; margin-top: 8px; }
+.inj-t th, .inj-t td { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--linea); }
+.inj-t td.m { font-family: var(--mono); font-size: 12px; color: var(--muto); }
+.inj-t tr.ok td:nth-child(2) { color: var(--ok); } .inj-t tr.forse td:nth-child(2) { color: var(--giallo); } .inj-t tr.ko td:nth-child(2) { color: var(--ko); }
+.inj b.blu { color: #6fb0ff; } .inj b.rossa { color: #ff7b6e; }

@@ -6,6 +6,7 @@
 //           Dall'app o da USB si mandano comandi alle bandiere (es. "cmd tutte soglia -75").
 // TAG:      fa finta di essere il tag di un giocatore (per provare senza tag veri). Pulsante: corto = cambia fazione,
 //           lungo = numero successivo.
+// INIETTORE: programma i tag veri DX-SMART (UUID, fazione, numero) via Bluetooth, senza l'app del produttore.
 //
 // Scheda: LILYGO T-Beam v1.1/v1.2 (ESP32, SX1278 433 MHz, GPS, display OLED facoltativo).
 // Il programma riconosce da solo il chip di alimentazione (AXP192 sulla v1.1, AXP2101 sulla v1.2).
@@ -25,11 +26,11 @@
 #include <Adafruit_NeoPixel.h>
 #endif
 
-#if !defined(RUOLO_BANDIERA) && !defined(RUOLO_HQ) && !defined(RUOLO_TAG)
-#error "Scegli l'ambiente bandiera, hq o tag in PlatformIO"
+#if !defined(RUOLO_BANDIERA) && !defined(RUOLO_HQ) && !defined(RUOLO_TAG) && !defined(RUOLO_INIETTORE)
+#error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.7"
+#define VERSIONE "0.8"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -722,5 +723,234 @@ void loop() {
   static uint32_t t = 0;
   if (millis() - t > 15000) { t = millis(); Serial.printf("{\"tag\":%u,\"f\":\"%s\",\"pot\":%d,\"batt\":%u}\n", numero, nomeFaz(fazione), DBM[potenza], batteria()); }
   delay(20);
+}
+#endif
+
+#ifdef RUOLO_INIETTORE
+// ================================================================ INIETTORE
+// Programma i tag veri DX-SMART (DX-CP35 e simili) senza la loro app: si collega via Bluetooth al tag più vicino
+// e gli scrive UUID, Major (fazione), Minor (numero), intervallo e potenza. Poi controlla nell'aria che trasmetta giusto.
+// Protocollo (dal codice della loro app): servizio FFE0, risposte su FFE1 (notifiche), comandi su FFE2, password su FFE3.
+// Ogni comando: 'N' 'O' codice lunghezza dati... xor(codice, lunghezza, dati).
+uint8_t uuid[16];
+String pwd = "555555";
+int potIdx = 4, intIdx = 5, vicinoDb = -60;       // potenza 0-7 (da -19,5 a +2,5 dBm), intervallo ×100 ms, soglia "tag in mano"
+bool autoOn = false; uint8_t autoFaz = 1; uint16_t autoNum = 1;
+String ultimo = "", stato = "pronto";
+String fatti[40]; int nFatti = 0;                 // indirizzi dei tag già programmati in questa sessione (modo automatico)
+const char *POT_TESTO[] = { "-19.5", "-13.5", "-7", "-3.5", "-1", "+1", "+1.5", "+2.5" };
+
+// risposte del tag
+uint8_t rxBuf[64]; int rxLen = 0, rxAtteso = 0;
+volatile int ultimaRisp = -1; uint8_t rispDati[40]; volatile int rispLen = 0;
+void notifica(NimBLERemoteCharacteristic *c, uint8_t *d, size_t n, bool isNotify) {
+  for (size_t i = 0; i < n; i++) {
+    uint8_t b = d[i];
+    if (rxLen == 0 && b != 0x4E) continue;
+    if (rxLen == 1 && b != 0x4F) { rxLen = 0; continue; }
+    rxBuf[rxLen++] = b;
+    if (rxLen == 4) rxAtteso = b + 5;
+    if (rxLen >= 4 && rxLen == rxAtteso) {
+      uint8_t x = rxBuf[2] ^ rxBuf[3]; for (int k = 0; k < rxBuf[3]; k++) x ^= rxBuf[4 + k];
+      if (x == rxBuf[rxLen - 1]) { rispLen = min((int)rxBuf[3], 40); memcpy(rispDati, rxBuf + 4, rispLen); ultimaRisp = rxBuf[2]; }
+      rxLen = 0; rxAtteso = 0;
+    }
+    if (rxLen >= (int)sizeof(rxBuf)) rxLen = 0;
+  }
+}
+std::string pacchetto(uint8_t cod, const uint8_t *d, uint8_t n) {
+  std::string s; s += (char)0x4E; s += (char)0x4F; s += (char)cod; s += (char)n;
+  uint8_t x = cod ^ n; for (int i = 0; i < n; i++) { s += (char)d[i]; x ^= d[i]; }
+  s += (char)x; return s;
+}
+String hexMac(const NimBLEAddress &a) { String s = a.toString().c_str(); s.toUpperCase(); return s; }
+void esito(bool ok, const String &mac, uint8_t f, uint16_t n, const String &testo, bool verificato) {
+  if (ok) ultimo = String(f == 1 ? "BLU " : "ROSSO ") + "#" + String(n) + (verificato ? " OK" : " ?"); else ultimo = testo;
+  if (ok) Serial.println(String("FATTO: tag ") + nomeFaz(f) + " #" + String(n) + " (" + mac + ")" + (verificato ? ", controllato in onda" : ", scritto ma non ancora visto in onda"));
+  else Serial.println(String("ERRORE: ") + testo);
+  String t = testo; t.replace("\"", "'");
+  Serial.printf("{\"iniettore\":\"%s\",\"f\":\"%s\",\"n\":%u,\"mac\":\"%s\",\"verificato\":%s,\"testo\":\"%s\"}\n", ok ? "ok" : "errore", nomeFaz(f), n, mac.c_str(), verificato ? "true" : "false", t.c_str());
+}
+
+// iBeacon nella pubblicità: 4C 00 02 15 + uuid(16) + major(2) + minor(2) + potenza
+bool leggiIbeacon(NimBLEAdvertisedDevice &d, uint8_t *u, uint16_t &maj, uint16_t &min_) {
+  if (!d.haveManufacturerData()) return false;
+  std::string m = d.getManufacturerData();
+  if (m.size() < 25 || (uint8_t)m[0] != 0x4C || (uint8_t)m[1] != 0x00 || (uint8_t)m[2] != 0x02 || (uint8_t)m[3] != 0x15) return false;
+  memcpy(u, m.data() + 4, 16); maj = ((uint8_t)m[20] << 8) | (uint8_t)m[21]; min_ = ((uint8_t)m[22] << 8) | (uint8_t)m[23];
+  return true;
+}
+void schermo() {
+  String r2 = autoOn ? String(String("AUTO ") + (autoFaz == 1 ? "BLU" : "ROSSO") + " #" + String(autoNum)) : String("manuale");
+  scrivi("INIETTORE " + idTesto(mioId), r2,
+         stato, ultimo, "pot " + String(POT_TESTO[potIdx]) + " int " + String(intIdx * 100));
+}
+
+bool programma(NimBLEAddress a, uint8_t f, uint16_t n) {
+  String mac = hexMac(a);
+  stato = "collego " + mac.substring(9); schermo();
+  Serial.println("Collego " + mac + "...");
+  NimBLEClient *c = NimBLEDevice::createClient();
+  c->setConnectTimeout(6);
+  bool ok = false; String err = "";
+  if (!c->connect(a)) err = "non si collega (tienilo vicino e riprova)";
+  NimBLERemoteService *s = nullptr; NimBLERemoteCharacteristic *rx = nullptr, *tx = nullptr, *pw = nullptr;
+  if (!err.length()) {
+    s = c->getService(NimBLEUUID((uint16_t)0xFFE0));
+    if (!s) err = "non e' un tag DX-SMART (manca il servizio FFE0)";
+  }
+  if (!err.length()) {
+    rx = s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE1)); tx = s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE2)); pw = s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE3));
+    if (!rx || !tx) err = "caratteristiche FFE1/FFE2 mancanti";
+  }
+  if (!err.length()) {
+    rxLen = 0; ultimaRisp = -1;
+    if (rx->canNotify()) rx->subscribe(true, notifica);
+    delay(200);
+    // serve la password?
+    std::string q = pacchetto(0x25, nullptr, 0); tx->writeValue((uint8_t *)q.data(), q.size(), false);
+    uint32_t t0 = millis(); while (ultimaRisp != 0x25 && millis() - t0 < 2000) delay(20);
+    bool serve = ultimaRisp != 0x25 || rispLen < 1 || rispDati[0] != 0;
+    Serial.println(ultimaRisp == 0x25 ? (serve ? "Il tag chiede la password" : "Il tag non chiede la password") : "Nessuna risposta alla domanda password: la mando comunque");
+    if (serve && pw) { pw->writeValue((uint8_t *)pwd.c_str(), pwd.length(), true); delay(400); }
+    if (!c->isConnected()) err = "password errata (comando: pwd 123456)";
+  }
+  if (!err.length()) {
+    stato = "scrivo " + String(f == 1 ? "BLU" : "ROSSO") + " #" + String(n); schermo();
+    uint8_t mj[2] = { 0, f }, mn[2] = { (uint8_t)(n >> 8), (uint8_t)(n & 0xFF) };
+    uint8_t rs = (uint8_t)(int8_t)-59, iv = (uint8_t)intIdx, pt = (uint8_t)potIdx;
+    struct { uint8_t cod; const uint8_t *d; uint8_t n; const char *nome; } passi[] = {
+      { 0x11, nullptr, 0, "slot 1" }, { 0x62, nullptr, 0, "tipo iBeacon" }, { 0x74, uuid, 16, "UUID" }, { 0x75, mj, 2, "Major (fazione)" },
+      { 0x76, mn, 2, "Minor (numero)" }, { 0x77, &rs, 1, "RSSI a 1 m" }, { 0x78, &iv, 1, "intervallo" }, { 0x79, &pt, 1, "potenza" },
+      { 0xA0, nullptr, 0, "sensore spento" }, { 0x60, nullptr, 0, "salva" } };
+    for (auto &p : passi) {
+      if (!c->isConnected()) { err = String("il tag si e' scollegato durante: ") + p.nome; break; }
+      std::string k = pacchetto(p.cod, p.d, p.n);
+      if (!tx->writeValue((uint8_t *)k.data(), k.size(), false)) { err = String("scrittura non riuscita: ") + p.nome; break; }
+      Serial.printf("  %s ok\n", p.nome);
+      delay(260);
+    }
+    if (!err.length()) ok = true;
+  }
+  if (c->isConnected()) c->disconnect();
+  NimBLEDevice::deleteClient(c);
+  if (!ok) { stato = "errore"; esito(false, mac, f, n, err, false); schermo(); return false; }
+  // controllo nell'aria: il tag deve trasmettere UUID, fazione e numero giusti
+  stato = "controllo in onda"; schermo();
+  bool visto = false;
+  NimBLEScan *sc = NimBLEDevice::getScan();
+  for (int giro = 0; giro < 4 && !visto; giro++) {
+    NimBLEScanResults r = sc->start(2, false);
+    for (int i = 0; i < r.getCount() && !visto; i++) {
+      NimBLEAdvertisedDevice d = r.getDevice(i); uint8_t u[16]; uint16_t ma, mi;
+      if (leggiIbeacon(d, u, ma, mi) && !memcmp(u, uuid, 16) && ma == f && mi == n) visto = true;
+    }
+    sc->clearResults();
+  }
+  stato = visto ? "fatto" : "scritto, non visto";
+  esito(true, mac, f, n, visto ? "" : "il tag potrebbe riavviarsi: ricontrolla con 'elenco'", visto);
+  schermo();
+  return true;
+}
+
+// il tag più vicino (sopra la soglia "in mano"), collegabile, non ancora fatto in questa sessione
+bool piuVicino(NimBLEAddress &out, bool saltaFatti) {
+  NimBLEScan *sc = NimBLEDevice::getScan();
+  NimBLEScanResults r = sc->start(2, false);
+  int best = -999; bool trovato = false;
+  for (int i = 0; i < r.getCount(); i++) {
+    NimBLEAdvertisedDevice d = r.getDevice(i);
+    if (d.getRSSI() < vicinoDb || d.getRSSI() <= best) continue;
+    if (d.getAdvType() != 0 && d.getAdvType() != 1) continue;   // solo pubblicità "collegabile"
+    String mac = hexMac(d.getAddress()); bool gia = false;
+    for (int k = 0; k < nFatti; k++) if (fatti[k] == mac) gia = true;
+    if (gia && saltaFatti) continue;
+    best = d.getRSSI(); out = d.getAddress(); trovato = true;
+  }
+  sc->clearResults();
+  return trovato;
+}
+
+void elenco() {
+  NimBLEScan *sc = NimBLEDevice::getScan();
+  NimBLEScanResults r = sc->start(4, false);
+  String js = "{\"vicini\":["; bool primo = true; int nostri = 0;
+  Serial.println("Tag nei dintorni (i nostri hanno l'UUID giusto):");
+  for (int i = 0; i < r.getCount(); i++) {
+    NimBLEAdvertisedDevice d = r.getDevice(i); uint8_t u[16]; uint16_t ma = 0, mi = 0;
+    bool ib = leggiIbeacon(d, u, ma, mi), nostro = ib && !memcmp(u, uuid, 16);
+    if (!ib && d.getRSSI() < vicinoDb) continue;
+    if (nostro) nostri++;
+    String mac = hexMac(d.getAddress());
+    String descr = nostro ? String(String(ma == 1 ? "BLU" : ma == 2 ? "ROSSO" : "?") + " #" + String(mi)) : String(ib ? "iBeacon di altri" : "collegabile, non iBeacon");
+    Serial.printf("  %s  %4d dBm  %s\n", mac.c_str(), d.getRSSI(), descr.c_str());
+    char b[160]; snprintf(b, sizeof(b), "%s{\"mac\":\"%s\",\"rssi\":%d,\"nostro\":%s,\"f\":\"%s\",\"n\":%u}", primo ? "" : ",", mac.c_str(), d.getRSSI(), nostro ? "true" : "false", nostro ? nomeFaz(ma) : "", nostro ? mi : 0);
+    js += b; primo = false;
+  }
+  sc->clearResults();
+  Serial.println(js + "]}");
+  ultimo = String(nostri) + " tag nostri in onda"; schermo();
+}
+
+void comando(String c) {
+  c.trim(); String low = c; low.toLowerCase();
+  int sp = low.indexOf(' '); String k = sp < 0 ? low : low.substring(0, sp), v = sp < 0 ? "" : c.substring(sp + 1); v.trim();
+  String vl = v; vl.toLowerCase();
+  auto faz = [](const String &s) -> uint8_t { return (s.startsWith("r") || s.startsWith("2")) ? 2 : 1; };
+  if (k == "auto" && v.length()) {
+    int s2 = vl.indexOf(' '); autoFaz = faz(vl); autoNum = s2 > 0 ? constrain(vl.substring(s2 + 1).toInt(), 1, 999) : 1; autoOn = true; nFatti = 0;
+    stato = "avvicina un tag"; Serial.printf("Modo automatico: %s dal numero %u. Avvicina un tag alla volta all'iniettore.\n", nomeFaz(autoFaz), autoNum);
+    Serial.printf("{\"auto\":true,\"f\":\"%s\",\"n\":%u}\n", nomeFaz(autoFaz), autoNum); schermo(); return;
+  }
+  if (k == "stop") { autoOn = false; stato = "pronto"; Serial.println("{\"auto\":false}"); schermo(); return; }
+  if (k == "prog" && v.length()) {
+    int s2 = vl.indexOf(' '); uint8_t f = faz(vl); uint16_t n = s2 > 0 ? constrain(vl.substring(s2 + 1).toInt(), 1, 999) : 1;
+    NimBLEAddress a; if (!piuVicino(a, false)) { esito(false, "", f, n, "nessun tag vicino: tienilo appoggiato all'iniettore", false); return; }
+    programma(a, f, n); return;
+  }
+  if (k == "elenco") { elenco(); return; }
+  if (k == "pwd" && v.length()) { pwd = v; pref.putString("pwd", pwd); Serial.println("password " + pwd); return; }
+  if (k == "pot" && v.length()) { potIdx = constrain(v.toInt(), 0, 7); pref.putInt("pot", potIdx); Serial.println(String("potenza ") + POT_TESTO[potIdx] + " dBm"); schermo(); return; }
+  if (k == "intervallo" && v.length()) { intIdx = constrain(v.toInt() >= 100 ? v.toInt() / 100 : v.toInt(), 1, 10); pref.putInt("int", intIdx); Serial.println("intervallo " + String(intIdx * 100) + " ms"); schermo(); return; }
+  if (k == "vicino" && v.length()) { vicinoDb = constrain(v.toInt(), -100, -20); pref.putInt("vic", vicinoDb); Serial.println("tag 'in mano' sopra " + String(vicinoDb) + " dBm"); return; }
+  if (k == "info") {
+    Serial.printf("{\"iniettore\":\"info\",\"pwd\":\"%s\",\"pot\":\"%s\",\"int\":%d,\"vicino\":%d,\"auto\":%s,\"f\":\"%s\",\"n\":%u}\n", pwd.c_str(), POT_TESTO[potIdx], intIdx * 100, vicinoDb, autoOn ? "true" : "false", nomeFaz(autoFaz), autoNum);
+    return;
+  }
+  if (k == "riavvia") { delay(200); ESP.restart(); }
+  Serial.println("comandi: auto blu 1 | auto rossa 1 (programma in fila i tag che avvicini), stop, prog blu 3 (solo il tag piu' vicino), elenco, pot 0-7, intervallo 500, pwd 555555, vicino -60, info");
+}
+
+void setup() {
+  avvioComune("INIETTORE");
+  pref.begin("ac", false);
+  pwd = pref.getString("pwd", "555555"); potIdx = pref.getInt("pot", 4); intIdx = pref.getInt("int", 5); vicinoDb = pref.getInt("vic", -60);
+  if (!leggiUuid(TAG_UUID, uuid)) Serial.println("TAG_UUID scritto male in config.h");
+  if (PMU) { if (PMU->getChipModel() == XPOWERS_AXP2101) PMU->disablePowerOutput(XPOWERS_ALDO2); else PMU->disablePowerOutput(XPOWERS_LDO2); }
+  NimBLEDevice::init("");
+  NimBLEDevice::setPower(ESP_PWR_LVL_N0);
+  NimBLEScan *sc = NimBLEDevice::getScan(); sc->setActiveScan(true); sc->setInterval(100); sc->setWindow(99);
+  schermo();
+  Serial.println("Iniettore pronto. Scrivi 'auto blu 1' e avvicina i tag uno alla volta. 'aiuto' per i comandi.");
+  Serial.println("{\"iniettore\":\"pronto\"}");
+}
+
+void loop() {
+  String riga; if (leggiRiga(riga)) comando(riga);
+  if (pulsante() == 1) { autoOn = !autoOn; stato = autoOn ? "avvicina un tag" : "pronto"; schermo(); }
+  if (autoOn) {
+    NimBLEAddress a;
+    if (piuVicino(a, true)) {
+      String mac = hexMac(a);
+      if (programma(a, autoFaz, autoNum)) {
+        if (nFatti < 40) fatti[nFatti++] = mac;
+        autoNum++;
+        stato = "fatto: avvicina il prossimo";
+        Serial.printf("{\"auto\":true,\"f\":\"%s\",\"n\":%u}\n", nomeFaz(autoFaz), autoNum);
+        schermo();
+      }
+    }
+  }
+  delay(50);
 }
 #endif

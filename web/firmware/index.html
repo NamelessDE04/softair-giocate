@@ -21,10 +21,12 @@ Dopo il caricamento, nella stessa finestra c'è "Logs &amp; Console" per vedere 
 
 <div class="r"><b>Bandiera</b> — conta i tag, fa la conquista (luce sul pin 13, cicalino sul pin 14), manda tutto via LoRa all'HQ.<br>
 <esp-web-install-button manifest="bin/bandiera.json"></esp-web-install-button></div>
-<div class="r"><b>HQ</b> — riceve le bandiere via LoRa; l'app si collega all'HQ via Bluetooth (Android) o USB (computer) dalla pagina <i>Banco bandiere</i>.<br>
+<div class="r"><b>HQ</b> — riceve le bandiere via LoRa; l'app si collega all'HQ via Bluetooth (Android) o USB (computer) dalla pagina <i>Iniettore</i>.<br>
 <esp-web-install-button manifest="bin/hq.json"></esp-web-install-button></div>
 <div class="r"><b>Tag finto</b> — un T-Beam che fa finta di essere il tag di un giocatore. Pulsante centrale: corto = cambia fazione (blu/rossa), lungo = numero +1.<br>
 <esp-web-install-button manifest="bin/tag.json"></esp-web-install-button></div>
+<div class="r"><b>Iniettore</b> — programma i tag veri DX-SMART (UUID, fazione, numero) senza l'app del produttore. Si usa dalla pagina <i>Iniettore</i> dell'app (computer, cavo USB): avvicini un tag alla volta e lui lo configura.<br>
+<esp-web-install-button manifest="bin/iniettore.json"></esp-web-install-button></div>
 <p class="k">Se il tasto non compare: questo browser non può scrivere sulla porta USB (serve Chrome/Edge su computer, non telefono, non Safari/Firefox).</p>
 
 <h2>Prova al banco (3 T-Beam)</h2>
