@@ -571,49 +571,6 @@ void mostra() {
 }
 
 // comandi all'HQ: "cmd <id|tutte> <comando>" passa il comando alle bandiere; "info" elenca le bandiere
-// SONDA: prova i diversi modi di parlare al tag e stampa tutto quello che risponde, senza cambiare niente
-String hx(const uint8_t *d, int n) { String h; for (int k = 0; k < n; k++) { char b[4]; snprintf(b, sizeof(b), "%02X ", d[k]); h += b; } return h; }
-void stampaGrezzo(const char *dopo) {
-  if (!nGrezzo) { Serial.printf("    (%s: nessuna notifica)\n", dopo); return; }
-  for (int k = 0; k < nGrezzo; k++) Serial.printf("    <- %s notifica da %04X: %s\n", dopo, grezzoDa[k], hx(grezzo[k], grezzoLen[k]).c_str());
-  nGrezzo = 0;
-}
-void sonda() {
-  NimBLEAddress a; if (!piuVicino(a, false)) { Serial.println("SONDA: nessun tag vicino"); return; }
-  Serial.println("SONDA su " + hexMac(a));
-  NimBLEClient *c = NimBLEDevice::createClient(); c->setConnectTimeout(6);
-  if (!c->connect(a)) { Serial.println("SONDA: non si collega"); NimBLEDevice::deleteClient(c); return; }
-  NimBLERemoteService *s = c->getService(NimBLEUUID((uint16_t)0xFFE0));
-  if (!s) { Serial.println("SONDA: niente FFE0"); c->disconnect(); NimBLEDevice::deleteClient(c); return; }
-  NimBLERemoteCharacteristic *ch[3] = { s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE1)), s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE2)), s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE3)) };
-  for (int i = 0; i < 3; i++) if (ch[i] && ch[i]->canRead()) { std::string v = ch[i]->readValue(); Serial.printf("  lettura FFE%d: %s| \"%s\"\n", i + 1, hx((const uint8_t *)v.data(), v.size()).c_str(), v.c_str()); }
-  nGrezzo = 0;
-  for (int i = 0; i < 3; i++) if (ch[i] && (ch[i]->canNotify() || ch[i]->canIndicate())) Serial.printf("  iscrizione FFE%d: %s\n", i + 1, ch[i]->subscribe(ch[i]->canNotify(), notifica) ? "ok" : "NO");
-  delay(500); stampaGrezzo("dopo l'iscrizione");
-  std::string q = pacchetto(0x25, nullptr, 0), r = pacchetto(0x34, nullptr, 0), f = pacchetto(0x10, nullptr, 0);
-  struct { int ch; bool conf; const std::string *dati; const char *nome; } prove[] = {
-    { 1, true, &q, "0x25 (password?) su FFE2 con conferma" }, { 0, false, &q, "0x25 su FFE1 veloce" }, { 0, true, &q, "0x25 su FFE1 con conferma" },
-    { 1, true, &f, "0x10 (slot) su FFE2" }, { 0, false, &f, "0x10 su FFE1" }, { 1, true, &r, "0x34 (parametri) su FFE2" }, { 0, false, &r, "0x34 su FFE1" } };
-  for (auto &p : prove) {
-    if (!c->isConnected()) { Serial.println("  il tag si e' scollegato"); break; }
-    NimBLERemoteCharacteristic *x = ch[p.ch]; if (!x) continue;
-    bool ok = x->writeValue((const uint8_t *)p.dati->data(), p.dati->size(), p.conf);
-    Serial.printf("  %s: %s\n", p.nome, ok ? "scritto" : "RIFIUTATO");
-    delay(700); stampaGrezzo(p.nome);
-  }
-  // password sul canale FFE3 e di nuovo la domanda
-  if (c->isConnected() && ch[2]) {
-    bool ok = ch[2]->writeValue((const uint8_t *)pwd.c_str(), pwd.length(), true);
-    Serial.printf("  password '%s' su FFE3: %s\n", pwd.c_str(), ok ? "scritta" : "RIFIUTATA");
-    delay(700); stampaGrezzo("dopo la password");
-    if (c->isConnected() && ch[1]) { ch[1]->writeValue((const uint8_t *)f.data(), f.size(), true); delay(700); stampaGrezzo("0x10 dopo la password"); }
-    if (c->isConnected()) for (int i = 0; i < 3; i++) if (ch[i] && ch[i]->canRead()) { std::string v = ch[i]->readValue(); Serial.printf("  lettura FFE%d dopo: %s\n", i + 1, hx((const uint8_t *)v.data(), v.size()).c_str()); }
-  }
-  Serial.println(c->isConnected() ? "SONDA finita (ancora collegato)" : "SONDA finita (il tag ha chiuso)");
-  if (c->isConnected()) c->disconnect();
-  NimBLEDevice::deleteClient(c);
-}
-
 void comando(String c) {
   c.trim(); if (!c.length()) return;
   String low = c; low.toLowerCase();
@@ -996,6 +953,49 @@ void elenco() {
   }
   Serial.println(js + "]}");
   ultimo = String(nostri) + " tag in onda"; schermo();
+}
+
+// SONDA: prova i diversi modi di parlare al tag e stampa tutto quello che risponde, senza cambiare niente
+String hx(const uint8_t *d, int n) { String h; for (int k = 0; k < n; k++) { char b[4]; snprintf(b, sizeof(b), "%02X ", d[k]); h += b; } return h; }
+void stampaGrezzo(const char *dopo) {
+  if (!nGrezzo) { Serial.printf("    (%s: nessuna notifica)\n", dopo); return; }
+  for (int k = 0; k < nGrezzo; k++) Serial.printf("    <- %s notifica da %04X: %s\n", dopo, grezzoDa[k], hx(grezzo[k], grezzoLen[k]).c_str());
+  nGrezzo = 0;
+}
+void sonda() {
+  NimBLEAddress a; if (!piuVicino(a, false)) { Serial.println("SONDA: nessun tag vicino"); return; }
+  Serial.println("SONDA su " + hexMac(a));
+  NimBLEClient *c = NimBLEDevice::createClient(); c->setConnectTimeout(6);
+  if (!c->connect(a)) { Serial.println("SONDA: non si collega"); NimBLEDevice::deleteClient(c); return; }
+  NimBLERemoteService *s = c->getService(NimBLEUUID((uint16_t)0xFFE0));
+  if (!s) { Serial.println("SONDA: niente FFE0"); c->disconnect(); NimBLEDevice::deleteClient(c); return; }
+  NimBLERemoteCharacteristic *ch[3] = { s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE1)), s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE2)), s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE3)) };
+  for (int i = 0; i < 3; i++) if (ch[i] && ch[i]->canRead()) { std::string v = ch[i]->readValue(); Serial.printf("  lettura FFE%d: %s| \"%s\"\n", i + 1, hx((const uint8_t *)v.data(), v.size()).c_str(), v.c_str()); }
+  nGrezzo = 0;
+  for (int i = 0; i < 3; i++) if (ch[i] && (ch[i]->canNotify() || ch[i]->canIndicate())) Serial.printf("  iscrizione FFE%d: %s\n", i + 1, ch[i]->subscribe(ch[i]->canNotify(), notifica) ? "ok" : "NO");
+  delay(500); stampaGrezzo("dopo l'iscrizione");
+  std::string q = pacchetto(0x25, nullptr, 0), r = pacchetto(0x34, nullptr, 0), f = pacchetto(0x10, nullptr, 0);
+  struct { int ch; bool conf; const std::string *dati; const char *nome; } prove[] = {
+    { 1, true, &q, "0x25 (password?) su FFE2 con conferma" }, { 0, false, &q, "0x25 su FFE1 veloce" }, { 0, true, &q, "0x25 su FFE1 con conferma" },
+    { 1, true, &f, "0x10 (slot) su FFE2" }, { 0, false, &f, "0x10 su FFE1" }, { 1, true, &r, "0x34 (parametri) su FFE2" }, { 0, false, &r, "0x34 su FFE1" } };
+  for (auto &p : prove) {
+    if (!c->isConnected()) { Serial.println("  il tag si e' scollegato"); break; }
+    NimBLERemoteCharacteristic *x = ch[p.ch]; if (!x) continue;
+    bool ok = x->writeValue((const uint8_t *)p.dati->data(), p.dati->size(), p.conf);
+    Serial.printf("  %s: %s\n", p.nome, ok ? "scritto" : "RIFIUTATO");
+    delay(700); stampaGrezzo(p.nome);
+  }
+  // password sul canale FFE3 e di nuovo la domanda
+  if (c->isConnected() && ch[2]) {
+    bool ok = ch[2]->writeValue((const uint8_t *)pwd.c_str(), pwd.length(), true);
+    Serial.printf("  password '%s' su FFE3: %s\n", pwd.c_str(), ok ? "scritta" : "RIFIUTATA");
+    delay(700); stampaGrezzo("dopo la password");
+    if (c->isConnected() && ch[1]) { ch[1]->writeValue((const uint8_t *)f.data(), f.size(), true); delay(700); stampaGrezzo("0x10 dopo la password"); }
+    if (c->isConnected()) for (int i = 0; i < 3; i++) if (ch[i] && ch[i]->canRead()) { std::string v = ch[i]->readValue(); Serial.printf("  lettura FFE%d dopo: %s\n", i + 1, hx((const uint8_t *)v.data(), v.size()).c_str()); }
+  }
+  Serial.println(c->isConnected() ? "SONDA finita (ancora collegato)" : "SONDA finita (il tag ha chiuso)");
+  if (c->isConnected()) c->disconnect();
+  NimBLEDevice::deleteClient(c);
 }
 
 void comando(String c) {
