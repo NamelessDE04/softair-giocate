@@ -30,7 +30,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.8.6"
+#define VERSIONE "0.9"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -743,7 +743,7 @@ const char *POT_TESTO[] = { "-19.5", "-13.5", "-7", "-3.5", "-1", "+1", "+1.5", 
 
 // risposte del tag
 uint8_t rxBuf[64]; int rxLen = 0, rxAtteso = 0;
-volatile int nRisp = 0; bool rispTx = true;
+volatile int nRisp = 0; bool rispTx = true; bool rilettoOk = false;
 uint8_t ultimaHex[64]; volatile int ultimaHexLen = 0;
 void stampaRisp() { String h = "  <- risposta"; for (int k = 0; k < ultimaHexLen; k++) { char b[4]; snprintf(b, sizeof(b), " %02X", ultimaHex[k]); h += b; } Serial.println(h); }
 volatile int ultimaRisp = -1; uint8_t rispDati[40]; volatile int rispLen = 0;
@@ -828,7 +828,7 @@ void schermo() {
 }
 
 bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
-  ultimoPwdErr = false;
+  ultimoPwdErr = false; rilettoOk = false;
   String mac = hexMac(a);
   stato = "Collego " + mac.substring(9); schermo();
   Serial.println("Collego " + mac + "...");
@@ -855,7 +855,8 @@ bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
   }
   if (!err.length()) {
     rxLen = 0; ultimaRisp = -1;
-    bool sub = rx->canNotify() ? rx->subscribe(true, notifica) : (rx->canIndicate() ? rx->subscribe(false, notifica) : false);
+    // la scrittura del CCCD deve essere CON conferma (Write Request): il CP35 ignora quella veloce (visto nel log della loro app)
+    bool sub = rx->canNotify() ? rx->subscribe(true, notifica, true) : (rx->canIndicate() ? rx->subscribe(false, notifica, true) : false);
     Serial.println(sub ? "  notifiche attive" : "  NOTIFICHE NON ATTIVE");
     rispTx = tx->canWrite();   // come l'app Android: scrittura con conferma se il tag la supporta
     delay(300);
@@ -871,9 +872,9 @@ bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
   if (!err.length()) {
     stato = "Scrivo..."; schermo();
     uint8_t mj[2] = { 0, f }, mn[2] = { (uint8_t)(n >> 8), (uint8_t)(n & 0xFF) };
-    uint8_t rs = (uint8_t)(int8_t)-59, iv = (uint8_t)intIdx, pt = (uint8_t)potIdx;
+    uint8_t rs = (uint8_t)(int8_t)-57, iv = (uint8_t)intIdx, pt = (uint8_t)potIdx;
     struct { uint8_t cod; const uint8_t *d; uint8_t n; const char *nome; } passi[] = {
-      { 0x11, nullptr, 0, "slot 1" }, { 0x62, nullptr, 0, "tipo iBeacon" }, { 0x74, uuid, 16, "UUID" }, { 0x75, mj, 2, "Major (fazione)" },
+      { 0x12, nullptr, 0, "slot 2 (iBeacon)" }, { 0x62, nullptr, 0, "tipo iBeacon" }, { 0x74, uuid, 16, "UUID" }, { 0x75, mj, 2, "Major (fazione)" },
       { 0x76, mn, 2, "Minor (numero)" }, { 0x77, &rs, 1, "RSSI a 1 m" }, { 0x78, &iv, 1, "intervallo" }, { 0x79, &pt, 1, "potenza" },
       { 0xA0, nullptr, 0, "sensore spento" }, { 0x60, nullptr, 0, "salva" } };
     for (auto &p : passi) {
@@ -887,6 +888,22 @@ bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
       delay(150);
     }
     if (!err.length()) ok = true;
+    // rilettura dal tag: 4E 4F 62 -> risponde 62 + UUID(16) + Major(2) + Minor(2) + ...
+    if (ok && c->isConnected()) {
+      delay(400); nGrezzo = 0;
+      std::string q = pacchetto(0x62, nullptr, 0); tx->writeValue((uint8_t *)q.data(), q.size(), rispTx);
+      uint32_t t2 = millis(); bool letto = false;
+      while (millis() - t2 < 1500 && !letto) {
+        for (int k = 0; k < nGrezzo; k++) if (grezzoLen[k] >= 21 && grezzo[k][0] == 0x62) {
+          uint8_t *g = grezzo[k]; letto = true;
+          bool giusto = !memcmp(g + 1, uuid, 16) && g[17] == 0 && g[18] == f && ((g[19] << 8) | g[20]) == n;
+          Serial.printf("  riletto dal tag: Major %u, Minor %u, UUID %s -> %s\n", (g[17] << 8) | g[18], (g[19] << 8) | g[20], !memcmp(g + 1, uuid, 16) ? "nostro" : "DIVERSO", giusto ? "GIUSTO" : "SBAGLIATO");
+          rilettoOk = giusto;
+        }
+        delay(20);
+      }
+      if (!letto) Serial.println("  rilettura: nessuna risposta");
+    }
   }
   if (c->isConnected()) c->disconnect();
   NimBLEDevice::deleteClient(c);
@@ -894,7 +911,7 @@ bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
   if (!ok) { stato = "ERRORE"; esito(false, mac, f, n, err, false); schermo(); return false; }
   // controllo nell'aria: il tag deve trasmettere UUID, fazione e numero giusti
   stato = "Controllo in onda..."; schermo();
-  bool visto = false;
+  bool visto = rilettoOk;
   for (int giro = 0; giro < 3 && !visto; giro++) {
     scansiona(3);
     for (int i = 0; i < nVisti; i++) if (visti[i].nostro && visti[i].ma == f && visti[i].mi == n) visto = true;
@@ -972,7 +989,7 @@ void sonda() {
   NimBLERemoteCharacteristic *ch[3] = { s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE1)), s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE2)), s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE3)) };
   for (int i = 0; i < 3; i++) if (ch[i] && ch[i]->canRead()) { std::string v = ch[i]->readValue(); Serial.printf("  lettura FFE%d: %s| \"%s\"\n", i + 1, hx((const uint8_t *)v.data(), v.size()).c_str(), v.c_str()); }
   nGrezzo = 0;
-  for (int i = 0; i < 3; i++) if (ch[i] && (ch[i]->canNotify() || ch[i]->canIndicate())) Serial.printf("  iscrizione FFE%d: %s\n", i + 1, ch[i]->subscribe(ch[i]->canNotify(), notifica) ? "ok" : "NO");
+  for (int i = 0; i < 3; i++) if (ch[i] && (ch[i]->canNotify() || ch[i]->canIndicate())) Serial.printf("  iscrizione FFE%d: %s\n", i + 1, ch[i]->subscribe(ch[i]->canNotify(), notifica, true) ? "ok" : "NO");
   delay(500); stampaGrezzo("dopo l'iscrizione");
   std::string q = pacchetto(0x25, nullptr, 0), r = pacchetto(0x34, nullptr, 0), f = pacchetto(0x10, nullptr, 0);
   struct { int ch; bool conf; const std::string *dati; const char *nome; } prove[] = {
