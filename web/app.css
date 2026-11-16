@@ -840,3 +840,9 @@ main > .btn.big { margin-bottom: 6px; }
 .bp-ck b { width: 70px; } .bp-ck span { padding: 4px 8px; border-radius: 8px; font-family: var(--mono); font-size: 15px; }
 .bp-ck .ok { background: rgba(127,194,138,.25); } .bp-ck .manca { background: rgba(255,210,63,.25); } .bp-ck .doppio { background: var(--ko); color: #fff; } .bp-ck .vuoto { opacity: .35; }
 .bp-esito { font-size: 20px; font-weight: 700; } .bp-esito.ok { color: var(--ok); } .bp-esito.ko { color: var(--ko); } .bp-esito.warn { color: var(--giallo); }
+.bp-cont { display: grid; grid-template-columns: 1fr 64px 70px 64px; align-items: center; gap: 8px; padding: 6px 0; }
+.bp-cont b { font-family: var(--tit); font-size: 28px; text-align: left; } .bp-cont.blu b { color: #6fb0ff; } .bp-cont.rossa b { color: #ff7b6e; }
+.btn.bp-pm { font-size: 34px; min-height: 60px; padding: 0; justify-content: center; }
+.bp-val { font-family: var(--tit); font-size: 40px; }
+.bp-pic { font-size: 16px; color: var(--muto); }
+.bp-fz:disabled { opacity: .35; }

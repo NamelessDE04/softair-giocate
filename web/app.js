@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.56';
+  var VERSIONE = '0.57';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -1139,7 +1139,7 @@
   }
   function bancoBle() {
     if (!navigator.bluetooth) { toast('Bluetooth web non disponibile: serve Chrome su Android o su computer (non iPhone)'); return; }
-    navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'AC-HQ' }], optionalServices: [NUS.s] }).then(function (dev) {
+    navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'AC-HQ' }, { namePrefix: 'AC-INJ' }], optionalServices: [NUS.s] }).then(function (dev) {
       BANCO.dev = dev; bancoRiga('-- collego ' + dev.name + '…', '##');
       dev.addEventListener('gattserverdisconnected', function () { if (BANCO.via === 'BT') { BANCO.via = null; bancoRiga('-- Bluetooth perso (scollegato o fuori portata)', '##'); } });
       return dev.gatt.connect().then(function (g) { return g.getPrimaryService(NUS.s); }).then(function (s) {
@@ -1369,13 +1369,23 @@
     var b = BANCO, I = b.inj, box = el('div', 'bp'); app.appendChild(box);
     var reg = null, faz = (function () { try { return localStorage.getItem('bp-faz') || 'blu'; } catch (e) { return 'blu'; } })();
     var fase = 'pronto', target = null, tag = null, esito = null, attesa = null, scelto = null, controllo = null, timer = null;
-    var stopReg = S.ascoltaBeacon(function (r) { reg = r || []; disegna(); });
+    var piano = null, pianoEdit = false;   // quanti tag per fazione: documento beacon/_piano
+    var stopReg = S.ascoltaBeacon(function (r) {
+      r = r || [];
+      var p0 = r.filter(function (x) { return x.id === '_piano'; })[0];
+      piano = p0 ? { blu: p0.blu || 0, rossa: p0.rossa || 0 } : null;
+      reg = r.filter(function (x) { return x.id.charAt(0) !== '_'; });
+      disegna();
+    });
+    function tot(f) { return piano ? piano[f] : 0; }
+    function completa(f) { for (var n = 1; n <= tot(f); n++) if (!perNum(f, n)) return false; return true; }
     function sig(f, n) { return (f === 'rossa' ? 'R' : 'B') + n; }
     function nomeF(f) { return f === 'rossa' ? 'ROSSO' : 'BLU'; }
+    function nomeP(f) { return f === 'rossa' ? 'ROSSI' : 'BLU'; }
     function diFaz(f) { return (reg || []).filter(function (x) { return x.f === f; }); }
     function perMac(mac) { return (reg || []).filter(function (x) { return x.id === mac; })[0]; }
     function perNum(f, n) { return (reg || []).filter(function (x) { return x.f === f && x.n === n; })[0]; }
-    function prossimo(f) { var n = 1; while (perNum(f, n)) n++; return n; }
+    function prossimo(f) { var n = 1; while (perNum(f, n)) n++; return n; }   // può superare il piano: lo controlla chi chiama
     function numero() { return scelto && !perNum(faz, scelto) ? scelto : prossimo(faz); }
     function vai2(f) { fase = f; disegna(); }
     function aspetta(tipo, ms) {
@@ -1430,10 +1440,12 @@
     function disegna() {
       box.innerHTML = '';
       // 1. collegamento
-      if (!navigator.serial) { box.appendChild(grosso('ko', 'Serve il computer', 'Apri questa pagina da computer con Chrome o Edge.')); return; }
       if (!b.via) {
-        var c = grosso('', 'Collega la T-Beam', 'T-Beam con il programma INIETTORE, cavo USB al computer.');
-        c.appendChild(tasto('COLLEGA', 'acc', function () { bancoUsb(); }));
+        if (!navigator.serial && !navigator.bluetooth) { box.appendChild(grosso('ko', 'Telefono non adatto', 'Serve Chrome su Android o su computer. Su iPhone non funziona.')); return; }
+        var c = grosso('', 'Collega la T-Beam', navigator.serial ? 'T-Beam con il programma INIETTORE. Cavo USB oppure Bluetooth.' : 'Accendi la T-Beam con il programma INIETTORE e premi COLLEGA.');
+        if (navigator.bluetooth) c.appendChild(tasto(navigator.serial ? 'COLLEGA BLUETOOTH' : 'COLLEGA', 'acc', function () { bancoBle(); }));
+        if (navigator.serial) c.appendChild(tasto('COLLEGA CON CAVO USB', navigator.bluetooth ? '' : 'acc', function () { bancoUsb(); }));
+        if (navigator.bluetooth) c.appendChild(el('div', 'bp-txt bp-pic', 'Nella lista scegli AC-INJ-…'));
         box.appendChild(c); return;
       }
       if (b.avvio && b.avvio !== 'INIETTORE') {
@@ -1442,17 +1454,37 @@
         box.appendChild(c2); return;
       }
       if (reg === null) { box.appendChild(grosso('', 'Carico il registro…')); return; }
+      // 1b. quanti tag per fazione (una volta sola, si cambia con "Cambia numeri")
+      if (!piano || pianoEdit) {
+        var pc = grosso('', 'Quanti tag?', 'Scegli quanti tag per ogni fazione.'), val = { blu: piano ? piano.blu : 5, rossa: piano ? piano.rossa : 5 };
+        ['blu', 'rossa'].forEach(function (f) {
+          var r = el('div', 'bp-cont ' + f); r.appendChild(el('b', null, nomeF(f)));
+          var meno = bottone('−', 'bp-pm'), num = el('span', 'bp-val', String(val[f])), piu = bottone('+', 'bp-pm');
+          var fatti = diFaz(f).reduce(function (m, x) { return Math.max(m, x.n); }, 0);
+          meno.onclick = function () { if (val[f] > Math.max(0, fatti)) { val[f]--; num.textContent = val[f]; } else if (fatti) toast('Ci sono già ' + sig(f, fatti) + ' fatti'); };
+          piu.onclick = function () { if (val[f] < 60) { val[f]++; num.textContent = val[f]; } };
+          r.appendChild(meno); r.appendChild(num); r.appendChild(piu); pc.appendChild(r);
+        });
+        pc.appendChild(tasto('INIZIA', 'acc', function () {
+          if (!val.blu && !val.rossa) { toast('Almeno un tag'); return; }
+          S.salvaBeacon('_piano', { blu: val.blu, rossa: val.rossa, quando: Date.now(), da: S.stato().me.callsign || '' }).then(function () { pianoEdit = false; if (!val[faz]) faz = val.blu ? 'blu' : 'rossa'; }, errore);
+        }));
+        if (pianoEdit) pc.appendChild(tasto('Annulla', 'link', function () { pianoEdit = false; disegna(); }));
+        box.appendChild(pc); return;
+      }
+      if (!tot(faz) && tot(faz === 'blu' ? 'rossa' : 'blu')) faz = faz === 'blu' ? 'rossa' : 'blu';
       // 2. fazione
       var fz = el('div', 'bp-faz');
       ['blu', 'rossa'].forEach(function (f) {
         var x = el('button', 'bp-fz ' + f + (faz === f ? ' on' : '')); x.type = 'button';
-        x.appendChild(el('b', null, nomeF(f))); x.appendChild(el('small', null, diFaz(f).length + ' fatti'));
+        x.appendChild(el('b', null, nomeF(f))); x.appendChild(el('small', null, (completa(f) && tot(f) ? '✓ ' : '') + diFaz(f).filter(function (r) { return r.n <= tot(f); }).length + ' / ' + tot(f)));
+        if (!tot(f)) x.disabled = true;
         x.onclick = function () { if (fase === 'scrivo' || fase === 'cerca') return; faz = f; scelto = null; try { localStorage.setItem('bp-faz', f); } catch (e) {} vai2('pronto'); };
         fz.appendChild(x);
       });
       box.appendChild(fz);
       // 3. numeri: pieni = fatti, quello col bordo = il prossimo
-      var nx = numero(), max = Math.max(10, nx, diFaz(faz).reduce(function (m, x) { return Math.max(m, x.n); }, 0) + 1);
+      var nx = numero(), max = Math.max(tot(faz), diFaz(faz).reduce(function (m, x) { return Math.max(m, x.n); }, 0));
       var gr = el('div', 'bp-num ' + faz);
       for (var n = 1; n <= max; n++) (function (n) {
         var r = perNum(faz, n), x = el('button', 'bp-n' + (r ? ' fatto' : '') + (n === nx && !r ? ' prox' : '')); x.type = 'button';
@@ -1461,6 +1493,7 @@
           if (fase === 'scrivo' || fase === 'cerca') return;
           if (r) { if (confirm(sig(faz, n) + ' fatto il ' + new Date(r.quando).toLocaleString('it-IT') + (r.da ? ' da ' + r.da : '') + '\nIndirizzo ' + r.id + '\n\nToglierlo dal registro? (solo se il tag è perso o sbagliato)')) S.eliminaBeacon(r.id).catch(errore); return; }
           if (n !== prossimo(faz) && !confirm('Saltare i numeri liberi e fare ' + sig(faz, n) + '?')) return;
+          if (n > tot(faz)) return;
           scelto = n; vai2('pronto');
         };
         gr.appendChild(x);
@@ -1468,7 +1501,11 @@
       box.appendChild(gr);
       // 4. il passo da fare adesso
       var T = sig(faz, nx), card;
-      if (fase === 'pronto') {
+      var altra = faz === 'blu' ? 'rossa' : 'blu';
+      if ((fase === 'pronto' || fase === 'fatto') && completa(faz) && fase !== 'fatto') {
+        if (completa(altra) || !tot(altra)) { card = grosso('ok', '✓ Tutti fatti!', 'Ora fai il CONTROLLO FINALE con tutti i tag vicini.'); card.appendChild(tasto('CONTROLLO FINALE', 'acc', finale)); }
+        else { card = grosso('ok', '✓ ' + nomeP(faz) + ' completi', 'Ora i ' + nomeP(altra) + '. Metti via i ' + nomeP(faz) + '.'); card.appendChild(tasto('PASSA AI ' + nomeP(altra), 'acc', function () { faz = altra; try { localStorage.setItem('bp-faz', altra); } catch (e) {} vai2('pronto'); })); }
+      } else if (fase === 'pronto') {
         card = grosso(faz, 'Tag ' + T, 'Prendi un tag NUOVO. Appoggialo sulla T-Beam. Gli altri lontano.');
         card.appendChild(tasto('PROGRAMMA ' + T, 'acc', cerca));
       } else if (fase === 'cerca') card = grosso('', 'Cerco il tag…', 'Tienilo fermo sulla T-Beam.');
@@ -1485,7 +1522,7 @@
         card.appendChild(tasto('È un tag, programmalo', 'link', scrivi));
       } else if (fase === 'fatto') {
         card = grosso('ok ' + faz, '✓ ' + sig(faz, target) + ' FATTO', 'Scrivi ' + sig(faz, target) + ' sul tag col pennarello. Mettilo con i ' + nomeF(faz) + '.');
-        card.appendChild(tasto('SCRITTO → PROSSIMO', 'acc', function () { vai2('pronto'); }));
+        card.appendChild(tasto(completa(faz) ? 'SCRITTO → AVANTI' : 'SCRITTO → PROSSIMO', 'acc', function () { vai2('pronto'); }));
       } else if (fase === 'errore') {
         card = grosso('ko', 'Non riuscito', (esito && esito.testo) || '');
         card.appendChild(tasto('RIPROVA', 'acc', cerca));
@@ -1494,6 +1531,7 @@
       // 5. controllo finale: quali tag si sentono davvero
       var fin = el('div', 'bp-fin');
       fin.appendChild(tasto('Controllo finale', '', finale));
+      fin.appendChild(tasto('Cambia numeri (' + tot('blu') + ' blu, ' + tot('rossa') + ' rossi)', 'link', function () { pianoEdit = true; disegna(); }));
       if (controllo) {
         if (controllo.attesa) fin.appendChild(el('p', 'hint', 'Metti tutti i tag vicino alla T-Beam… (5 secondi)'));
         else {
