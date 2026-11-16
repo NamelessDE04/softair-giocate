@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.58';
+  var VERSIONE = '0.59';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -1096,6 +1096,9 @@
         if (j.bandiera) { bancoStoria(BANCO.band[j.bandiera], j); BANCO.band[j.bandiera] = j; bancoInoltra(j); }
         else if (j.avvio) { BANCO.avvio = j.avvio; BANCO.versione = j.versione; }
         else if (j.iniettore) { BANCO.avvio = 'INIETTORE'; if (j.iniettore === 'ok' || j.iniettore === 'errore') BANCO.inj.fatti.unshift(j); else if (j.iniettore === 'info') BANCO.inj.info = j; }
+        else if (j.nuovi) { BANCO.avvio = 'INIETTORE'; BANCO.inj.nuovi = j.nuovi; BANCO.inj.seqN = (BANCO.inj.seqN || 0) + 1; }
+        else if (j.batterie) { BANCO.avvio = 'INIETTORE'; BANCO.inj.batt = j.batterie; BANCO.inj.seqB = (BANCO.inj.seqB || 0) + 1; }
+        else if (j.lampeggia) { BANCO.inj.lamp = j; BANCO.inj.seqL = (BANCO.inj.seqL || 0) + 1; }
         else if (j.vicino) { BANCO.avvio = 'INIETTORE'; BANCO.inj.vicino = j.vicino; BANCO.inj.seqV = (BANCO.inj.seqV || 0) + 1; }
         else if (j.vicini) { BANCO.avvio = 'INIETTORE'; BANCO.inj.vicini = j.vicini; BANCO.inj.viciniT = Date.now(); }
         else if (j.auto != null) { BANCO.avvio = 'INIETTORE'; BANCO.inj.auto = j.auto ? j : null; }
@@ -1106,7 +1109,7 @@
     }
     if (BANCO.cb) BANCO.cb();
   }
-  function bancoLinee() { var buf = ''; return function (pezzo) { buf += pezzo; var i; while ((i = buf.indexOf('\n')) >= 0) { bancoRiga(buf.slice(0, i)); buf = buf.slice(i + 1); } if (buf.length > 4000) { bancoRiga(buf); buf = ''; } }; }
+  function bancoLinee() { var buf = ''; return function (pezzo) { buf += pezzo; var i; while ((i = buf.indexOf('\n')) >= 0) { bancoRiga(buf.slice(0, i)); buf = buf.slice(i + 1); } if (buf.length > 40000) { bancoRiga(buf); buf = ''; } }; }
   function bancoScollega() {
     var b = BANCO;
     try { if (b.lettore) b.lettore.cancel(); } catch (e) {}
@@ -1369,6 +1372,8 @@
     var b = BANCO, I = b.inj, box = el('div', 'bp'); app.appendChild(box);
     var reg = null, faz = (function () { try { return localStorage.getItem('bp-faz') || 'blu'; } catch (e) { return 'blu'; } })();
     var fase = 'pronto', target = null, tag = null, esito = null, attesa = null, scelto = null, controllo = null, timer = null;
+    var modo = 'uno', L = null, Bt = null, utenti = null, report = [], stopU = null;
+    var stopRep = S.ascoltaReportBatt(function (r) { report = r; if (modo === 'batterie') disegna(); });
     var piano = null, pianoEdit = false;   // quanti tag per fazione: documento beacon/_piano
     var stopReg = S.ascoltaBeacon(function (r) {
       r = r || [];
@@ -1479,7 +1484,7 @@
         var x = el('button', 'bp-fz ' + f + (faz === f ? ' on' : '')); x.type = 'button';
         x.appendChild(el('b', null, nomeF(f))); x.appendChild(el('small', null, (completa(f) && tot(f) ? '✓ ' : '') + diFaz(f).filter(function (r) { return r.n <= tot(f); }).length + ' / ' + tot(f)));
         if (!tot(f)) x.disabled = true;
-        x.onclick = function () { if (fase === 'scrivo' || fase === 'cerca') return; faz = f; scelto = null; try { localStorage.setItem('bp-faz', f); } catch (e) {} vai2('pronto'); };
+        x.onclick = function () { if (fase === 'scrivo' || fase === 'cerca' || (L && /scrivo|etichette|contando/.test(L.fase))) return; faz = f; scelto = null; try { localStorage.setItem('bp-faz', f); } catch (e) {} vai2('pronto'); };
         fz.appendChild(x);
       });
       box.appendChild(fz);
@@ -1499,6 +1504,7 @@
         gr.appendChild(x);
       })(n);
       box.appendChild(gr);
+      if (modo !== 'uno') { disegnaModo(); return; }
       // 4. il passo da fare adesso
       var T = sig(faz, nx), card;
       var altra = faz === 'blu' ? 'rossa' : 'blu';
@@ -1528,6 +1534,13 @@
         card.appendChild(tasto('RIPROVA', 'acc', cerca));
       }
       box.appendChild(card);
+      if (fase === 'pronto' || fase === 'fatto') {
+        var alt = el('div', 'bp-alt');
+        alt.appendChild(tasto('TANTI TAG INSIEME', '', function () { modo = 'lotto'; L = { fase: 'conta' }; disegna(); }));
+        alt.appendChild(tasto('BATTERIE', '', function () { modo = 'batterie'; Bt = null; disegna(); }));
+        alt.appendChild(tasto('ASSEGNA AI GIOCATORI', '', function () { modo = 'assegna'; caricaUtenti(); disegna(); }));
+        box.appendChild(alt);
+      }
       // 5. controllo finale: quali tag si sentono davvero
       var fin = el('div', 'bp-fin');
       fin.appendChild(tasto('Controllo finale', '', finale));
@@ -1552,16 +1565,181 @@
       }
       box.appendChild(fin);
     }
+    // ---------- modi: tanti tag insieme, batterie, assegnazione
+    function liberi(f, k) { var r = [], n = 1; while (r.length < k && n <= tot(f)) { if (!perNum(f, n)) r.push(n); n++; } return r; }
+    function indietro2() { if (L && (L.fase === 'scrivo')) return; if (L && L.fase === 'etichette') bancoInvia('basta'); modo = 'uno'; L = null; fase = 'pronto'; disegna(); }
+    function stepper(val, min, max, onch) {
+      var r = el('div', 'bp-step'), meno = bottone('−', 'bp-pm'), num = el('span', 'bp-val', String(val)), piu = bottone('+', 'bp-pm');
+      meno.onclick = function () { if (val > min) { val--; num.textContent = val; onch(val); } };
+      piu.onclick = function () { if (val < max) { val++; num.textContent = val; onch(val); } };
+      r.appendChild(meno); r.appendChild(num); r.appendChild(piu); return r;
+    }
+    function arriviModi() {
+      if (L && L.attesa === 'nuovi' && (I.seqN || 0) > L.seqN) { L.attesa = null; L.visti = (I.nuovi || []).slice().sort(function (a, c) { return c.rssi - a.rssi; }); L.messi = 0; L.fase = 'contati'; }
+      if (L && L.attesa === 'scrivi' && I.fatti.length > L.nf) {
+        var e = I.fatti[0], it = L.lista[L.i]; L.attesa = null; clearTimeout(L.to);
+        if (e.iniettore === 'ok' && e.mac === it.mac) {
+          it.stato = 'ok';
+          S.salvaBeacon(it.mac, { f: L.f, n: it.n, quando: Date.now(), da: S.stato().me.callsign || '', nome: it.nome || '' }).catch(function () { it.stato = 'noreg'; });
+          L.i++;
+        } else if (!it.riprova) { it.riprova = true; }
+        else { it.stato = 'errore'; it.testo = e.testo; L.i++; }
+        setTimeout(prossimoLotto, 300);
+      }
+      if (Bt && Bt.attesa && (I.seqB || 0) > Bt.seqB) { Bt.attesa = false; Bt.righe = I.batt || []; }
+    }
+    function prossimoLotto() {
+      if (!L || L.fase !== 'scrivo') return;
+      while (L.i < L.lista.length && L.lista[L.i].stato) L.i++;
+      if (L.i >= L.lista.length) { L.fase = L.lista.some(function (x) { return x.stato === 'ok'; }) ? 'etichette' : 'fine'; L.e = 0; if (L.fase === 'etichette') lampeggia(); disegna(); return; }
+      var it = L.lista[L.i]; L.attesa = 'scrivi'; L.nf = I.fatti.length;
+      clearTimeout(L.to); L.to = setTimeout(function () { if (L && L.attesa === 'scrivi' && L.lista[L.i] === it) { L.attesa = null; it.stato = 'errore'; it.testo = 'nessuna risposta'; L.i++; prossimoLotto(); } }, 60000);
+      bancoInvia('progmac ' + it.mac + ' ' + L.f + ' ' + it.n); disegna();
+    }
+    function okLista() { return L.lista.filter(function (x) { return x.stato === 'ok'; }); }
+    function lampeggia() { var it = okLista()[L.e]; if (it) bancoInvia('lampeggia ' + it.mac + ' 40'); }
+    function caricaUtenti() {
+      if (stopU) return;
+      stopU = S.ascoltaUtenti(function (u) {
+        var me = S.stato().me || {};
+        utenti = u.filter(function (x) { return (me.team && x.team === me.team) || x.ruolo === 'organizzatore'; }).sort(function (a, c) { return nomeG(a).localeCompare(nomeG(c)); });
+        if (modo === 'assegna' || (L && L.fase === 'etichette')) disegna();
+      });
+    }
+    function sceltaGioc(r, cb) {
+      var usati = {}; (reg || []).forEach(function (x) { if (x.uid && x.id !== (r && r.id)) usati[x.uid] = sig(x.f, x.n); });
+      var opz = [['', '— nessuno —']].concat((utenti || []).map(function (u) { return [u.id, conNome(u) + (usati[u.id] ? '  (ha già ' + usati[u.id] + ')' : '')]; }));
+      var sel = select(opz, (r && r.uid) || ''); sel.className = 'bp-sel';
+      sel.onchange = function () {
+        var u = (utenti || []).filter(function (x) { return x.id === sel.value; })[0];
+        if (u && usati[u.id] && !confirm(nomeG(u) + ' ha già ' + usati[u.id] + '. Spostarlo su ' + sig(r.f, r.n) + '?')) { sel.value = (r && r.uid) || ''; return; }
+        var lavori = [S.aggiornaBeacon(r.id, { uid: u ? u.id : null, gioc: u ? nomeG(u) : null })];
+        if (u && usati[u.id]) (reg || []).forEach(function (x) { if (x.uid === u.id && x.id !== r.id) lavori.push(S.aggiornaBeacon(x.id, { uid: null, gioc: null })); });
+        Promise.all(lavori).then(function () { if (cb) cb(); }, errore);
+      };
+      return sel;
+    }
+    function voltaggio(mv) { return mv ? (mv / 1000).toFixed(2).replace('.', ',') + ' V' : '—'; }
+    function statoBatt(mv) { return !mv ? 'nd' : mv >= 2900 ? 'ok' : mv >= 2700 ? 'warn' : 'ko'; }
+    function tabellaBatt(righe) {
+      var t = el('div', 'bp-batt');
+      righe.forEach(function (x) {
+        var r = el('div', 'bp-br ' + statoBatt(x.mv));
+        r.appendChild(el('b', x.f, x.f ? sig(x.f, x.n) : '?'));
+        r.appendChild(el('span', 'g', x.gioc || ''));
+        r.appendChild(el('span', 'v', x.sentito === false ? 'NON SENTITO' : voltaggio(x.mv)));
+        t.appendChild(r);
+      });
+      return t;
+    }
+    function disegnaModo() {
+      var card, T;
+      box.appendChild(tasto('← Indietro', 'link', indietro2));
+      if (modo === 'lotto') {
+        if (L.fase === 'conta') {
+          card = grosso(faz, 'Tanti tag ' + nomeP(faz), 'Togli la linguetta ai tag nuovi e mettili TUTTI intorno alla T-Beam (meno di 1 metro).');
+          card.appendChild(tasto('CONTA I TAG', 'acc', function () { L.attesa = 'nuovi'; L.seqN = I.seqN || 0; L.fase = 'contando'; bancoInvia('nuovi'); disegna(); }));
+        } else if (L.fase === 'contando') card = grosso('', 'Conto i tag…', 'Aspetta 6 secondi.');
+        else if (L.fase === 'contati') {
+          card = grosso('', 'Vedo ' + L.visti.length + ' tag', 'Quanti ne hai messi tu?');
+          card.appendChild(stepper(L.messi, 0, 60, function (v) { L.messi = v; }));
+          card.appendChild(tasto('CONFERMA', 'acc', function () {
+            if (!L.messi) { toast('Conta i tag che hai messo'); return; }
+            if (L.messi !== L.visti.length) { L.fase = 'diverso'; disegna(); return; }
+            var lib = liberi(faz, L.visti.length);
+            if (lib.length < L.visti.length) { L.fase = 'troppi'; L.lib = lib.length; disegna(); return; }
+            L.f = faz; L.lista = L.visti.map(function (v, k) { return { mac: v.mac, nome: v.nome, n: lib[k], stato: null }; }); L.fase = 'pronto'; disegna();
+          }));
+          card.appendChild(tasto('Riconta', 'link', function () { L.fase = 'conta'; disegna(); }));
+        } else if (L.fase === 'diverso') {
+          card = grosso('ko', 'Non corrisponde', 'Io ne vedo ' + L.visti.length + ', tu ne hai messi ' + L.messi + '. Avvicinali tutti e controlla le linguette.');
+          card.appendChild(tasto('RICONTA', 'acc', function () { L.fase = 'conta'; disegna(); }));
+        } else if (L.fase === 'troppi') {
+          card = grosso('ko', 'Troppi tag', 'Ai ' + nomeP(faz) + ' ne mancano solo ' + L.lib + '. Togline ' + (L.visti.length - L.lib) + ' e riconta.');
+          card.appendChild(tasto('RICONTA', 'acc', function () { L.fase = 'conta'; disegna(); }));
+        } else if (L.fase === 'pronto') {
+          T = sig(L.f, L.lista[0].n) + (L.lista.length > 1 ? ' – ' + sig(L.f, L.lista[L.lista.length - 1].n) : '');
+          card = grosso(L.f, L.lista.length + ' tag: ' + T, 'Non toccare i tag finché non ho finito (circa ' + Math.ceil(L.lista.length * 20 / 60) + ' min).');
+          card.appendChild(tasto('PROGRAMMA TUTTI', 'acc', function () { L.fase = 'scrivo'; L.i = 0; prossimoLotto(); }));
+        } else if (L.fase === 'scrivo' || L.fase === 'fine') {
+          var fatti = okLista().length;
+          card = grosso(L.fase === 'fine' ? (fatti === L.lista.length ? 'ok' : 'warn') : '', L.fase === 'fine' ? 'Finito: ' + fatti + ' su ' + L.lista.length : 'Scrivo ' + (Math.min(L.i + 1, L.lista.length)) + ' di ' + L.lista.length + '…', L.fase === 'fine' ? 'Quelli con ✗ rifalli uno alla volta.' : 'Non toccare i tag.');
+          var pr = el('div', 'bp-prog');
+          L.lista.forEach(function (x, k) { pr.appendChild(el('span', 'p ' + (x.stato || (k === L.i ? 'ora' : '')), sig(L.f, x.n) + (x.stato === 'ok' ? ' ✓' : x.stato === 'errore' ? ' ✗' : ''))); });
+          card.appendChild(pr);
+          if (L.fase === 'fine') card.appendChild(tasto('FINE', 'acc', indietro2));
+        } else if (L.fase === 'etichette') {
+          var oks = okLista(), it = oks[L.e];
+          card = grosso(L.f, 'Lampeggia: ' + sig(L.f, it.n), 'Cerca il tag con la LUCE ROSSA che lampeggia. Scrivici ' + sig(L.f, it.n) + ' col pennarello.');
+          var r = perMac(it.mac);
+          if (r) { if (!utenti) caricaUtenti(); var lab = el('div', 'bp-txt bp-pic', 'A chi lo dai?'); card.appendChild(lab); card.appendChild(sceltaGioc(r)); }
+          card.appendChild(tasto(L.e + 1 < oks.length ? 'SCRITTO → PROSSIMO (' + (L.e + 2) + '/' + oks.length + ')' : 'SCRITTO → FINE', 'acc', function () {
+            bancoInvia('basta');
+            L.e++;
+            if (L.e >= oks.length) { L.fase = 'fine'; disegna(); return; }
+            setTimeout(lampeggia, 800); disegna();
+          }));
+          card.appendChild(tasto('Non lo trovo: fallo lampeggiare di nuovo', 'link', function () { bancoInvia('basta'); setTimeout(lampeggia, 800); }));
+        }
+        box.appendChild(card); return;
+      }
+      if (modo === 'batterie') {
+        card = grosso('', 'Batterie dei tag', 'Metti TUTTI i tag vicino alla T-Beam (per esempio al briefing).');
+        card.appendChild(tasto(Bt && Bt.attesa ? 'LEGGO… (8 s)' : 'LEGGI BATTERIE', 'acc', function () { if (Bt && Bt.attesa) return; Bt = { attesa: true, seqB: I.seqB || 0 }; bancoInvia('batterie'); disegna(); }));
+        if (Bt && Bt.righe) {
+          var sentiti = {}; Bt.righe.forEach(function (x) { sentiti[x.mac] = x; });
+          var righe = (reg || []).slice().sort(function (a, c) { return a.f === c.f ? a.n - c.n : a.f === 'blu' ? -1 : 1; }).map(function (r) {
+            var x = sentiti[r.id]; return { mac: r.id, f: r.f, n: r.n, mv: x ? x.mv : 0, gioc: r.gioc || '', sentito: !!x };
+          });
+          var basse = righe.filter(function (x) { return x.sentito && statoBatt(x.mv) === 'ko'; }).length, mancano = righe.filter(function (x) { return !x.sentito; }).length;
+          card.appendChild(el('div', 'bp-esito ' + (basse ? 'ko' : mancano ? 'warn' : 'ok'), basse ? basse + ' batterie da cambiare' : mancano ? mancano + ' tag non sentiti' : 'Tutte a posto'));
+          card.appendChild(tabellaBatt(righe));
+          var sv = el('div', 'bp-faz');
+          [['inizio', 'SALVA INIZIO'], ['fine', 'SALVA FINE']].forEach(function (t) {
+            sv.appendChild(tasto(t[1], '', function () {
+              S.salvaReportBatt({ tipo: t[0], quando: Date.now(), da: S.stato().me.callsign || '', righe: righe }).then(function () { toast('Report salvato'); }, errore);
+              righe.forEach(function (x) { if (x.sentito && x.mv) S.aggiornaBeacon(x.mac, { mv: x.mv, mvQuando: Date.now() }).catch(function () {}); });
+            }));
+          });
+          card.appendChild(sv);
+        }
+        box.appendChild(card);
+        // report salvati (li vedono tutti gli organizzatori)
+        var rp = el('div', 'bp-rep'); rp.appendChild(el('h3', 'sez', 'Report salvati'));
+        if (!report.length) rp.appendChild(el('p', 'hint', 'Nessun report ancora.'));
+        report.forEach(function (r) {
+          var d = el('details', 'bp-repi'), sm = el('summary');
+          var basse = (r.righe || []).filter(function (x) { return x.sentito && statoBatt(x.mv) === 'ko'; }).length, manc = (r.righe || []).filter(function (x) { return !x.sentito; }).length;
+          sm.textContent = (r.tipo === 'fine' ? 'FINE' : 'INIZIO') + ' · ' + new Date(r.quando).toLocaleString('it-IT', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' · ' + (basse ? basse + ' da cambiare' : 'ok') + (manc ? ' · ' + manc + ' non sentiti' : '');
+          d.appendChild(sm); d.appendChild(tabellaBatt(r.righe || [])); rp.appendChild(d);
+        });
+        box.appendChild(rp); return;
+      }
+      if (modo === 'assegna') {
+        card = grosso('', 'Chi ha quale tag', 'Scegli il giocatore per ogni tag.');
+        if (!utenti) card.appendChild(el('p', 'hint', 'Carico i giocatori…'));
+        else {
+          var lst = (reg || []).slice().sort(function (a, c) { return a.f === c.f ? a.n - c.n : a.f === 'blu' ? -1 : 1; });
+          var ass = lst.filter(function (x) { return x.uid; }).length;
+          card.appendChild(el('div', 'bp-esito ' + (ass === lst.length ? 'ok' : 'warn'), ass + ' su ' + lst.length + ' assegnati'));
+          lst.forEach(function (r) { var row = el('div', 'bp-ass ' + r.f); row.appendChild(el('b', null, sig(r.f, r.n))); row.appendChild(sceltaGioc(r)); card.appendChild(row); });
+          var conTag = {}; lst.forEach(function (r) { if (r.uid) conTag[r.uid] = 1; });
+          var senza = utenti.filter(function (u) { return !conTag[u.id]; });
+          if (senza.length) card.appendChild(el('p', 'bp-txt bp-pic', 'Senza tag: ' + senza.map(nomeG).join(', ')));
+        }
+        box.appendChild(card); return;
+      }
+    }
     var vecchiVicini = I.viciniT || 0;
     b.cb = function () {
       if (controllo && controllo.attesa && (I.viciniT || 0) > vecchiVicini) { vecchiVicini = I.viciniT; controllo = { v: I.vicini, attesa: false }; }
-      arrivi(); disegna();
+      arrivi(); arriviModi(); disegna();
     };
     // appena collegati chiediamo chi è (l'iniettore risponde con "info")
     var giaChiesto = false;
     var tk = setInterval(function () { if (b.via && !b.avvio && !giaChiesto) { giaChiesto = true; bancoInvia('info'); } }, 1000);
     disegna();
-    var prima = chiusura; chiusura = function () { clearInterval(tk); clearTimeout(timer); b.cb = null; if (stopReg) stopReg(); if (prima) prima(); };
+    var prima = chiusura; chiusura = function () { clearInterval(tk); clearTimeout(timer); b.cb = null; if (stopReg) stopReg(); if (stopRep) stopRep(); if (stopU) stopU(); if (prima) prima(); };
   }
   function pagProvaTbeam() {
     testata('Prova 3 T-Beam');

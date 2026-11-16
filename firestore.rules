@@ -158,6 +158,10 @@ service cloud.firestore {
       allow read: if signed();
       allow write: if perm('conflitti');
     }
+    // Report delle batterie dei tag (inizio / fine giocata): li vedono e li scrivono gli organizzatori
+    match /beaconReport/{id} {
+      allow read, write: if perm('conflitti');
+    }
     // Posa dei QR sul campo: chi li ha messi e dove
     match /campiPosa/{id} {
       allow read: if signed();

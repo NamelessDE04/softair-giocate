@@ -330,6 +330,10 @@
   // registro dei tag programmati: { mac, f: 'blu'|'rossa', n, quando, da }
   api.ascoltaBeacon = function (cb) { return db.collection('beacon').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb(null); }); };
   api.salvaBeacon = function (mac, dati) { return db.collection('beacon').doc(mac).set(dati); };
+  api.aggiornaBeacon = function (mac, dati) { return db.collection('beacon').doc(mac).set(dati, { merge: true }); };
+  // report batterie (inizio / fine giocata): { tipo, quando, da, righe: [{ mac, f, n, mv, gioc }] }
+  api.salvaReportBatt = function (r) { return db.collection('beaconReport').add(r); };
+  api.ascoltaReportBatt = function (cb) { return db.collection('beaconReport').orderBy('quando', 'desc').limit(10).onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb([]); }); };
   api.eliminaBeacon = function (mac) { return db.collection('beacon').doc(mac).delete(); };
   api.ascoltaCampi = function (cb) { return db.collection('campi').onSnapshot(function (qs) { cb(lista(qs).map(normalizza)); }, function () { cb([]); }); };
   api.campoInCache = function (id) { return cacheCampi[id] || null; };

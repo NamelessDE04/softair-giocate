@@ -30,7 +30,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.9.4"
+#define VERSIONE "0.9.5"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -827,7 +827,7 @@ bool leggiIbeacon(NimBLEAdvertisedDevice &d, uint8_t *u, uint16_t &maj, uint16_t
 }
 // I CP35 trasmettono a turno piu' pacchetti (iBeacon, Eddystone, nome...): bisogna guardarli uno per uno,
 // non solo l'ultimo ricevuto. Questa tabella raccoglie tutto quello che si sente durante una scansione.
-struct Visto { char mac[18]; char nome[20]; int rssi; bool coll, ib, nostro; uint16_t ma, mi; uint8_t tipo; };
+struct Visto { char mac[18]; char nome[20]; int rssi; bool coll, ib, nostro; uint16_t ma, mi; uint8_t tipo; uint16_t mv; };
 Visto visti[40]; volatile int nVisti = 0; volatile bool raccogli = false;
 portMUX_TYPE muxV = portMUX_INITIALIZER_UNLOCKED;
 class Raccolta : public NimBLEAdvertisedDeviceCallbacks {
@@ -838,6 +838,13 @@ class Raccolta : public NimBLEAdvertisedDeviceCallbacks {
     bool nostro = ib && !memcmp(u, uuid, 16);
     std::string nm = d->haveName() ? d->getName() : std::string();
     bool coll = d->getAdvType() == 0 || d->getAdvType() == 1;
+    // Eddystone TLM (servizio FEAA, tipo 0x20): dentro c'e' la tensione della batteria in mV
+    uint16_t mv = 0;
+    for (int k = 0; k < (int)d->getServiceDataCount(); k++) {
+      if (!(d->getServiceDataUUID(k) == NimBLEUUID((uint16_t)0xFEAA))) continue;
+      std::string sd = d->getServiceData(k);
+      if (sd.size() >= 4 && (uint8_t)sd[0] == 0x20) mv = ((uint8_t)sd[2] << 8) | (uint8_t)sd[3];
+    }
     portENTER_CRITICAL(&muxV);
     int i = 0; for (; i < nVisti; i++) if (!strcmp(visti[i].mac, mac.c_str())) break;
     if (i == nVisti && nVisti < 40) { memset(&visti[i], 0, sizeof(Visto)); strncpy(visti[i].mac, mac.c_str(), 17); visti[i].rssi = -999; visti[i].tipo = d->getAddress().getType(); nVisti++; }
@@ -847,6 +854,7 @@ class Raccolta : public NimBLEAdvertisedDeviceCallbacks {
       if (coll) v.coll = true;
       if (nm.size() && !v.nome[0]) strncpy(v.nome, nm.c_str(), 19);
       if (ib && (!v.ib || nostro)) { v.ib = true; v.nostro = nostro; v.ma = ma; v.mi = mi; }
+      if (mv) v.mv = mv;
     }
     portEXIT_CRITICAL(&muxV);
   }
@@ -1003,7 +1011,7 @@ void elenco() {
     String descr = v.nostro ? String(String(v.ma == 1 ? "BLU" : v.ma == 2 ? "ROSSO" : "?") + " #" + String(v.mi)) :
                    v.ib ? String("iBeacon di altri (major " + String(v.ma) + ", minor " + String(v.mi) + ")") : String(v.coll ? "collegabile, non iBeacon" : "non iBeacon");
     Out.printf("  %s  %4d dBm  %-10s %s\n", v.mac, v.rssi, v.nome, descr.c_str());
-    char b[200]; snprintf(b, sizeof(b), "%s{\"mac\":\"%s\",\"nome\":\"%s\",\"rssi\":%d,\"nostro\":%s,\"f\":\"%s\",\"n\":%u}", js.endsWith("[") ? "" : ",", v.mac, v.nome, v.rssi, v.nostro ? "true" : "false", v.nostro ? nomeFaz(v.ma) : "", v.nostro ? v.mi : 0);
+    char b[200]; snprintf(b, sizeof(b), "%s{\"mac\":\"%s\",\"nome\":\"%s\",\"rssi\":%d,\"nostro\":%s,\"f\":\"%s\",\"n\":%u,\"mv\":%u}", js.endsWith("[") ? "" : ",", v.mac, v.nome, v.rssi, v.nostro ? "true" : "false", v.nostro ? nomeFaz(v.ma) : "", v.nostro ? v.mi : 0, v.mv);
     js += b;
   }
   Out.println(js + "]}");
@@ -1102,6 +1110,57 @@ void comando(String c) {
     programma(a, f, n); return;
   }
   if (k == "elenco") { elenco(); return; }
+  // tutti i tag NUOVI (non ancora nostri) intorno all'iniettore, per programmarli in blocco
+  if (k == "nuovi") {
+    int soglia = v.length() ? constrain(v.toInt(), -100, -20) : -80;
+    scansiona(6);
+    String js = "{\"nuovi\":[";
+    for (int i = 0; i < nVisti; i++) {
+      Visto &w = visti[i];
+      if (w.nostro || w.rssi < soglia || strncmp(w.nome, "CP35", 4)) continue;
+      char b[120]; snprintf(b, sizeof(b), "%s{\"mac\":\"%s\",\"nome\":\"%s\",\"rssi\":%d,\"mv\":%u}", js.endsWith("[") ? "" : ",", w.mac, w.nome, w.rssi, w.mv);
+      js += b;
+    }
+    Out.println(js + "]}");
+    return;
+  }
+  // batterie di tutti i tag (lettura dai pacchetti TLM, senza collegarsi): 8 secondi per sentirli tutti
+  if (k == "batterie") {
+    scansiona(8);
+    String js = "{\"batterie\":[";
+    for (int i = 0; i < nVisti; i++) {
+      Visto &w = visti[i];
+      if (!w.nostro && strncmp(w.nome, "CP35", 4)) continue;
+      char b[140]; snprintf(b, sizeof(b), "%s{\"mac\":\"%s\",\"nostro\":%s,\"f\":\"%s\",\"n\":%u,\"mv\":%u,\"rssi\":%d}", js.endsWith("[") ? "" : ",", w.mac, w.nostro ? "true" : "false", w.nostro ? nomeFaz(w.ma) : "", w.nostro ? w.mi : 0, w.mv, w.rssi);
+      js += b;
+    }
+    Out.println(js + "]}");
+    return;
+  }
+  // fa lampeggiare un tag (la sua luce rossa lampeggia finche' e' collegato): per riconoscerlo e scriverci il numero
+  if (k == "lampeggia" && v.length()) {
+    int s1 = v.indexOf(' '); String mac = s1 > 0 ? v.substring(0, s1) : v; mac.toUpperCase();
+    int sec = s1 > 0 ? constrain(v.substring(s1 + 1).toInt(), 2, 60) : 15;
+    scansiona(2);
+    int i = 0; for (; i < nVisti; i++) if (mac == String(visti[i].mac)) break;
+    if (i == nVisti) { Out.printf("{\"lampeggia\":\"%s\",\"ok\":false}\n", mac.c_str()); return; }
+    NimBLEClient *c = NimBLEDevice::createClient(); c->setConnectTimeout(6);
+    bool ok = c->connect(NimBLEAddress(std::string(visti[i].mac), visti[i].tipo));
+    Out.printf("{\"lampeggia\":\"%s\",\"ok\":%s,\"sec\":%d}\n", mac.c_str(), ok ? "true" : "false", sec);
+    stato = "Lampeggia " + mac.substring(12); schermo();
+    uint32_t t0 = millis();
+    while (ok && c->isConnected() && millis() - t0 < (uint32_t)sec * 1000) {
+      delay(50);
+      String bl; portENTER_CRITICAL(&muxBle); bl = daBle; portEXIT_CRITICAL(&muxBle);
+      if (bl.indexOf("basta") >= 0) { portENTER_CRITICAL(&muxBle); daBle = ""; portEXIT_CRITICAL(&muxBle); break; }
+      if (Serial.available()) break;
+    }
+    if (c->isConnected()) c->disconnect();
+    NimBLEDevice::deleteClient(c);
+    stato = "Pronto"; schermo();
+    Out.printf("{\"lampeggia\":\"%s\",\"fine\":true}\n", mac.c_str());
+    return;
+  }
   if (k == "sonda") { sonda(); return; }
   if (k == "pwd" && v.length()) { pwd = v; pref.putString("pwd", pwd); Out.println("password " + pwd); return; }
   if (k == "pot" && v.length()) { potIdx = constrain(v.toInt(), 0, 7); pref.putInt("pot", potIdx); Out.println(String("potenza ") + POT_TESTO[potIdx] + " dBm"); schermo(); return; }
