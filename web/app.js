@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.57';
+  var VERSIONE = '0.58';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -1506,12 +1506,12 @@
         if (completa(altra) || !tot(altra)) { card = grosso('ok', '✓ Tutti fatti!', 'Ora fai il CONTROLLO FINALE con tutti i tag vicini.'); card.appendChild(tasto('CONTROLLO FINALE', 'acc', finale)); }
         else { card = grosso('ok', '✓ ' + nomeP(faz) + ' completi', 'Ora i ' + nomeP(altra) + '. Metti via i ' + nomeP(faz) + '.'); card.appendChild(tasto('PASSA AI ' + nomeP(altra), 'acc', function () { faz = altra; try { localStorage.setItem('bp-faz', altra); } catch (e) {} vai2('pronto'); })); }
       } else if (fase === 'pronto') {
-        card = grosso(faz, 'Tag ' + T, 'Prendi un tag NUOVO. Appoggialo sulla T-Beam. Gli altri lontano.');
+        card = grosso(faz, 'Tag ' + T, 'Prendi un tag NUOVO, togli la linguetta e appoggialo sulla T-Beam.');
         card.appendChild(tasto('PROGRAMMA ' + T, 'acc', cerca));
       } else if (fase === 'cerca') card = grosso('', 'Cerco il tag…', 'Tienilo fermo sulla T-Beam.');
       else if (fase === 'scrivo') card = grosso('', 'Scrivo ' + sig(faz, target) + '…', 'Non muovere il tag. Ci vogliono circa 15 secondi.');
       else if (fase === 'nessuno') { card = grosso('ko', 'Non vedo il tag', 'Appoggialo sulla T-Beam. Se non va, togli e rimetti la batteria.'); card.appendChild(tasto('RIPROVA', 'acc', cerca)); }
-      else if (fase === 'troppi') { card = grosso('ko', 'Troppi tag vicini', 'Sulla T-Beam lascia SOLO il tag da fare. Gli altri ad almeno 2 metri.'); card.appendChild(tasto('RIPROVA', 'acc', cerca)); }
+      else if (fase === 'troppi') { card = grosso('ko', 'Troppi tag vicini', 'Accendi un tag nuovo alla volta: togli la linguetta solo a quello da fare.'); card.appendChild(tasto('RIPROVA', 'acc', cerca)); }
       else if (fase === 'gia') {
         card = grosso('warn', 'Questo è già ' + tag.gia, 'Mettilo da parte. Prendi un tag nuovo.');
         card.appendChild(tasto('OK, NE PRENDO UN ALTRO', 'acc', function () { vai2('pronto'); }));

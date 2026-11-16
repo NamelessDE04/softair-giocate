@@ -30,7 +30,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.9.3"
+#define VERSIONE "0.9.4"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -1066,22 +1066,21 @@ void comando(String c) {
   if (k == "stop") { autoOn = false; stato = "Pronto"; Out.println("{\"auto\":false}"); schermo(); return; }
   // per la pagina "Beacon prog": chi c'e' appoggiato all'iniettore (e quanti altri tag sono vicini)
   if (k == "vicino" && !v.length()) {
+    // I tag gia' programmati (trasmettono il nostro UUID) non contano: si cerca il tag NUOVO piu' vicino.
+    // Solo se non c'e' nessun tag nuovo si riporta quello gia' fatto piu' vicino (per dire "questo e' gia' B2").
     scansiona(3);
-    int best = -1; int altri = 0;
-    for (int i = 0; i < nVisti; i++) {
-      Visto &v = visti[i];
-      bool tag = v.nostro || v.ib || !strncmp(v.nome, "CP35", 4) || v.coll;
-      if (!tag || v.rssi < vicinoDb) continue;
-      if (best < 0 || v.rssi > visti[best].rssi) best = i;
-    }
-    if (best >= 0) for (int i = 0; i < nVisti; i++) {
-      Visto &v = visti[i];
-      if (i != best && v.rssi >= vicinoDb && (v.nostro || v.ib || !strncmp(v.nome, "CP35", 4) || v.coll) && v.rssi >= visti[best].rssi - 12) altri++;
+    auto candidato = [](Visto &v) { return v.rssi >= vicinoDb && (v.ib || !strncmp(v.nome, "CP35", 4) || v.coll); };
+    int best = -1, altri = 0;
+    for (int i = 0; i < nVisti; i++) if (candidato(visti[i]) && !visti[i].nostro && (best < 0 || visti[i].rssi > visti[best].rssi)) best = i;
+    if (best >= 0) {
+      for (int i = 0; i < nVisti; i++) if (i != best && candidato(visti[i]) && !visti[i].nostro && visti[i].rssi >= visti[best].rssi - 12) altri++;
+    } else {
+      for (int i = 0; i < nVisti; i++) if (candidato(visti[i]) && visti[i].nostro && (best < 0 || visti[i].rssi > visti[best].rssi)) best = i;
     }
     if (best < 0) { Out.println("{\"vicino\":{\"mac\":\"\"}}"); return; }
-    Visto &v = visti[best];
+    Visto &w = visti[best];
     Out.printf("{\"vicino\":{\"mac\":\"%s\",\"nome\":\"%s\",\"rssi\":%d,\"nostro\":%s,\"f\":\"%s\",\"n\":%u,\"altri\":%d,\"cp35\":%s}}\n",
-                  v.mac, v.nome, v.rssi, v.nostro ? "true" : "false", v.nostro ? nomeFaz(v.ma) : "", v.nostro ? v.mi : 0, altri, !strncmp(v.nome, "CP35", 4) ? "true" : "false");
+               w.mac, w.nome, w.rssi, w.nostro ? "true" : "false", w.nostro ? nomeFaz(w.ma) : "", w.nostro ? w.mi : 0, altri, !strncmp(w.nome, "CP35", 4) ? "true" : "false");
     return;
   }
   // programma proprio quel tag (indirizzo), non "il piu' vicino": niente scambi tra un controllo e la scrittura
