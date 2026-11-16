@@ -30,7 +30,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.9.6"
+#define VERSIONE "0.9.7"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -492,6 +492,7 @@ void setup() {
   sc->setActiveScan(false);
   sc->setInterval(100); sc->setWindow(99);
   sc->setMaxResults(0);                                     // non tenere in memoria i risultati
+  sc->setDuplicateFilter(false);                            // i CP35 alternano 5 pacchetti diversi: col filtro passava solo il primo
   sc->start(0, nullptr, false);                             // ascolto continuo
   Serial.println(comando("info"));
   Serial.println("Scrivi 'aiuto' per i comandi. Pulsante: corto = invio subito, lungo = area neutra.");
@@ -1198,6 +1199,7 @@ void setup() {
   adv->addServiceUUID(NUS_SERV); adv->setScanResponse(true); adv->start();
   NimBLEScan *sc = NimBLEDevice::getScan(); sc->setActiveScan(true); sc->setInterval(100); sc->setWindow(99);
   sc->setAdvertisedDeviceCallbacks(new Raccolta(), true);   // true: ogni pacchetto, anche dello stesso tag
+  sc->setDuplicateFilter(false);
   schermo();
   Out.println("Iniettore pronto. Scrivi 'auto blu 1' e avvicina i tag uno alla volta. 'aiuto' per i comandi.");
   Out.println("{\"iniettore\":\"pronto\"}");
