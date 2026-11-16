@@ -30,7 +30,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.9.8"
+#define VERSIONE "0.9.9"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -492,7 +492,6 @@ void setup() {
   sc->setActiveScan(false);
   sc->setInterval(100); sc->setWindow(99);
   sc->setMaxResults(0);                                     // non tenere in memoria i risultati
-  sc->setDuplicateFilter(false);                            // i CP35 alternano 5 pacchetti diversi: col filtro passava solo il primo
   sc->start(0, nullptr, false);                             // ascolto continuo
   Serial.println(comando("info"));
   Serial.println("Scrivi 'aiuto' per i comandi. Pulsante: corto = invio subito, lungo = area neutra.");
@@ -515,9 +514,13 @@ void loop() {
   static uint32_t attesa = INVIO_MS;
   if (millis() - ultimoInvio >= attesa) { conta(); ultimoInvio = millis(); attesa = INVIO_MS + random(0, 3000); invia(); }
   disegnaLuce(); suona();
-  // se lo scanner si ferma, ripartire
+  // La radio Bluetooth scarta i pacchetti identici gia' sentiti: l'iBeacon di un tag (sempre uguale) passerebbe
+  // una volta sola. Ripartire con l'ascolto ogni secondo azzera quella memoria, cosi' ogni tag viene risentito.
+  // (Spegnere il filtro invece intasa la scheda con tutti i pacchetti dei telefoni intorno.)
   NimBLEScan *sc = NimBLEDevice::getScan();
-  if (!sc->isScanning()) sc->start(0, nullptr, false);
+  static uint32_t ultimoRiavvio = 0;
+  if (millis() - ultimoRiavvio >= 1000) { ultimoRiavvio = millis(); if (sc->isScanning()) sc->stop(); sc->start(0, nullptr, false); }
+  else if (!sc->isScanning()) sc->start(0, nullptr, false);
   delay(20);
 }
 #endif
@@ -1208,7 +1211,6 @@ void setup() {
   adv->addServiceUUID(NUS_SERV); adv->setScanResponse(true); adv->start();
   NimBLEScan *sc = NimBLEDevice::getScan(); sc->setActiveScan(true); sc->setInterval(100); sc->setWindow(99);
   sc->setAdvertisedDeviceCallbacks(new Raccolta(), true);   // true: ogni pacchetto, anche dello stesso tag
-  sc->setDuplicateFilter(false);
   schermo();
   Out.println("Iniettore pronto. Scrivi 'auto blu 1' e avvicina i tag uno alla volta. 'aiuto' per i comandi.");
   Out.println("{\"iniettore\":\"pronto\"}");
