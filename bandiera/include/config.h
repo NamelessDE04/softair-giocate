@@ -16,7 +16,7 @@
 // Nell'app del tag imposta: UUID qui sotto, Major = fazione (1 blu, 2 rossa), Minor = numero del tag (1, 2, 3...)
 #define TAG_UUID       "41435446-4c41-4721-8000-000000000001"
 #define SOGLIA_RSSI    -80       // dBm: sotto questo valore il tag è "fuori dall'area". Si tara sul campo (comando: soglia -75)
-#define TAG_VALIDO_MS  30000     // un tag conta per 30 s dall'ultima volta che è stato sentito
+#define TAG_VALIDO_MS  8000      // un tag conta per 8 s dall'ultima volta che è stato sentito (comando: uscita 8)
 
 // ---- Conquista (fatta dalla bandiera da sola, così funziona anche senza app)
 #define CONQUISTA_S    60        // secondi per conquistare con un giocatore (comando: tempo 60)

@@ -30,7 +30,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.9"
+#define VERSIONE "0.9.1"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -271,6 +271,7 @@ uint32_t ultimoInvio = 0;
 
 // impostazioni (salvate sulla scheda)
 int soglia = SOGLIA_RSSI, tempoConq = CONQUISTA_S, luce = LUCE;
+uint32_t validoMs = TAG_VALIDO_MS;   // dopo quanto un tag non piu' sentito esce dall'area (comando: uscita 8)
 bool muto = false, buzBasso = BUZZER_BASSO;
 
 // stato della conquista
@@ -279,7 +280,7 @@ uint8_t blu = 0, rossi = 0;
 uint32_t bipLungoFino = 0, testFino = 0;
 
 void salva() {
-  pref.putInt("soglia", soglia); pref.putInt("tempo", tempoConq); pref.putInt("luce", luce);
+  pref.putInt("soglia", soglia); pref.putUInt("valido", validoMs); pref.putInt("tempo", tempoConq); pref.putInt("luce", luce);
   pref.putBool("muto", muto); pref.putBool("buzBasso", buzBasso);
 }
 
@@ -292,7 +293,7 @@ void registra(uint16_t minor, uint8_t major, int rssi) {
   if (i == nTag) {
     if (nTag < MAX_TAG) { tags[nTag] = { minor, major, (float)rssi, ora }; nTag++; }
   } else {
-    tags[i].rssi = (ora - tags[i].visto > TAG_VALIDO_MS) ? rssi : tags[i].rssi * 0.7f + rssi * 0.3f;
+    tags[i].rssi = (ora - tags[i].visto > validoMs) ? rssi : tags[i].rssi * 0.6f + rssi * 0.4f;
     tags[i].visto = ora;
   }
   portEXIT_CRITICAL(&muxTag);
@@ -319,8 +320,8 @@ void conta() {
   portENTER_CRITICAL(&muxTag);
   for (int i = 0; i < nTag; i++) {
     Tag &t = tags[i];
-    if (ora - t.visto > 5 * TAG_VALIDO_MS) { tags[i] = tags[nTag - 1]; nTag--; i--; continue; }
-    if (ora - t.visto < TAG_VALIDO_MS && t.rssi >= soglia) { if (t.major == 1) b++; else r++; }
+    if (ora - t.visto > 5 * validoMs) { tags[i] = tags[nTag - 1]; nTag--; i--; continue; }
+    if (ora - t.visto < validoMs && t.rssi >= soglia) { if (t.major == 1) b++; else r++; }
   }
   portEXIT_CRITICAL(&muxTag);
   blu = b; rossi = r;
@@ -385,7 +386,7 @@ String jsonStato() {
   uint32_t ora = millis(); bool primo = true;
   portENTER_CRITICAL(&muxTag);
   for (int i = 0; i < nTag; i++) {
-    if (ora - tags[i].visto >= TAG_VALIDO_MS) continue;
+    if (ora - tags[i].visto >= validoMs) continue;
     char b[64]; snprintf(b, sizeof(b), "%s{\"n\":%u,\"f\":\"%s\",\"rssi\":%d}", primo ? "" : ",", tags[i].minor, nomeFaz(tags[i].major), (int)tags[i].rssi);
     s += b; primo = false;
   }
@@ -401,7 +402,7 @@ void invia() {
   for (int i = 0; i < nTag && n < MAX_TAG_PACCHETTO; i++) {
     Tag &t = tags[i];
     // nel messaggio vanno anche i tag sentiti ma sotto soglia: servono per tarare la soglia dall'HQ
-    if (ora - t.visto >= TAG_VALIDO_MS) continue;
+    if (ora - t.visto >= validoMs) continue;
     uint8_t *q = p + TESTA + 4 * n;
     q[0] = t.minor >> 8; q[1] = t.minor & 0xFF; q[2] = t.major; q[3] = (uint8_t)(int8_t)constrain((int)t.rssi, -127, 0);
     n++;
@@ -441,6 +442,7 @@ String comando(String c) {
   if (k == "gps") return "GPS: " + String(gps.satellites.value()) + " satelliti, HDOP " + String(gps.hdop.hdop(), 1) + (posFissa() ? ", posizione fissa " + String(mLat, 6) + "," + String(mLon, 6) + " (" + String(nPos) + " letture)" : String(", posizione non ancora fissa (") + String(nPos) + "/10)") + (spostata() ? ", SPOSTATA" : "");
   if (k == "muto") { muto = v.length() ? v.toInt() != 0 : !muto; salva(); return muto ? "cicalino muto" : "cicalino attivo"; }
   if (k == "buzzer") { buzBasso = !buzBasso; salva(); return String("cicalino ") + (buzBasso ? "attivo col segnale basso" : "attivo col segnale alto"); }
+  if (k == "uscita" && v.length()) { validoMs = constrain(v.toInt(), 2, 60) * 1000UL; salva(); return "un tag non sentito per " + String(validoMs / 1000) + " s esce dall'area"; }
   if (k == "reset") { owner = 0; prog = 0; progF = 0; ultimoInvio = 0; return "area neutra"; }
   if (k == "fazione") { owner = constrain(v.toInt(), 0, 2); prog = 0; progF = 0; ultimoInvio = 0; return String("area ai ") + nomeFaz(owner); }
   if (k == "test") { testFino = millis() + 4000; return "prova luce e cicalino per 4 s"; }
@@ -474,6 +476,7 @@ void ascoltaRadio() {
 void setup() {
   avvioComune("BANDIERA");
   pref.begin("ac", false);
+  validoMs = pref.getUInt("valido", 8000);
   soglia = pref.getInt("soglia", SOGLIA_RSSI); tempoConq = pref.getInt("tempo", CONQUISTA_S); luce = pref.getInt("luce", LUCE);
   muto = pref.getBool("muto", false); buzBasso = pref.getBool("buzBasso", BUZZER_BASSO);
   pinMode(PIN_BUZZER, OUTPUT); digitalWrite(PIN_BUZZER, buzBasso ? HIGH : LOW);
@@ -504,7 +507,8 @@ void loop() {
   if (b == 1) ultimoInvio = 0;
   if (b == 2) Serial.println("> " + comando("reset"));
   static uint32_t ultimoPasso = millis(), ultimoDisp = 0;
-  if (millis() - ultimoPasso >= 1000) { passoConquista((millis() - ultimoPasso) / 1000.0f); ultimoPasso = millis(); }
+  // conteggio ogni secondo (prima solo a ogni invio, ogni 20 s: per questo l'uscita dall'area era lenta)
+  if (millis() - ultimoPasso >= 1000) { conta(); passoConquista((millis() - ultimoPasso) / 1000.0f); ultimoPasso = millis(); }
   if (millis() - ultimoDisp >= 1000) { ultimoDisp = millis(); aggiornaDisplay(); }
   // un po' di casualità sul ritmo, così due bandiere non trasmettono sempre insieme
   static uint32_t attesa = INVIO_MS;
