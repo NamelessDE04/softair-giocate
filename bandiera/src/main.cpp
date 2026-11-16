@@ -30,7 +30,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.8.2"
+#define VERSIONE "0.8.3"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -743,6 +743,7 @@ const char *POT_TESTO[] = { "-19.5", "-13.5", "-7", "-3.5", "-1", "+1", "+1.5", 
 
 // risposte del tag
 uint8_t rxBuf[64]; int rxLen = 0, rxAtteso = 0;
+volatile int nRisp = 0; bool rispTx = true;
 volatile int ultimaRisp = -1; uint8_t rispDati[40]; volatile int rispLen = 0;
 void notifica(NimBLERemoteCharacteristic *c, uint8_t *d, size_t n, bool isNotify) {
   for (size_t i = 0; i < n; i++) {
@@ -753,7 +754,8 @@ void notifica(NimBLERemoteCharacteristic *c, uint8_t *d, size_t n, bool isNotify
     if (rxLen == 4) rxAtteso = b + 5;
     if (rxLen >= 4 && rxLen == rxAtteso) {
       uint8_t x = rxBuf[2] ^ rxBuf[3]; for (int k = 0; k < rxBuf[3]; k++) x ^= rxBuf[4 + k];
-      if (x == rxBuf[rxLen - 1]) { rispLen = min((int)rxBuf[3], 40); memcpy(rispDati, rxBuf + 4, rispLen); ultimaRisp = rxBuf[2]; }
+      if (x == rxBuf[rxLen - 1]) { rispLen = min((int)rxBuf[3], 40); memcpy(rispDati, rxBuf + 4, rispLen); ultimaRisp = rxBuf[2]; nRisp++; }
+      String h = "  <- risposta"; for (int k = 0; k < rxLen; k++) { char b[4]; snprintf(b, sizeof(b), " %02X", rxBuf[k]); h += b; } Serial.println(h);
       rxLen = 0; rxAtteso = 0;
     }
     if (rxLen >= (int)sizeof(rxBuf)) rxLen = 0;
@@ -804,18 +806,28 @@ bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
   }
   if (!err.length()) {
     rx = s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE1)); tx = s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE2)); pw = s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE3));
+    // elenco di servizi e caratteristiche (serve per capire i modelli diversi)
+    std::vector<NimBLERemoteService *> *sv = c->getServices(true);
+    for (auto *x : *sv) {
+      Serial.printf("  servizio %s\n", x->getUUID().toString().c_str());
+      std::vector<NimBLERemoteCharacteristic *> *cv = x->getCharacteristics(true);
+      for (auto *y : *cv) Serial.printf("    car. %s%s%s%s%s\n", y->getUUID().toString().c_str(), y->canRead() ? " lettura" : "", y->canWrite() ? " scrittura" : "",
+                                       y->canWriteNoResponse() ? " scrittura-veloce" : "", y->canNotify() ? " notifica" : (y->canIndicate() ? " indicazione" : ""));
+    }
     if (!rx || !tx) err = "caratteristiche FFE1/FFE2 mancanti";
   }
   if (!err.length()) {
     rxLen = 0; ultimaRisp = -1;
-    if (rx->canNotify()) rx->subscribe(true, notifica);
-    delay(200);
+    bool sub = rx->canNotify() ? rx->subscribe(true, notifica) : (rx->canIndicate() ? rx->subscribe(false, notifica) : false);
+    Serial.println(sub ? "  notifiche attive" : "  NOTIFICHE NON ATTIVE");
+    rispTx = tx->canWrite();   // come l'app Android: scrittura con conferma se il tag la supporta
+    delay(300);
     // serve la password?
-    std::string q = pacchetto(0x25, nullptr, 0); tx->writeValue((uint8_t *)q.data(), q.size(), false);
+    std::string q = pacchetto(0x25, nullptr, 0); tx->writeValue((uint8_t *)q.data(), q.size(), rispTx);
     uint32_t t0 = millis(); while (ultimaRisp != 0x25 && millis() - t0 < 2000) delay(20);
     bool serve = ultimaRisp != 0x25 || rispLen < 1 || rispDati[0] != 0;
     Serial.println(ultimaRisp == 0x25 ? (serve ? "Il tag chiede la password" : "Il tag non chiede la password") : "Nessuna risposta alla domanda password: la mando comunque");
-    if (serve && pw) { pw->writeValue((uint8_t *)pwd.c_str(), pwd.length(), true); delay(400); }
+    if (serve && pw) { pw->writeValue((uint8_t *)pwd.c_str(), pwd.length(), pw->canWrite()); delay(500); }
     if (!c->isConnected()) { err = "password errata (prova il tasto Password)"; ultimoPwdErr = true; }
   }
   if (!err.length()) {
@@ -829,9 +841,11 @@ bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
     for (auto &p : passi) {
       if (!c->isConnected()) { err = String("il tag si e' scollegato durante: ") + p.nome; break; }
       std::string k = pacchetto(p.cod, p.d, p.n);
-      if (!tx->writeValue((uint8_t *)k.data(), k.size(), false)) { err = String("scrittura non riuscita: ") + p.nome; break; }
-      Serial.printf("  %s ok\n", p.nome);
-      delay(260);
+      int prima = nRisp;
+      if (!tx->writeValue((uint8_t *)k.data(), k.size(), rispTx)) { err = String("scrittura non riuscita: ") + p.nome; break; }
+      uint32_t t1 = millis(); while (nRisp == prima && millis() - t1 < 600) delay(10);
+      Serial.printf("  %s %s\n", p.nome, nRisp != prima ? "ok (risposto)" : "inviato (nessuna risposta)");
+      delay(150);
     }
     if (!err.length()) ok = true;
   }
