@@ -30,7 +30,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.8.1"
+#define VERSIONE "0.8.2"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -84,7 +84,7 @@ String battTesto(uint8_t b) { return b == 255 ? String("USB") : String(b) + "%";
 // ---------------------------------------------------------------- display
 void scrivi(const String &r1, const String &r2, const String &r3 = "", const String &r4 = "", const String &r5 = "") {
   if (!haOled) return;
-  oled.clearDisplay(); oled.setTextColor(SSD1306_WHITE);
+  oled.clearDisplay(); oled.setTextColor(SSD1306_WHITE); oled.setTextWrap(false);   // niente a capo: le righe lunghe vengono tagliate, non si sovrappongono
   oled.setTextSize(1); oled.setCursor(0, 0); oled.println(r1);
   oled.setTextSize(2); oled.setCursor(0, 12); oled.println(r2);
   oled.setTextSize(1); oled.setCursor(0, 32); oled.println(r3); oled.setCursor(0, 42); oled.println(r4); oled.setCursor(0, 52); oled.println(r5);
@@ -737,7 +737,7 @@ String pwd = "dx1234";
 bool silenzioPwd = false, ultimoPwdErr = false;   // per riprovare con le password di fabbrica conosciute
 int potIdx = 4, intIdx = 5, vicinoDb = -60;       // potenza 0-7 (da -19,5 a +2,5 dBm), intervallo ×100 ms, soglia "tag in mano"
 bool autoOn = false; uint8_t autoFaz = 1; uint16_t autoNum = 1;
-String ultimo = "", stato = "pronto";
+String ultimo = "", stato = "Pronto";
 String fatti[40]; int nFatti = 0;                 // indirizzi dei tag già programmati in questa sessione (modo automatico)
 const char *POT_TESTO[] = { "-19.5", "-13.5", "-7", "-3.5", "-1", "+1", "+1.5", "+2.5" };
 
@@ -766,7 +766,7 @@ std::string pacchetto(uint8_t cod, const uint8_t *d, uint8_t n) {
 }
 String hexMac(const NimBLEAddress &a) { String s = a.toString().c_str(); s.toUpperCase(); return s; }
 void esito(bool ok, const String &mac, uint8_t f, uint16_t n, const String &testo, bool verificato) {
-  if (ok) ultimo = String(f == 1 ? "BLU " : "ROSSO ") + "#" + String(n) + (verificato ? " OK" : " ?"); else ultimo = testo;
+  if (ok) ultimo = String(f == 1 ? "B" : "R") + String(n) + (verificato ? " OK" : " da ver."); else ultimo = String(f == 1 ? "B" : "R") + String(n) + " ERRORE";
   if (ok) Serial.println(String("FATTO: tag ") + nomeFaz(f) + " #" + String(n) + " (" + mac + ")" + (verificato ? ", controllato in onda" : ", scritto ma non ancora visto in onda"));
   else Serial.println(String("ERRORE: ") + testo);
   String t = testo; t.replace("\"", "'");
@@ -782,15 +782,16 @@ bool leggiIbeacon(NimBLEAdvertisedDevice &d, uint8_t *u, uint16_t &maj, uint16_t
   return true;
 }
 void schermo() {
-  String r2 = autoOn ? String(String("AUTO ") + (autoFaz == 1 ? "BLU" : "ROSSO") + " #" + String(autoNum)) : String("manuale");
-  scrivi("INIETTORE " + idTesto(mioId), r2,
-         stato, ultimo, "pot " + String(POT_TESTO[potIdx]) + " int " + String(intIdx * 100));
+  // riga grande (max 10 caratteri): il prossimo tag che verra' scritto
+  String r2 = autoOn ? String(String(autoFaz == 1 ? "BLU" : "ROSSO") + " #" + String(autoNum)) : String("FERMO");
+  scrivi(autoOn ? "INIETTORE  in corso" : "INIETTORE  fermo", r2, stato.substring(0, 21),
+         ultimo.length() ? ("Ultimo: " + ultimo).substring(0, 21) : String(""), ("pot " + String(POT_TESTO[potIdx]) + "dBm  " + String(intIdx * 100) + "ms").substring(0, 21));
 }
 
 bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
   ultimoPwdErr = false;
   String mac = hexMac(a);
-  stato = "collego " + mac.substring(9); schermo();
+  stato = "Collego " + mac.substring(9); schermo();
   Serial.println("Collego " + mac + "...");
   NimBLEClient *c = NimBLEDevice::createClient();
   c->setConnectTimeout(6);
@@ -818,7 +819,7 @@ bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
     if (!c->isConnected()) { err = "password errata (prova il tasto Password)"; ultimoPwdErr = true; }
   }
   if (!err.length()) {
-    stato = "scrivo " + String(f == 1 ? "BLU" : "ROSSO") + " #" + String(n); schermo();
+    stato = "Scrivo..."; schermo();
     uint8_t mj[2] = { 0, f }, mn[2] = { (uint8_t)(n >> 8), (uint8_t)(n & 0xFF) };
     uint8_t rs = (uint8_t)(int8_t)-59, iv = (uint8_t)intIdx, pt = (uint8_t)potIdx;
     struct { uint8_t cod; const uint8_t *d; uint8_t n; const char *nome; } passi[] = {
@@ -837,9 +838,9 @@ bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
   if (c->isConnected()) c->disconnect();
   NimBLEDevice::deleteClient(c);
   if (!ok && ultimoPwdErr && silenzioPwd) { Serial.println("Password " + pwd + " rifiutata"); return false; }
-  if (!ok) { stato = "errore"; esito(false, mac, f, n, err, false); schermo(); return false; }
+  if (!ok) { stato = "ERRORE"; esito(false, mac, f, n, err, false); schermo(); return false; }
   // controllo nell'aria: il tag deve trasmettere UUID, fazione e numero giusti
-  stato = "controllo in onda"; schermo();
+  stato = "Controllo in onda..."; schermo();
   bool visto = false;
   NimBLEScan *sc = NimBLEDevice::getScan();
   for (int giro = 0; giro < 4 && !visto; giro++) {
@@ -850,7 +851,7 @@ bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
     }
     sc->clearResults();
   }
-  stato = visto ? "fatto" : "scritto, non visto";
+  stato = visto ? "Fatto" : "Scritto, non visto";
   esito(true, mac, f, n, visto ? "" : "il tag potrebbe riavviarsi: ricontrolla con 'elenco'", visto);
   schermo();
   return true;
@@ -908,7 +909,7 @@ void elenco() {
   }
   sc->clearResults();
   Serial.println(js + "]}");
-  ultimo = String(nostri) + " tag nostri in onda"; schermo();
+  ultimo = String(nostri) + " tag in onda"; schermo();
 }
 
 void comando(String c) {
@@ -918,10 +919,10 @@ void comando(String c) {
   auto faz = [](const String &s) -> uint8_t { return (s.startsWith("r") || s.startsWith("2")) ? 2 : 1; };
   if (k == "auto" && v.length()) {
     int s2 = vl.indexOf(' '); autoFaz = faz(vl); autoNum = s2 > 0 ? constrain(vl.substring(s2 + 1).toInt(), 1, 999) : 1; autoOn = true; nFatti = 0;
-    stato = "avvicina un tag"; Serial.printf("Modo automatico: %s dal numero %u. Avvicina un tag alla volta all'iniettore.\n", nomeFaz(autoFaz), autoNum);
+    stato = "Avvicina un tag"; Serial.printf("Modo automatico: %s dal numero %u. Avvicina un tag alla volta all'iniettore.\n", nomeFaz(autoFaz), autoNum);
     Serial.printf("{\"auto\":true,\"f\":\"%s\",\"n\":%u}\n", nomeFaz(autoFaz), autoNum); schermo(); return;
   }
-  if (k == "stop") { autoOn = false; stato = "pronto"; Serial.println("{\"auto\":false}"); schermo(); return; }
+  if (k == "stop") { autoOn = false; stato = "Pronto"; Serial.println("{\"auto\":false}"); schermo(); return; }
   if (k == "prog" && v.length()) {
     int s2 = vl.indexOf(' '); uint8_t f = faz(vl); uint16_t n = s2 > 0 ? constrain(vl.substring(s2 + 1).toInt(), 1, 999) : 1;
     NimBLEAddress a; if (!piuVicino(a, false)) { esito(false, "", f, n, "nessun tag vicino: tienilo appoggiato all'iniettore", false); return; }
@@ -956,7 +957,7 @@ void setup() {
 
 void loop() {
   String riga; if (leggiRiga(riga)) comando(riga);
-  if (pulsante() == 1) { autoOn = !autoOn; stato = autoOn ? "avvicina un tag" : "pronto"; schermo(); }
+  if (pulsante() == 1) { autoOn = !autoOn; stato = autoOn ? "Avvicina un tag" : "Pronto"; schermo(); }
   if (autoOn) {
     NimBLEAddress a;
     if (piuVicino(a, true)) {
@@ -964,7 +965,7 @@ void loop() {
       if (programma(a, autoFaz, autoNum)) {
         if (nFatti < 40) fatti[nFatti++] = mac;
         autoNum++;
-        stato = "fatto: avvicina il prossimo";
+        stato = "Avvicina il prossimo";
         Serial.printf("{\"auto\":true,\"f\":\"%s\",\"n\":%u}\n", nomeFaz(autoFaz), autoNum);
         schermo();
       }
