@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.54';
+  var VERSIONE = '0.55';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -1220,6 +1220,7 @@
     injB.appendChild(bottone('■ Stop', '', function () { bancoInvia('stop'); }));
     injB.appendChild(bottone('Solo il più vicino', '', function () { bancoInvia('pot ' + injP.value); setTimeout(function () { bancoInvia('prog ' + injF.value + ' ' + (parseInt(injN.value, 10) || 1)); }, 300); }));
     injB.appendChild(bottone('Tag in onda', '', function () { bancoInvia('elenco'); }));
+    injB.appendChild(bottone('Sonda', 'mini', function () { bancoInvia('sonda'); }));
     injB.appendChild(bottone('Password…', 'mini', function () { var v = prompt('Password dei tag (di fabbrica: dx1234)'); if (v) bancoInvia('pwd ' + v.trim()); }));
     var injSt = el('div', 'inj-st'); inj.appendChild(injSt);
     function disegnaInj() {
