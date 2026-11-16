@@ -30,7 +30,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.8"
+#define VERSIONE "0.8.1"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -733,7 +733,8 @@ void loop() {
 // Protocollo (dal codice della loro app): servizio FFE0, risposte su FFE1 (notifiche), comandi su FFE2, password su FFE3.
 // Ogni comando: 'N' 'O' codice lunghezza dati... xor(codice, lunghezza, dati).
 uint8_t uuid[16];
-String pwd = "555555";
+String pwd = "dx1234";
+bool silenzioPwd = false, ultimoPwdErr = false;   // per riprovare con le password di fabbrica conosciute
 int potIdx = 4, intIdx = 5, vicinoDb = -60;       // potenza 0-7 (da -19,5 a +2,5 dBm), intervallo ×100 ms, soglia "tag in mano"
 bool autoOn = false; uint8_t autoFaz = 1; uint16_t autoNum = 1;
 String ultimo = "", stato = "pronto";
@@ -786,7 +787,8 @@ void schermo() {
          stato, ultimo, "pot " + String(POT_TESTO[potIdx]) + " int " + String(intIdx * 100));
 }
 
-bool programma(NimBLEAddress a, uint8_t f, uint16_t n) {
+bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
+  ultimoPwdErr = false;
   String mac = hexMac(a);
   stato = "collego " + mac.substring(9); schermo();
   Serial.println("Collego " + mac + "...");
@@ -813,7 +815,7 @@ bool programma(NimBLEAddress a, uint8_t f, uint16_t n) {
     bool serve = ultimaRisp != 0x25 || rispLen < 1 || rispDati[0] != 0;
     Serial.println(ultimaRisp == 0x25 ? (serve ? "Il tag chiede la password" : "Il tag non chiede la password") : "Nessuna risposta alla domanda password: la mando comunque");
     if (serve && pw) { pw->writeValue((uint8_t *)pwd.c_str(), pwd.length(), true); delay(400); }
-    if (!c->isConnected()) err = "password errata (comando: pwd 123456)";
+    if (!c->isConnected()) { err = "password errata (prova il tasto Password)"; ultimoPwdErr = true; }
   }
   if (!err.length()) {
     stato = "scrivo " + String(f == 1 ? "BLU" : "ROSSO") + " #" + String(n); schermo();
@@ -834,6 +836,7 @@ bool programma(NimBLEAddress a, uint8_t f, uint16_t n) {
   }
   if (c->isConnected()) c->disconnect();
   NimBLEDevice::deleteClient(c);
+  if (!ok && ultimoPwdErr && silenzioPwd) { Serial.println("Password " + pwd + " rifiutata"); return false; }
   if (!ok) { stato = "errore"; esito(false, mac, f, n, err, false); schermo(); return false; }
   // controllo nell'aria: il tag deve trasmettere UUID, fazione e numero giusti
   stato = "controllo in onda"; schermo();
@@ -851,6 +854,22 @@ bool programma(NimBLEAddress a, uint8_t f, uint16_t n) {
   esito(true, mac, f, n, visto ? "" : "il tag potrebbe riavviarsi: ricontrolla con 'elenco'", visto);
   schermo();
   return true;
+}
+
+// prova la password impostata, poi quelle di fabbrica conosciute; quella che funziona resta salvata
+bool programma(NimBLEAddress a, uint8_t f, uint16_t n) {
+  String prove[] = { pwd, "dx1234", "DX1234", "555555", "000000" };
+  String usata = pwd;
+  for (int i = 0; i < 5; i++) {
+    bool doppia = false; for (int k = 0; k < i; k++) if (prove[k] == prove[i]) doppia = true;
+    if (doppia) continue;
+    pwd = prove[i]; silenzioPwd = i < 4;
+    bool ok = programma1(a, f, n);
+    if (ok) { if (pwd != usata) { pref.putString("pwd", pwd); Serial.println("Password giusta: " + pwd + " (salvata)"); } silenzioPwd = false; return true; }
+    if (!ultimoPwdErr) { pwd = usata; silenzioPwd = false; return false; }
+    delay(500);
+  }
+  pwd = usata; silenzioPwd = false; return false;
 }
 
 // il tag più vicino (sopra la soglia "in mano"), collegabile, non ancora fatto in questa sessione
@@ -918,13 +937,13 @@ void comando(String c) {
     return;
   }
   if (k == "riavvia") { delay(200); ESP.restart(); }
-  Serial.println("comandi: auto blu 1 | auto rossa 1 (programma in fila i tag che avvicini), stop, prog blu 3 (solo il tag piu' vicino), elenco, pot 0-7, intervallo 500, pwd 555555, vicino -60, info");
+  Serial.println("comandi: auto blu 1 | auto rossa 1 (programma in fila i tag che avvicini), stop, prog blu 3 (solo il tag piu' vicino), elenco, pot 0-7, intervallo 500, pwd dx1234, vicino -60, info");
 }
 
 void setup() {
   avvioComune("INIETTORE");
   pref.begin("ac", false);
-  pwd = pref.getString("pwd", "555555"); potIdx = pref.getInt("pot", 4); intIdx = pref.getInt("int", 5); vicinoDb = pref.getInt("vic", -60);
+  pwd = pref.getString("pwd", "dx1234"); potIdx = pref.getInt("pot", 4); intIdx = pref.getInt("int", 5); vicinoDb = pref.getInt("vic", -60);
   if (!leggiUuid(TAG_UUID, uuid)) Serial.println("TAG_UUID scritto male in config.h");
   if (PMU) { if (PMU->getChipModel() == XPOWERS_AXP2101) PMU->disablePowerOutput(XPOWERS_ALDO2); else PMU->disablePowerOutput(XPOWERS_LDO2); }
   NimBLEDevice::init("");
