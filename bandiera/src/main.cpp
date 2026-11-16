@@ -30,7 +30,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.8.3"
+#define VERSIONE "0.8.4"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -744,6 +744,8 @@ const char *POT_TESTO[] = { "-19.5", "-13.5", "-7", "-3.5", "-1", "+1", "+1.5", 
 // risposte del tag
 uint8_t rxBuf[64]; int rxLen = 0, rxAtteso = 0;
 volatile int nRisp = 0; bool rispTx = true;
+uint8_t ultimaHex[64]; volatile int ultimaHexLen = 0;
+void stampaRisp() { String h = "  <- risposta"; for (int k = 0; k < ultimaHexLen; k++) { char b[4]; snprintf(b, sizeof(b), " %02X", ultimaHex[k]); h += b; } Serial.println(h); }
 volatile int ultimaRisp = -1; uint8_t rispDati[40]; volatile int rispLen = 0;
 void notifica(NimBLERemoteCharacteristic *c, uint8_t *d, size_t n, bool isNotify) {
   for (size_t i = 0; i < n; i++) {
@@ -755,7 +757,7 @@ void notifica(NimBLERemoteCharacteristic *c, uint8_t *d, size_t n, bool isNotify
     if (rxLen >= 4 && rxLen == rxAtteso) {
       uint8_t x = rxBuf[2] ^ rxBuf[3]; for (int k = 0; k < rxBuf[3]; k++) x ^= rxBuf[4 + k];
       if (x == rxBuf[rxLen - 1]) { rispLen = min((int)rxBuf[3], 40); memcpy(rispDati, rxBuf + 4, rispLen); ultimaRisp = rxBuf[2]; nRisp++; }
-      String h = "  <- risposta"; for (int k = 0; k < rxLen; k++) { char b[4]; snprintf(b, sizeof(b), " %02X", rxBuf[k]); h += b; } Serial.println(h);
+      ultimaHexLen = rxLen; memcpy(ultimaHex, rxBuf, rxLen);   // la stampa si fa fuori dalla callback
       rxLen = 0; rxAtteso = 0;
     }
     if (rxLen >= (int)sizeof(rxBuf)) rxLen = 0;
@@ -801,12 +803,7 @@ bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
   if (!c->connect(a)) err = "non si collega (tienilo vicino e riprova)";
   NimBLERemoteService *s = nullptr; NimBLERemoteCharacteristic *rx = nullptr, *tx = nullptr, *pw = nullptr;
   if (!err.length()) {
-    s = c->getService(NimBLEUUID((uint16_t)0xFFE0));
-    if (!s) err = "non e' un tag DX-SMART (manca il servizio FFE0)";
-  }
-  if (!err.length()) {
-    rx = s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE1)); tx = s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE2)); pw = s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE3));
-    // elenco di servizi e caratteristiche (serve per capire i modelli diversi)
+    // elenco di servizi e caratteristiche, PRIMA di prendere i puntatori: rileggere i servizi li invaliderebbe (era il riavvio della 0.8.3)
     std::vector<NimBLERemoteService *> *sv = c->getServices(true);
     for (auto *x : *sv) {
       Serial.printf("  servizio %s\n", x->getUUID().toString().c_str());
@@ -814,6 +811,11 @@ bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
       for (auto *y : *cv) Serial.printf("    car. %s%s%s%s%s\n", y->getUUID().toString().c_str(), y->canRead() ? " lettura" : "", y->canWrite() ? " scrittura" : "",
                                        y->canWriteNoResponse() ? " scrittura-veloce" : "", y->canNotify() ? " notifica" : (y->canIndicate() ? " indicazione" : ""));
     }
+    s = c->getService(NimBLEUUID((uint16_t)0xFFE0));
+    if (!s) err = "non e' un tag DX-SMART (manca il servizio FFE0)";
+  }
+  if (!err.length()) {
+    rx = s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE1)); tx = s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE2)); pw = s->getCharacteristic(NimBLEUUID((uint16_t)0xFFE3));
     if (!rx || !tx) err = "caratteristiche FFE1/FFE2 mancanti";
   }
   if (!err.length()) {
@@ -826,6 +828,7 @@ bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
     std::string q = pacchetto(0x25, nullptr, 0); tx->writeValue((uint8_t *)q.data(), q.size(), rispTx);
     uint32_t t0 = millis(); while (ultimaRisp != 0x25 && millis() - t0 < 2000) delay(20);
     bool serve = ultimaRisp != 0x25 || rispLen < 1 || rispDati[0] != 0;
+    if (ultimaRisp == 0x25) stampaRisp();
     Serial.println(ultimaRisp == 0x25 ? (serve ? "Il tag chiede la password" : "Il tag non chiede la password") : "Nessuna risposta alla domanda password: la mando comunque");
     if (serve && pw) { pw->writeValue((uint8_t *)pwd.c_str(), pwd.length(), pw->canWrite()); delay(500); }
     if (!c->isConnected()) { err = "password errata (prova il tasto Password)"; ultimoPwdErr = true; }
@@ -845,6 +848,7 @@ bool programma1(NimBLEAddress a, uint8_t f, uint16_t n) {
       if (!tx->writeValue((uint8_t *)k.data(), k.size(), rispTx)) { err = String("scrittura non riuscita: ") + p.nome; break; }
       uint32_t t1 = millis(); while (nRisp == prima && millis() - t1 < 600) delay(10);
       Serial.printf("  %s %s\n", p.nome, nRisp != prima ? "ok (risposto)" : "inviato (nessuna risposta)");
+      if (nRisp != prima) stampaRisp();
       delay(150);
     }
     if (!err.length()) ok = true;
