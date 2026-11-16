@@ -327,6 +327,10 @@
     c.tracce = (c.tracce || []).map(function (tr) { return Object.assign({}, tr, { pts: (tr.pts || []).map(function (p) { return Array.isArray(p) ? p : [p.la, p.lo]; }) }); });
     return c;
   }
+  // registro dei tag programmati: { mac, f: 'blu'|'rossa', n, quando, da }
+  api.ascoltaBeacon = function (cb) { return db.collection('beacon').onSnapshot(function (qs) { cb(lista(qs)); }, function () { cb(null); }); };
+  api.salvaBeacon = function (mac, dati) { return db.collection('beacon').doc(mac).set(dati); };
+  api.eliminaBeacon = function (mac) { return db.collection('beacon').doc(mac).delete(); };
   api.ascoltaCampi = function (cb) { return db.collection('campi').onSnapshot(function (qs) { cb(lista(qs).map(normalizza)); }, function () { cb([]); }); };
   api.campoInCache = function (id) { return cacheCampi[id] || null; };
   // campo completo, con l'immagine ricomposta

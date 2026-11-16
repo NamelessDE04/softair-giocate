@@ -30,7 +30,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.9.1"
+#define VERSIONE "0.9.2"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -1030,6 +1030,39 @@ void comando(String c) {
     Serial.printf("{\"auto\":true,\"f\":\"%s\",\"n\":%u}\n", nomeFaz(autoFaz), autoNum); schermo(); return;
   }
   if (k == "stop") { autoOn = false; stato = "Pronto"; Serial.println("{\"auto\":false}"); schermo(); return; }
+  // per la pagina "Beacon prog": chi c'e' appoggiato all'iniettore (e quanti altri tag sono vicini)
+  if (k == "vicino" && !v.length()) {
+    scansiona(3);
+    int best = -1; int altri = 0;
+    for (int i = 0; i < nVisti; i++) {
+      Visto &v = visti[i];
+      bool tag = v.nostro || v.ib || !strncmp(v.nome, "CP35", 4) || v.coll;
+      if (!tag || v.rssi < vicinoDb) continue;
+      if (best < 0 || v.rssi > visti[best].rssi) best = i;
+    }
+    if (best >= 0) for (int i = 0; i < nVisti; i++) {
+      Visto &v = visti[i];
+      if (i != best && v.rssi >= vicinoDb && (v.nostro || v.ib || !strncmp(v.nome, "CP35", 4) || v.coll) && v.rssi >= visti[best].rssi - 12) altri++;
+    }
+    if (best < 0) { Serial.println("{\"vicino\":{\"mac\":\"\"}}"); return; }
+    Visto &v = visti[best];
+    Serial.printf("{\"vicino\":{\"mac\":\"%s\",\"nome\":\"%s\",\"rssi\":%d,\"nostro\":%s,\"f\":\"%s\",\"n\":%u,\"altri\":%d,\"cp35\":%s}}\n",
+                  v.mac, v.nome, v.rssi, v.nostro ? "true" : "false", v.nostro ? nomeFaz(v.ma) : "", v.nostro ? v.mi : 0, altri, !strncmp(v.nome, "CP35", 4) ? "true" : "false");
+    return;
+  }
+  // programma proprio quel tag (indirizzo), non "il piu' vicino": niente scambi tra un controllo e la scrittura
+  if (k == "progmac" && v.length()) {
+    int s1 = v.indexOf(' '), s2 = s1 > 0 ? v.indexOf(' ', s1 + 1) : -1;
+    if (s1 < 0 || s2 < 0) { Serial.println("uso: progmac AA:BB:CC:DD:EE:FF blu 3"); return; }
+    String mac = v.substring(0, s1); mac.toUpperCase();
+    String fs = vl.substring(s1 + 1, s2); uint8_t f = faz(fs); uint16_t n = constrain(v.substring(s2 + 1).toInt(), 1, 999);
+    potIdx = 7; intIdx = 5;   // sempre +2,5 dBm e 500 ms: uguali per tutti i tag
+    scansiona(2);
+    int i = 0; for (; i < nVisti; i++) if (mac == String(visti[i].mac)) break;
+    if (i == nVisti) { esito(false, mac, f, n, "tag non trovato: tienilo appoggiato e riprova", false); return; }
+    programma(NimBLEAddress(std::string(visti[i].mac), visti[i].tipo), f, n);
+    return;
+  }
   if (k == "prog" && v.length()) {
     int s2 = vl.indexOf(' '); uint8_t f = faz(vl); uint16_t n = s2 > 0 ? constrain(vl.substring(s2 + 1).toInt(), 1, 999) : 1;
     NimBLEAddress a; if (!piuVicino(a, false)) { esito(false, "", f, n, "nessun tag vicino: tienilo appoggiato all'iniettore", false); return; }

@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.55';
+  var VERSIONE = '0.56';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -97,7 +97,7 @@
     app.innerHTML = ''; window.scrollTo(0, 0);
     $('pieno').hidden = true; $('pieno').innerHTML = '';
     document.body.classList.remove('a-pieno');
-    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva, dmz: pagDmz, dmzModifica: pagDmzModifica, dmzLive: pagDmzLive, mortaioProva: pagMortaioProva, banco: pagBanco, provaTbeam: pagProvaTbeam }[c.v];
+    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva, dmz: pagDmz, dmzModifica: pagDmzModifica, dmzLive: pagDmzLive, mortaioProva: pagMortaioProva, banco: pagBanco, beaconProg: pagBeaconProg, provaTbeam: pagProvaTbeam }[c.v];
     (r || home)(c.p);
   }
   function aPieno() { document.body.classList.add('a-pieno'); var p = $('pieno'); p.hidden = false; p.innerHTML = ''; return p; }
@@ -131,7 +131,8 @@
     profilo: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>',
     organizza: '<path d="M4 6h16M4 12h10M4 18h13"/><circle cx="18" cy="12" r="2.2"/>',
     esci: '<path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/>',
-    iniettore: '<path d="M18 3l3 3M16.5 4.5l3 3M19 6l-9 9-3-3 9-9M7 12l-4 4M4 15l2 2M10 15l-1 1"/>'
+    iniettore: '<path d="M18 3l3 3M16.5 4.5l3 3M19 6l-9 9-3-3 9-9M7 12l-4 4M4 15l2 2M10 15l-1 1"/>',
+    beacon: '<circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/>'
   };
   function chiudiMenu() {
     var m = $('menuTendina'); if (!m) return;
@@ -155,6 +156,7 @@
     if (me.team) voci.push(['team', 'Il mio team', function () { vai('team', me.team); }]);
     voci.push(['profilo', 'Profilo', function () { vai('profilo'); }]);
     if (organizza()) voci.push(['organizza', 'Organizza', function () { vai('organizza'); }]);
+    if (st.dev || P('conflitti')) voci.push(['beacon', 'Beacon prog', function () { vai('beaconProg'); }]);
     if (st.dev) voci.push(['iniettore', 'Iniettore', function () { vai('banco'); }]);
     voci.push(['esci', 'Esci', function () { S.logout(); }, 'menu-esci']);
     voci.forEach(function (v) {
@@ -173,7 +175,7 @@
 
   // ================= HOME
   // pagine di debug tolte dalla home: si aprono con l'indirizzo …/#banco o …/#prova
-  var apriNascosta = { '#banco': 'banco', '#iniettore': 'banco', '#prova': 'provaTbeam' }[location.hash] || null;
+  var apriNascosta = { '#banco': 'banco', '#iniettore': 'banco', '#beacon': 'beaconProg', '#prova': 'provaTbeam' }[location.hash] || null;
   function home() {
     if (apriNascosta) { var v = apriNascosta; apriNascosta = null; history.replaceState(null, '', location.pathname); setTimeout(function () { vai(v); }, 0); }
     var st = S.stato(), me = st.me;
@@ -1092,8 +1094,9 @@
       try {
         var j = JSON.parse(s); j._t = Date.now();
         if (j.bandiera) { bancoStoria(BANCO.band[j.bandiera], j); BANCO.band[j.bandiera] = j; bancoInoltra(j); }
-        else if (j.avvio) BANCO.avvio = j.avvio;
+        else if (j.avvio) { BANCO.avvio = j.avvio; BANCO.versione = j.versione; }
         else if (j.iniettore) { BANCO.avvio = 'INIETTORE'; if (j.iniettore === 'ok' || j.iniettore === 'errore') BANCO.inj.fatti.unshift(j); else if (j.iniettore === 'info') BANCO.inj.info = j; }
+        else if (j.vicino) { BANCO.avvio = 'INIETTORE'; BANCO.inj.vicino = j.vicino; BANCO.inj.seqV = (BANCO.inj.seqV || 0) + 1; }
         else if (j.vicini) { BANCO.avvio = 'INIETTORE'; BANCO.inj.vicini = j.vicini; BANCO.inj.viciniT = Date.now(); }
         else if (j.auto != null) { BANCO.avvio = 'INIETTORE'; BANCO.inj.auto = j.auto ? j : null; }
         else if (j.risposta) { BANCO.visto.risposta = 1; BANCO.storia.push({ t: Date.now(), testo: 'Risposta via radio da ' + j.risposta + ': ' + j.testo }); }
@@ -1356,6 +1359,171 @@
     (j.tag || []).forEach(function (t) { v.tag = 1; if (t.rssi >= j.soglia) v.dentro = 1; else v.fuori = 1; });
     if (j.conq) v.conq = 1; if (j.owner) v.owner = 1; if (j.contesa) v.contesa = 1;
     if (prima && prima.owner && j.conq && j.conq !== prima.owner) v.riconq = 1;
+  }
+  // ================= BEACON PROG: programmazione dei tag dei giocatori, a prova di errore.
+  // Un tag alla volta: l'app chiede all'iniettore chi è appoggiato, controlla nel registro (Firestore, un documento per indirizzo MAC)
+  // che non sia già fatto, lo scrive col numero libero successivo, aspetta la conferma e solo allora lo segna nel registro.
+  function pagBeaconProg() {
+    testata('Beacon prog');
+    if (!P('conflitti') && !S.stato().dev) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
+    var b = BANCO, I = b.inj, box = el('div', 'bp'); app.appendChild(box);
+    var reg = null, faz = (function () { try { return localStorage.getItem('bp-faz') || 'blu'; } catch (e) { return 'blu'; } })();
+    var fase = 'pronto', target = null, tag = null, esito = null, attesa = null, scelto = null, controllo = null, timer = null;
+    var stopReg = S.ascoltaBeacon(function (r) { reg = r || []; disegna(); });
+    function sig(f, n) { return (f === 'rossa' ? 'R' : 'B') + n; }
+    function nomeF(f) { return f === 'rossa' ? 'ROSSO' : 'BLU'; }
+    function diFaz(f) { return (reg || []).filter(function (x) { return x.f === f; }); }
+    function perMac(mac) { return (reg || []).filter(function (x) { return x.id === mac; })[0]; }
+    function perNum(f, n) { return (reg || []).filter(function (x) { return x.f === f && x.n === n; })[0]; }
+    function prossimo(f) { var n = 1; while (perNum(f, n)) n++; return n; }
+    function numero() { return scelto && !perNum(faz, scelto) ? scelto : prossimo(faz); }
+    function vai2(f) { fase = f; disegna(); }
+    function aspetta(tipo, ms) {
+      attesa = { tipo: tipo, v: I.seqV || 0, f: I.fatti.length, t: Date.now() };
+      clearTimeout(timer); timer = setTimeout(function () { if (attesa) { attesa = null; esito = { testo: 'La T-Beam non risponde. Controlla il cavo e riprova.' }; vai2('errore'); } }, ms);
+    }
+    // risposte dell'iniettore
+    function arrivi() {
+      if (!attesa) return;
+      if ((attesa.tipo === 'cerca' || attesa.tipo === 'verifica') && (I.seqV || 0) > attesa.v) {
+        var t = I.vicino, tipo = attesa.tipo; attesa = null; clearTimeout(timer);
+        if (tipo === 'verifica') {
+          if (t && t.mac === tag.mac && t.nostro && t.f === faz && t.n === target) registra(); else { esito = { testo: 'Scritto ma non confermato. Rifai.' }; vai2('errore'); }
+          return;
+        }
+        tag = t;
+        if (!t || !t.mac) return vai2('nessuno');
+        if (t.altri > 0) return vai2('troppi');
+        var g = perMac(t.mac);
+        if (g || t.nostro) { tag.gia = g ? sig(g.f, g.n) : sig(t.f, t.n); return vai2('gia'); }
+        if (!t.cp35) return vai2('strano');
+        return scrivi();
+      }
+      if (attesa.tipo === 'scrivi' && I.fatti.length > attesa.f) {
+        var e = I.fatti[0]; attesa = null; clearTimeout(timer);
+        if (e.iniettore !== 'ok') { esito = { testo: e.testo || 'errore' }; return vai2('errore'); }
+        if (e.verificato) return registra();
+        fase = 'scrivo'; disegna(); aspetta('verifica', 15000); bancoInvia('vicino');
+      }
+    }
+    function cerca() {
+      if (!b.scrittore) return vai2('pronto');
+      target = numero(); tag = null; esito = null;
+      vai2('cerca'); aspetta('cerca', 12000); bancoInvia('vicino');
+    }
+    function scrivi() {
+      target = numero();
+      vai2('scrivo'); aspetta('scrivi', 60000);
+      bancoInvia('progmac ' + tag.mac + ' ' + faz + ' ' + target);
+    }
+    function registra() {
+      var dati = { f: faz, n: target, quando: Date.now(), da: S.stato().me.callsign || '', nome: (tag && tag.nome) || '' };
+      S.salvaBeacon(tag.mac, dati).then(function () { scelto = null; vai2('fatto'); }, function (e) { esito = { testo: 'Tag scritto ma non salvato nel registro: ' + (e.message || e) }; vai2('errore'); });
+      fase = 'fatto'; disegna();
+    }
+    function riprogramma() { if (confirm('Il tag ' + tag.gia + ' diventerà ' + sig(faz, numero()) + '. Sicuro?')) scrivi(); }
+    function finale() {
+      controllo = { v: I.vicini, t: Date.now(), attesa: true }; disegna(); bancoInvia('elenco');
+    }
+    function grosso(cls, titolo, testo) { var c = el('div', 'bp-card ' + cls); c.appendChild(el('div', 'bp-tit', titolo)); if (testo) c.appendChild(el('div', 'bp-txt', testo)); return c; }
+    function tasto(t, cls, fn) { var x = bottone(t, 'bp-btn ' + (cls || ''), fn); return x; }
+    function disegna() {
+      box.innerHTML = '';
+      // 1. collegamento
+      if (!navigator.serial) { box.appendChild(grosso('ko', 'Serve il computer', 'Apri questa pagina da computer con Chrome o Edge.')); return; }
+      if (!b.via) {
+        var c = grosso('', 'Collega la T-Beam', 'T-Beam con il programma INIETTORE, cavo USB al computer.');
+        c.appendChild(tasto('COLLEGA', 'acc', function () { bancoUsb(); }));
+        box.appendChild(c); return;
+      }
+      if (b.avvio && b.avvio !== 'INIETTORE') {
+        var c2 = grosso('ko', 'Programma sbagliato', 'Sulla T-Beam c\'è «' + b.avvio + '». Carica INIETTORE.');
+        var l = el('a', 'btn bp-btn', 'CARICA FIRMWARE'); l.href = '/firmware/'; l.target = '_blank'; c2.appendChild(l);
+        box.appendChild(c2); return;
+      }
+      if (reg === null) { box.appendChild(grosso('', 'Carico il registro…')); return; }
+      // 2. fazione
+      var fz = el('div', 'bp-faz');
+      ['blu', 'rossa'].forEach(function (f) {
+        var x = el('button', 'bp-fz ' + f + (faz === f ? ' on' : '')); x.type = 'button';
+        x.appendChild(el('b', null, nomeF(f))); x.appendChild(el('small', null, diFaz(f).length + ' fatti'));
+        x.onclick = function () { if (fase === 'scrivo' || fase === 'cerca') return; faz = f; scelto = null; try { localStorage.setItem('bp-faz', f); } catch (e) {} vai2('pronto'); };
+        fz.appendChild(x);
+      });
+      box.appendChild(fz);
+      // 3. numeri: pieni = fatti, quello col bordo = il prossimo
+      var nx = numero(), max = Math.max(10, nx, diFaz(faz).reduce(function (m, x) { return Math.max(m, x.n); }, 0) + 1);
+      var gr = el('div', 'bp-num ' + faz);
+      for (var n = 1; n <= max; n++) (function (n) {
+        var r = perNum(faz, n), x = el('button', 'bp-n' + (r ? ' fatto' : '') + (n === nx && !r ? ' prox' : '')); x.type = 'button';
+        x.textContent = sig(faz, n);
+        x.onclick = function () {
+          if (fase === 'scrivo' || fase === 'cerca') return;
+          if (r) { if (confirm(sig(faz, n) + ' fatto il ' + new Date(r.quando).toLocaleString('it-IT') + (r.da ? ' da ' + r.da : '') + '\nIndirizzo ' + r.id + '\n\nToglierlo dal registro? (solo se il tag è perso o sbagliato)')) S.eliminaBeacon(r.id).catch(errore); return; }
+          if (n !== prossimo(faz) && !confirm('Saltare i numeri liberi e fare ' + sig(faz, n) + '?')) return;
+          scelto = n; vai2('pronto');
+        };
+        gr.appendChild(x);
+      })(n);
+      box.appendChild(gr);
+      // 4. il passo da fare adesso
+      var T = sig(faz, nx), card;
+      if (fase === 'pronto') {
+        card = grosso(faz, 'Tag ' + T, 'Prendi un tag NUOVO. Appoggialo sulla T-Beam. Gli altri lontano.');
+        card.appendChild(tasto('PROGRAMMA ' + T, 'acc', cerca));
+      } else if (fase === 'cerca') card = grosso('', 'Cerco il tag…', 'Tienilo fermo sulla T-Beam.');
+      else if (fase === 'scrivo') card = grosso('', 'Scrivo ' + sig(faz, target) + '…', 'Non muovere il tag. Ci vogliono circa 15 secondi.');
+      else if (fase === 'nessuno') { card = grosso('ko', 'Non vedo il tag', 'Appoggialo sulla T-Beam. Se non va, togli e rimetti la batteria.'); card.appendChild(tasto('RIPROVA', 'acc', cerca)); }
+      else if (fase === 'troppi') { card = grosso('ko', 'Troppi tag vicini', 'Sulla T-Beam lascia SOLO il tag da fare. Gli altri ad almeno 2 metri.'); card.appendChild(tasto('RIPROVA', 'acc', cerca)); }
+      else if (fase === 'gia') {
+        card = grosso('warn', 'Questo è già ' + tag.gia, 'Mettilo da parte. Prendi un tag nuovo.');
+        card.appendChild(tasto('OK, NE PRENDO UN ALTRO', 'acc', function () { vai2('pronto'); }));
+        card.appendChild(tasto('Riprogrammalo come ' + T, 'link', riprogramma));
+      } else if (fase === 'strano') {
+        card = grosso('warn', 'Non è un tag CP35', (tag.nome || tag.mac) + ': forse è un altro dispositivo vicino.');
+        card.appendChild(tasto('RIPROVA', 'acc', cerca));
+        card.appendChild(tasto('È un tag, programmalo', 'link', scrivi));
+      } else if (fase === 'fatto') {
+        card = grosso('ok ' + faz, '✓ ' + sig(faz, target) + ' FATTO', 'Scrivi ' + sig(faz, target) + ' sul tag col pennarello. Mettilo con i ' + nomeF(faz) + '.');
+        card.appendChild(tasto('SCRITTO → PROSSIMO', 'acc', function () { vai2('pronto'); }));
+      } else if (fase === 'errore') {
+        card = grosso('ko', 'Non riuscito', (esito && esito.testo) || '');
+        card.appendChild(tasto('RIPROVA', 'acc', cerca));
+      }
+      box.appendChild(card);
+      // 5. controllo finale: quali tag si sentono davvero
+      var fin = el('div', 'bp-fin');
+      fin.appendChild(tasto('Controllo finale', '', finale));
+      if (controllo) {
+        if (controllo.attesa) fin.appendChild(el('p', 'hint', 'Metti tutti i tag vicino alla T-Beam… (5 secondi)'));
+        else {
+          var vs = (controllo.v || []).filter(function (v) { return v.nostro; }), h = '';
+          ['blu', 'rossa'].forEach(function (f) {
+            var nums = {}; vs.filter(function (v) { return v.f === f; }).forEach(function (v) { (nums[v.n] = nums[v.n] || []).push(v.mac); });
+            var regF = diFaz(f), mx = Math.max(0, regF.reduce(function (m, x) { return Math.max(m, x.n); }, 0), Object.keys(nums).reduce(function (m, k) { return Math.max(m, +k); }, 0));
+            h += '<div class="bp-ck ' + f + '"><b>' + nomeF(f) + '</b>';
+            for (var k = 1; k <= mx; k++) {
+              var stato = nums[k] && nums[k].length > 1 ? 'doppio' : nums[k] ? 'ok' : perNum(f, k) ? 'manca' : 'vuoto';
+              h += '<span class="' + stato + '">' + sig(f, k) + (stato === 'doppio' ? ' ×' + nums[k].length : '') + '</span>';
+            }
+            h += '</div>';
+          });
+          var dopp = /doppio/.test(h), manc = /manca/.test(h);
+          fin.innerHTML += h + '<p class="bp-esito ' + (dopp ? 'ko' : manc ? 'warn' : 'ok') + '">' + (dopp ? 'ATTENZIONE: numeri doppi!' : manc ? 'Alcuni tag non si sentono: avvicinali o controlla la batteria.' : 'Tutto a posto.') + '</p>';
+        }
+      }
+      box.appendChild(fin);
+    }
+    var vecchiVicini = I.viciniT || 0;
+    b.cb = function () {
+      if (controllo && controllo.attesa && (I.viciniT || 0) > vecchiVicini) { vecchiVicini = I.viciniT; controllo = { v: I.vicini, attesa: false }; }
+      arrivi(); disegna();
+    };
+    // appena collegati chiediamo chi è (l'iniettore risponde con "info")
+    var giaChiesto = false;
+    var tk = setInterval(function () { if (b.via && !b.avvio && !giaChiesto) { giaChiesto = true; bancoInvia('info'); } }, 1000);
+    disegna();
+    var prima = chiusura; chiusura = function () { clearInterval(tk); clearTimeout(timer); b.cb = null; if (stopReg) stopReg(); if (prima) prima(); };
   }
   function pagProvaTbeam() {
     testata('Prova 3 T-Beam');

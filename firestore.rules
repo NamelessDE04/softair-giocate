@@ -153,6 +153,11 @@ service cloud.firestore {
     match /campiQr/{id} {
       allow read, write: if perm('mappe');
     }
+    // Registro dei tag Bluetooth programmati (pagina Beacon prog): un documento per tag, la chiave è l'indirizzo MAC
+    match /beacon/{mac} {
+      allow read: if signed();
+      allow write: if perm('conflitti');
+    }
     // Posa dei QR sul campo: chi li ha messi e dove
     match /campiPosa/{id} {
       allow read: if signed();
