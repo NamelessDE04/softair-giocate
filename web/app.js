@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.61';
+  var VERSIONE = '0.62';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -1620,14 +1620,24 @@
       return sel;
     }
     function voltaggio(mv) { return mv && mv < 5000 ? (mv / 1000).toFixed(2).replace('.', ',') + ' V' : '—'; }
-    function statoBatt(mv) { return !mv ? 'nd' : mv >= 2900 ? 'ok' : mv >= 2700 ? 'warn' : 'ko'; }
+    // CR2032: tensione quasi piatta fino a fine vita, poi crolla. Curva indicativa (con il tag che trasmette).
+    var CURVA = [[3000, 100], [2950, 90], [2900, 75], [2850, 60], [2800, 45], [2700, 25], [2600, 12], [2500, 5], [2300, 0]];
+    function percento(mv) {
+      if (!mv || mv >= 5000) return null;
+      if (mv >= CURVA[0][0]) return 100;
+      for (var i = 1; i < CURVA.length; i++) if (mv >= CURVA[i][0]) { var a = CURVA[i - 1], b = CURVA[i]; return Math.round(b[1] + (a[1] - b[1]) * (mv - b[0]) / (a[0] - b[0])); }
+      return 0;
+    }
+    // ok: regge piu' giocate · warn: da cambiare prima della prossima giocata · ko: cambiare subito
+    function statoBatt(mv) { return !mv || mv >= 5000 ? 'nd' : mv >= 2850 ? 'ok' : mv >= 2700 ? 'warn' : 'ko'; }
+    function testoBatt(mv) { var p = percento(mv); return p == null ? '—' : voltaggio(mv) + ' · ' + p + '%' + (statoBatt(mv) === 'warn' ? ' · CAMBIA PRESTO' : statoBatt(mv) === 'ko' ? ' · CAMBIA ORA' : ''); }
     function tabellaBatt(righe) {
       var t = el('div', 'bp-batt');
       righe.forEach(function (x) {
         var r = el('div', 'bp-br ' + statoBatt(x.mv));
         r.appendChild(el('b', x.f, x.f ? sig(x.f, x.n) : '?'));
         r.appendChild(el('span', 'g', x.gioc || ''));
-        r.appendChild(el('span', 'v', x.sentito === false ? 'NON SENTITO' : x.mv ? voltaggio(x.mv) : 'non letta'));
+        r.appendChild(el('span', 'v', x.sentito === false ? 'NON SENTITO' : x.mv ? testoBatt(x.mv) : 'non letta'));
         t.appendChild(r);
       });
       return t;
@@ -1693,7 +1703,8 @@
           });
           var basse = righe.filter(function (x) { return x.sentito && statoBatt(x.mv) === 'ko'; }).length, mancano = righe.filter(function (x) { return !x.sentito; }).length;
           var nonLette = righe.filter(function (x) { return x.sentito && !x.mv; }).length;
-          card.appendChild(el('div', 'bp-esito ' + (basse ? 'ko' : mancano || nonLette ? 'warn' : 'ok'), basse ? basse + ' batterie da cambiare' : mancano ? mancano + ' tag non sentiti' : nonLette ? nonLette + ' non lette: rileggi' : 'Tutte a posto'));
+          var presto = righe.filter(function (x) { return x.sentito && statoBatt(x.mv) === 'warn'; }).length;
+          card.appendChild(el('div', 'bp-esito ' + (basse ? 'ko' : mancano || nonLette || presto ? 'warn' : 'ok'), basse ? basse + ' batterie da cambiare ORA' : mancano ? mancano + ' tag non sentiti' : nonLette ? nonLette + ' non lette: rileggi' : presto ? presto + ' da cambiare prima della prossima giocata' : 'Tutte a posto'));
           card.appendChild(tabellaBatt(righe));
           var sv = el('div', 'bp-faz');
           [['inizio', 'SALVA INIZIO'], ['fine', 'SALVA FINE']].forEach(function (t) {
@@ -1710,8 +1721,8 @@
         if (!report.length) rp.appendChild(el('p', 'hint', 'Nessun report ancora.'));
         report.forEach(function (r) {
           var d = el('details', 'bp-repi'), sm = el('summary');
-          var basse = (r.righe || []).filter(function (x) { return x.sentito && statoBatt(x.mv) === 'ko'; }).length, manc = (r.righe || []).filter(function (x) { return !x.sentito; }).length;
-          sm.textContent = (r.tipo === 'fine' ? 'FINE' : 'INIZIO') + ' · ' + new Date(r.quando).toLocaleString('it-IT', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' · ' + (basse ? basse + ' da cambiare' : 'ok') + (manc ? ' · ' + manc + ' non sentiti' : '');
+          var presto = (r.righe || []).filter(function (x) { return x.sentito && statoBatt(x.mv) === 'warn'; }).length, basse = (r.righe || []).filter(function (x) { return x.sentito && statoBatt(x.mv) === 'ko'; }).length, manc = (r.righe || []).filter(function (x) { return !x.sentito; }).length;
+          sm.textContent = (r.tipo === 'fine' ? 'FINE' : 'INIZIO') + ' · ' + new Date(r.quando).toLocaleString('it-IT', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) + ' · ' + (basse ? basse + ' da cambiare ora' : presto ? presto + ' da cambiare presto' : 'ok') + (manc ? ' · ' + manc + ' non sentiti' : '');
           d.appendChild(sm); d.appendChild(tabellaBatt(r.righe || [])); rp.appendChild(d);
         });
         box.appendChild(rp); return;
