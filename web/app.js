@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.62';
+  var VERSIONE = '0.63';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -1638,6 +1638,7 @@
         r.appendChild(el('b', x.f, x.f ? sig(x.f, x.n) : '?'));
         r.appendChild(el('span', 'g', x.gioc || ''));
         r.appendChild(el('span', 'v', x.sentito === false ? 'NON SENTITO' : x.mv ? testoBatt(x.mv) : 'non letta'));
+        if (x.grezzo) r.appendChild(el('code', 'bp-grezzo', x.grezzo));
         t.appendChild(r);
       });
       return t;
@@ -1699,7 +1700,7 @@
         if (Bt && Bt.righe) {
           var sentiti = {}; Bt.righe.forEach(function (x) { sentiti[x.mac] = x; });
           var righe = (reg || []).slice().sort(function (a, c) { return a.f === c.f ? a.n - c.n : a.f === 'blu' ? -1 : 1; }).map(function (r) {
-            var x = sentiti[r.id]; return { mac: r.id, f: r.f, n: r.n, mv: x ? x.mv : 0, gioc: r.gioc || '', sentito: !!x };
+            var x = sentiti[r.id]; return { mac: r.id, f: r.f, n: r.n, mv: x ? x.mv : 0, gioc: r.gioc || '', sentito: !!x, grezzo: x && !x.mv ? (x.tlm ? 'TLM ' + x.tlm : 'no TLM') + (x.altro ? ' · ' + x.altro : '') : '' };
           });
           var basse = righe.filter(function (x) { return x.sentito && statoBatt(x.mv) === 'ko'; }).length, mancano = righe.filter(function (x) { return !x.sentito; }).length;
           var nonLette = righe.filter(function (x) { return x.sentito && !x.mv; }).length;

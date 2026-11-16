@@ -30,7 +30,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.9.7"
+#define VERSIONE "0.9.8"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -828,7 +828,7 @@ bool leggiIbeacon(NimBLEAdvertisedDevice &d, uint8_t *u, uint16_t &maj, uint16_t
 }
 // I CP35 trasmettono a turno piu' pacchetti (iBeacon, Eddystone, nome...): bisogna guardarli uno per uno,
 // non solo l'ultimo ricevuto. Questa tabella raccoglie tutto quello che si sente durante una scansione.
-struct Visto { char mac[18]; char nome[20]; int rssi; bool coll, ib, nostro; uint16_t ma, mi; uint8_t tipo; uint16_t mv; };
+struct Visto { char mac[18]; char nome[20]; int rssi; bool coll, ib, nostro; uint16_t ma, mi; uint8_t tipo; uint16_t mv; char tlm[33]; char altro[48]; };
 Visto visti[40]; volatile int nVisti = 0; volatile bool raccogli = false;
 portMUX_TYPE muxV = portMUX_INITIALIZER_UNLOCKED;
 class Raccolta : public NimBLEAdvertisedDeviceCallbacks {
@@ -840,15 +840,22 @@ class Raccolta : public NimBLEAdvertisedDeviceCallbacks {
     std::string nm = d->haveName() ? d->getName() : std::string();
     bool coll = d->getAdvType() == 0 || d->getAdvType() == 1;
     // Eddystone TLM (servizio FEAA, tipo 0x20): dentro c'e' la tensione della batteria in mV
-    uint16_t mv = 0;
+    uint16_t mv = 0; char tlm[33] = "", altro[48] = "";
     for (int k = 0; k < (int)d->getServiceDataCount(); k++) {
-      if (!(d->getServiceDataUUID(k) == NimBLEUUID((uint16_t)0xFEAA))) continue;
       std::string sd = d->getServiceData(k);
-      if (sd.size() >= 4 && (uint8_t)sd[0] == 0x20) {
-        // standard Eddystone: 20 00 VV VV (versione poi mV); i CP35 invece mettono i mV subito dopo il 20.
-        // Si prende quello che da' un valore sensato per una pila (1,8 - 3,7 V).
-        uint16_t a = ((uint8_t)sd[1] << 8) | (uint8_t)sd[2], b = ((uint8_t)sd[2] << 8) | (uint8_t)sd[3];
-        mv = (a >= 1800 && a <= 3700) ? a : (b >= 1800 && b <= 3700) ? b : 0;
+      bool feaa = d->getServiceDataUUID(k) == NimBLEUUID((uint16_t)0xFEAA);
+      if (feaa && sd.size() >= 4 && (uint8_t)sd[0] == 0x20) {
+        // byte grezzi del TLM, per capire il formato dei CP35 (finiscono nell'elenco batterie)
+        for (int j = 0; j < (int)sd.size() && j < 16; j++) sprintf(tlm + 2 * j, "%02X", (uint8_t)sd[j]);
+        // tensione: si prova il formato standard (20 00 VV VV) e le varianti, si tiene il primo valore da pila (1,8 - 3,7 V)
+        const uint8_t *q = (const uint8_t *)sd.data();
+        uint16_t prove[] = { (uint16_t)(q[2] << 8 | q[3]), (uint16_t)(q[1] << 8 | q[2]), (uint16_t)(q[3] << 8 | q[2]), (uint16_t)(q[2] << 8 | q[1]) };
+        for (uint16_t x : prove) if (x >= 1800 && x <= 3700) { mv = x; break; }
+      } else if (!feaa && sd.size()) {
+        // altri dati (es. il pacchetto "informazioni" dei DX, che potrebbe contenere la batteria)
+        snprintf(altro, 8, "%s:", d->getServiceDataUUID(k).toString().substr(0, 6).c_str());
+        int o = strlen(altro);
+        for (int j = 0; j < (int)sd.size() && o + 2 < 47; j++, o += 2) sprintf(altro + o, "%02X", (uint8_t)sd[j]);
       }
     }
     portENTER_CRITICAL(&muxV);
@@ -861,6 +868,8 @@ class Raccolta : public NimBLEAdvertisedDeviceCallbacks {
       if (nm.size() && !v.nome[0]) strncpy(v.nome, nm.c_str(), 19);
       if (ib && (!v.ib || nostro)) { v.ib = true; v.nostro = nostro; v.ma = ma; v.mi = mi; }
       if (mv) v.mv = mv;
+      if (tlm[0]) strcpy(v.tlm, tlm);
+      if (altro[0] && !v.altro[0]) strcpy(v.altro, altro);
     }
     portEXIT_CRITICAL(&muxV);
   }
@@ -1137,7 +1146,7 @@ void comando(String c) {
     for (int i = 0; i < nVisti; i++) {
       Visto &w = visti[i];
       if (!w.nostro && strncmp(w.nome, "CP35", 4)) continue;
-      char b[140]; snprintf(b, sizeof(b), "%s{\"mac\":\"%s\",\"nostro\":%s,\"f\":\"%s\",\"n\":%u,\"mv\":%u,\"rssi\":%d}", js.endsWith("[") ? "" : ",", w.mac, w.nostro ? "true" : "false", w.nostro ? nomeFaz(w.ma) : "", w.nostro ? w.mi : 0, w.mv, w.rssi);
+      char b[240]; snprintf(b, sizeof(b), "%s{\"mac\":\"%s\",\"nostro\":%s,\"f\":\"%s\",\"n\":%u,\"mv\":%u,\"rssi\":%d,\"tlm\":\"%s\",\"altro\":\"%s\"}", js.endsWith("[") ? "" : ",", w.mac, w.nostro ? "true" : "false", w.nostro ? nomeFaz(w.ma) : "", w.nostro ? w.mi : 0, w.mv, w.rssi, w.tlm, w.altro);
       js += b;
     }
     Out.println(js + "]}");
