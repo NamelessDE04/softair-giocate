@@ -30,7 +30,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.9.5"
+#define VERSIONE "0.9.6"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -843,7 +843,12 @@ class Raccolta : public NimBLEAdvertisedDeviceCallbacks {
     for (int k = 0; k < (int)d->getServiceDataCount(); k++) {
       if (!(d->getServiceDataUUID(k) == NimBLEUUID((uint16_t)0xFEAA))) continue;
       std::string sd = d->getServiceData(k);
-      if (sd.size() >= 4 && (uint8_t)sd[0] == 0x20) mv = ((uint8_t)sd[2] << 8) | (uint8_t)sd[3];
+      if (sd.size() >= 4 && (uint8_t)sd[0] == 0x20) {
+        // standard Eddystone: 20 00 VV VV (versione poi mV); i CP35 invece mettono i mV subito dopo il 20.
+        // Si prende quello che da' un valore sensato per una pila (1,8 - 3,7 V).
+        uint16_t a = ((uint8_t)sd[1] << 8) | (uint8_t)sd[2], b = ((uint8_t)sd[2] << 8) | (uint8_t)sd[3];
+        mv = (a >= 1800 && a <= 3700) ? a : (b >= 1800 && b <= 3700) ? b : 0;
+      }
     }
     portENTER_CRITICAL(&muxV);
     int i = 0; for (; i < nVisti; i++) if (!strcmp(visti[i].mac, mac.c_str())) break;
@@ -1126,7 +1131,7 @@ void comando(String c) {
   }
   // batterie di tutti i tag (lettura dai pacchetti TLM, senza collegarsi): 8 secondi per sentirli tutti
   if (k == "batterie") {
-    scansiona(8);
+    scansiona(12);
     String js = "{\"batterie\":[";
     for (int i = 0; i < nVisti; i++) {
       Visto &w = visti[i];

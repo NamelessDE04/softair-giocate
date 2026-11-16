@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.59';
+  var VERSIONE = '0.60';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -1619,7 +1619,7 @@
       };
       return sel;
     }
-    function voltaggio(mv) { return mv ? (mv / 1000).toFixed(2).replace('.', ',') + ' V' : '—'; }
+    function voltaggio(mv) { return mv && mv < 5000 ? (mv / 1000).toFixed(2).replace('.', ',') + ' V' : '—'; }
     function statoBatt(mv) { return !mv ? 'nd' : mv >= 2900 ? 'ok' : mv >= 2700 ? 'warn' : 'ko'; }
     function tabellaBatt(righe) {
       var t = el('div', 'bp-batt');
@@ -1627,7 +1627,7 @@
         var r = el('div', 'bp-br ' + statoBatt(x.mv));
         r.appendChild(el('b', x.f, x.f ? sig(x.f, x.n) : '?'));
         r.appendChild(el('span', 'g', x.gioc || ''));
-        r.appendChild(el('span', 'v', x.sentito === false ? 'NON SENTITO' : voltaggio(x.mv)));
+        r.appendChild(el('span', 'v', x.sentito === false ? 'NON SENTITO' : x.mv ? voltaggio(x.mv) : 'non letta'));
         t.appendChild(r);
       });
       return t;
@@ -1685,14 +1685,15 @@
       }
       if (modo === 'batterie') {
         card = grosso('', 'Batterie dei tag', 'Metti TUTTI i tag vicino alla T-Beam (per esempio al briefing).');
-        card.appendChild(tasto(Bt && Bt.attesa ? 'LEGGO… (8 s)' : 'LEGGI BATTERIE', 'acc', function () { if (Bt && Bt.attesa) return; Bt = { attesa: true, seqB: I.seqB || 0 }; bancoInvia('batterie'); disegna(); }));
+        card.appendChild(tasto(Bt && Bt.attesa ? 'LEGGO… (12 s)' : 'LEGGI BATTERIE', 'acc', function () { if (Bt && Bt.attesa) return; Bt = { attesa: true, seqB: I.seqB || 0 }; bancoInvia('batterie'); disegna(); }));
         if (Bt && Bt.righe) {
           var sentiti = {}; Bt.righe.forEach(function (x) { sentiti[x.mac] = x; });
           var righe = (reg || []).slice().sort(function (a, c) { return a.f === c.f ? a.n - c.n : a.f === 'blu' ? -1 : 1; }).map(function (r) {
             var x = sentiti[r.id]; return { mac: r.id, f: r.f, n: r.n, mv: x ? x.mv : 0, gioc: r.gioc || '', sentito: !!x };
           });
           var basse = righe.filter(function (x) { return x.sentito && statoBatt(x.mv) === 'ko'; }).length, mancano = righe.filter(function (x) { return !x.sentito; }).length;
-          card.appendChild(el('div', 'bp-esito ' + (basse ? 'ko' : mancano ? 'warn' : 'ok'), basse ? basse + ' batterie da cambiare' : mancano ? mancano + ' tag non sentiti' : 'Tutte a posto'));
+          var nonLette = righe.filter(function (x) { return x.sentito && !x.mv; }).length;
+          card.appendChild(el('div', 'bp-esito ' + (basse ? 'ko' : mancano || nonLette ? 'warn' : 'ok'), basse ? basse + ' batterie da cambiare' : mancano ? mancano + ' tag non sentiti' : nonLette ? nonLette + ' non lette: rileggi' : 'Tutte a posto'));
           card.appendChild(tabellaBatt(righe));
           var sv = el('div', 'bp-faz');
           [['inizio', 'SALVA INIZIO'], ['fine', 'SALVA FINE']].forEach(function (t) {
