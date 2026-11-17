@@ -466,6 +466,12 @@
   };
 
   // eventi di gioco (posizione nei punti, ordini del comandante)
+  // ---------- esercitazione bandiere (in un allenamento)
+  api.statoEsercizio = function (aid, e) { return db.collection('allenamenti').doc(aid).update({ esercizio: JSON.parse(JSON.stringify(e)) }); };
+  api.ascoltaEsercizio = function (aid, cb) { return db.collection('esercizi').doc(aid).onSnapshot(function (s) { cb(s.exists ? s.data() : {}); }, function () { cb({}); }); };
+  api.aggiornaEsercizio = function (aid, d) { return db.collection('esercizi').doc(aid).set(JSON.parse(JSON.stringify(d)), { merge: true }); };
+  api.ascoltaEventiEsercizio = function (aid, cb) { return db.collection('esercizi/' + aid + '/eventi').onSnapshot(function (qs) { cb(qs.docs.map(function (d) { return d.data(); })); }, function () { cb([]); }); };
+  api.eventoEsercizio = function (aid, e) { return db.collection('esercizi/' + aid + '/eventi').doc().set(e); };
   api.ascoltaEventi = function (cid, cb) {
     return db.collection('conflitti/' + cid + '/eventi').onSnapshot(function (qs) { cb(qs.docs.map(function (d) { return d.data(); })); }, function () { cb([]); });
   };

@@ -154,6 +154,16 @@ service cloud.firestore {
       allow read, write: if perm('mappe');
     }
     // Registro dei tag Bluetooth programmati (pagina Beacon prog): un documento per tag, la chiave è l'indirizzo MAC
+    // Esercitazione bandiere (in un allenamento): lo stato lo scrive chi organizza (telefono collegato all'HQ);
+    // gli eventi (mortaio, colpito, rinascita, fazione) ognuno i suoi, chi organizza anche per gli altri
+    match /esercizi/{id} {
+      allow read: if signed();
+      allow write: if perm('allenamenti');
+      match /eventi/{e} {
+        allow read: if signed();
+        allow create: if signed() && (request.resource.data.uid == request.auth.uid || perm('allenamenti'));
+      }
+    }
     match /beacon/{mac} {
       allow read: if signed();
       allow write: if perm('conflitti');

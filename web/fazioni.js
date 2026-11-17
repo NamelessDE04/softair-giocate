@@ -281,6 +281,8 @@
       // i punti riempiono lo schermo (lasciando spazio alle barre)
       var xs = [], ys = [];
       campo.punti.forEach(function (p) { var q = pxP(campo, p); xs.push(q.x); ys.push(q.y); });
+      if (opts.inquadra && campo.geo) opts.inquadra().forEach(function (g) { var q = px(campo, g.lat, g.lon); xs.push(q.x); ys.push(q.y); });
+      if (!xs.length) { xs = [70, campo.w - 70]; ys = [80, campo.h - 80]; }
       var x0 = Math.min.apply(null, xs) - 70, x1 = Math.max.apply(null, xs) + 70, y0 = Math.min.apply(null, ys) - 80, y1 = Math.max.apply(null, ys) + 80;
       var padT = ante ? 20 : 110, padB = ante ? 20 : 150;
       sc = Math.max(minSc, Math.min(vw / (x1 - x0), (vh - padT - padB) / (y1 - y0)));
@@ -474,6 +476,17 @@
         if (q.tipo === 'mortaio') s += '<rect x="' + (m.x - 11 * k) + '" y="' + (m.y - 11 * k) + '" width="' + (22 * k) + '" height="' + (22 * k) + '" rx="' + (4 * k) + '" fill="' + c + '" stroke="#fff" stroke-width="' + (2 * k) + '"/><path d="M' + (m.x - 5 * k) + ' ' + (m.y + 6 * k) + 'L' + (m.x + 5 * k) + ' ' + (m.y - 7 * k) + '" stroke="#fff" stroke-width="' + (3.4 * k) + '" stroke-linecap="round"/>';
         else if (q.tipo === 'bersaglio') s += '<g stroke="' + c + '" stroke-width="' + (2.6 * k) + '" fill="none"><circle cx="' + m.x + '" cy="' + m.y + '" r="' + (11 * k) + '"/><path d="M' + (m.x - 17 * k) + ' ' + m.y + 'h' + (34 * k) + 'M' + m.x + ' ' + (m.y - 17 * k) + 'v' + (34 * k) + '"/></g>';
         else if (q.tipo === 'impatto') s += '<path d="M' + m.x + ' ' + (m.y - 13 * k) + 'L' + (m.x + 4 * k) + ' ' + (m.y - 4 * k) + 'L' + (m.x + 13 * k) + ' ' + m.y + 'L' + (m.x + 4 * k) + ' ' + (m.y + 4 * k) + 'L' + m.x + ' ' + (m.y + 13 * k) + 'L' + (m.x - 4 * k) + ' ' + (m.y + 4 * k) + 'L' + (m.x - 13 * k) + ' ' + m.y + 'L' + (m.x - 4 * k) + ' ' + (m.y - 4 * k) + 'Z" fill="' + c + '" stroke="#fff" stroke-width="' + (1.4 * k) + '"/>';
+        else if (q.tipo === 'area') {
+          // area disegnata da fuori (es. bandiera col suo GPS): colore di chi la tiene, anello della conquista, contesa
+          var ra = Math.max((q.r || 15) / mpp(campo), 22 * k);
+          s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + ra + '" fill="' + c + '" fill-opacity=".55" stroke="' + c + '" stroke-width="' + (3 * k) + '"/>';
+          if (q.pct) { var rr2 = ra + 6 * k, gi = 2 * Math.PI * rr2; s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + rr2 + '" fill="none" stroke="#000" stroke-opacity=".5" stroke-width="' + (6 * k) + '"/><circle cx="' + m.x + '" cy="' + m.y + '" r="' + rr2 + '" fill="none" stroke="' + (q.colConq || '#fff') + '" stroke-width="' + (5 * k) + '" stroke-dasharray="' + (gi * Math.min(1, q.pct / 100)) + ' ' + gi + '" transform="rotate(-90 ' + m.x + ' ' + m.y + ')"/>'; }
+          if (q.contesa) s += '<circle class="fz-cont" cx="' + m.x + '" cy="' + m.y + '" r="' + (ra + 13 * k) + '" fill="none" stroke="#ffd23f" stroke-width="' + (4 * k) + '" stroke-dasharray="' + (10 * k) + ' ' + (7 * k) + '"/>';
+          s += testo(q.sim || '⚑', m.x, m.y, (q.sim && q.sim.length > 1 ? 16 : 28) * k, 'fz-sim', '#fff');
+          if (q.nome) s += testo(String(q.nome).toUpperCase(), m.x, m.y + ra + 13 * k, 15 * k, 'fz-lab');
+          if (q.sotto) s += testo(q.sotto, m.x, m.y + ra + 30 * k, 12 * k, 'fz-lab');
+        }
+        else if (q.tipo === 'pallino') s += '<circle cx="' + m.x + '" cy="' + m.y + '" r="' + (12 * k) + '" fill="' + c + '" stroke="#fff" stroke-width="' + (2.4 * k) + '"/><text x="' + m.x + '" y="' + m.y + '" font-size="' + (10 * k) + '" text-anchor="middle" dominant-baseline="central" style="fill:#fff;font-weight:700;font-family:sans-serif">' + esc(q.nome || '') + '</text>';
         else if (q.tipo === 'linea' && q.a) { var a2 = px(campo, q.a.lat, q.a.lon); s += '<path d="M' + a2.x + ' ' + a2.y + 'L' + m.x + ' ' + m.y + '" stroke="' + c + '" stroke-width="' + (2 * k) + '" stroke-dasharray="' + (6 * k) + ' ' + (5 * k) + '"/>'; }
         if (q.testo) s += '<text x="' + m.x + '" y="' + (m.y + 26 * k) + '" font-size="' + (13 * k) + '" text-anchor="middle" class="fz-lab" style="fill:' + c + '">' + esc(q.testo) + '</text>';
       });

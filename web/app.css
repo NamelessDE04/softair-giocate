@@ -871,3 +871,19 @@ main > .btn.big { margin-bottom: 6px; }
 .banco-patr { display: grid; grid-template-columns: auto 1fr 70px; gap: 6px; align-items: center; margin: 6px 0; } .banco-patr small { grid-column: 1 / -1; }
 
 .p3-mort { background: #6b2a14 !important; color: #fff !important; } .p3-sogl { display: flex; gap: 8px; align-items: center; width: 100%; } .p3-sogl b { flex: 1; text-align: center; }
+
+/* esercitazione bandiere */
+.es-testa { text-align: center; padding: 10px; border-radius: 12px; background: #1d2418; margin-bottom: 8px; }
+.es-testa small { display: block; letter-spacing: .12em; font-weight: 700; color: #b9c2a8; }
+.es-testa b { display: block; font-size: 34px; font-family: var(--mono, monospace); }
+.es-testa.f1 { background: #3a2d10; } .es-testa.f2 { background: #3b1a12; } .es-testa.fine { background: #16301e; }
+.es-stato { padding: 10px 12px; border-radius: 12px; margin-bottom: 8px; background: #22261d; }
+.es-stato b { display: block; font-size: 20px; } .es-stato span { display: block; color: #cfd3c4; }
+.es-stato.blu { border-left: 6px solid #2f7fd6; } .es-stato.rossa { border-left: 6px solid #d23a2c; }
+.es-stato.morto { background: #6b1410; border-left: 6px solid #ff5a4a; } .es-stato.morto b { font-size: 26px; }
+.es-stato .riga2 .btn { min-height: 64px; }
+.es-rossa { background: #a3281d !important; color: #fff !important; } .es-blu { background: #2264b0 !important; color: #fff !important; }
+.es-mappa { height: 62vh; min-height: 340px; }
+.es-k h3 { margin: 0 0 6px; } .es-k p { margin: 6px 0; line-height: 1.45; }
+.es-righe { white-space: pre-wrap; font-size: 13px; background: #15180f; padding: 8px; border-radius: 8px; }
+.es-regia .btn { margin-top: 6px; } .es-home { width: 100%; margin-bottom: 10px; }

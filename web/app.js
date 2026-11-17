@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.67';
+  var VERSIONE = '0.68';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -97,7 +97,7 @@
     app.innerHTML = ''; window.scrollTo(0, 0);
     $('pieno').hidden = true; $('pieno').innerHTML = '';
     document.body.classList.remove('a-pieno');
-    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva, dmz: pagDmz, dmzModifica: pagDmzModifica, dmzLive: pagDmzLive, mortaioProva: pagMortaioProva, banco: pagBanco, beaconProg: pagBeaconProg, provaTbeam: pagProvaTbeam }[c.v];
+    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva, dmz: pagDmz, dmzModifica: pagDmzModifica, dmzLive: pagDmzLive, mortaioProva: pagMortaioProva, banco: pagBanco, beaconProg: pagBeaconProg, provaTbeam: pagProvaTbeam, esercizio: pagEsercizio }[c.v];
     (r || home)(c.p);
   }
   function aPieno() { document.body.classList.add('a-pieno'); var p = $('pieno'); p.hidden = false; p.innerHTML = ''; return p; }
@@ -178,7 +178,13 @@
   // pagine di debug tolte dalla home: si aprono con l'indirizzo …/#banco o …/#prova
   var apriNascosta = { '#banco': 'banco', '#iniettore': 'banco', '#beacon': 'beaconProg', '#prova': 'provaTbeam', '#provabandiera': 'provaTbeam' }[location.hash] || null;
   // link condiviso di un evento: …/#ev=c-ID (conflict) o #ev=a-ID (allenamento). Resta in sospeso anche durante l'accesso.
-  var apriEvento = null;
+  var apriEvento = null, apriEs = null;
+  (function () {
+    // QR dell'esercitazione: #mortaio (display dell'HQ) e #rinascita (stampato all'HQ)
+    var q = { '#mortaio': 'm', '#rinascita': 'r' }[location.hash];
+    try { if (q) sessionStorage.setItem('apriEs', q); apriEs = sessionStorage.getItem('apriEs'); } catch (e) { if (q) apriEs = q; }
+    if (q) history.replaceState(null, '', location.pathname);
+  })();
   (function () {
     var m = /^#ev=([ca])-(.+)$/.exec(location.hash);
     try { if (m) sessionStorage.setItem('apriEvento', m[1] + '-' + m[2]); apriEvento = sessionStorage.getItem('apriEvento'); } catch (e) { if (m) apriEvento = m[1] + '-' + m[2]; }
@@ -201,6 +207,11 @@
     }
     var st = S.stato(), me = st.me;
     if (!me.callsign) return sceltaCallsign();
+    if (apriEs) {
+      var esA = esercizioInCorso();
+      if (esA) { var az = apriEs; apriEs = null; try { sessionStorage.removeItem('apriEs'); } catch (e) {} setTimeout(function () { vai('esercizio', esA.id + '~' + az); }, 0); }
+      else if (!home.attesaEs) home.attesaEs = setTimeout(function () { home.attesaEs = null; if (apriEs) { apriEs = null; try { sessionStorage.removeItem('apriEs'); } catch (e) {} toast('Nessuna esercitazione in corso'); } }, 8000);
+    }
     var lista = attivi(), inviti = [], promemoria = [];
     lista.forEach(function (c) {
       // anche chi organizza risponde, se il suo team è invitato; e vede comunque tutti i conflict
@@ -212,6 +223,8 @@
     var all = allenamentiAttivi().filter(function (a) { var r = miaAdesione('a:' + a.id); return P('allenamenti') || !r || r.si || r.dopo; });
     var dz = D.dmz.filter(function (x) { return x.fine > Date.now() - 6 * 3600000 && (x.giocatori || []).indexOf(st.user.uid) >= 0; });
     if (!inviti.length && !promemoria.length && !all.length && !dz.length) { schermataInvito(); if (P('conflitti')) app.appendChild(cartaBeta()); return; }
+    var esH = esercizioInCorso();
+    if (esH) { var kE = bottone('⚑ ESERCITAZIONE IN CORSO · apri', 'accent big es-home', function () { vai('esercizio', esH.id); }); app.appendChild(kE); }
     inviti.forEach(function (c) { app.appendChild(cartaInvito(c)); });
     // conflict e allenamenti in ordine di data
     promemoria.map(function (c) { return { t: c.inizio, el: cartaPromemoria(c) }; }).concat(all.map(function (a) { return { t: a.inizio || 0, el: cartaAllenamento(a) }; }))
@@ -924,7 +937,7 @@
         tabs.appendChild(bottone(x[1], 'scheda' + (sel.scheda === x[0] ? ' on' : ''), function () { sel.scheda = x[0]; disegna(); }));
       });
       box.appendChild(tabs);
-      var mio = s.mortai[ctx.team], hq = s.hq[ctx.team], cassa = s.cassa[ctx.team] || { q: 0 }, allHq = ctx.prova || (hq && zona === hq);
+      var mio = s.mortai[ctx.team], hq = s.hq[ctx.team], cassa = s.cassa[ctx.team] || { q: 0 }, allHq = ctx.prova || ctx.ovunque || (hq && zona === hq);
       var cont = el('div', 'mort-c'); box.appendChild(cont);
       if (sel.scheda === 'rif') {
         // rifornimenti dell'HQ: arrivano da soli, a scatti, come in Arma
@@ -972,7 +985,7 @@
         if (!mio) { cont.appendChild(el('p', 'hint', 'La tua fazione non ha ancora il mortaio. Si costruisce all\'HQ, dalla scheda HQ.')); return; }
         var mo = mio, scorta = cassa.q, P0 = (ctx.punti || []).filter(function (p) { return p.id === mo.pt; })[0];
         var hm = el('div', 'mort-mh'); hm.appendChild(el('b', null, 'Mortaio · HQ'));
-        hm.appendChild(el('span', 'mono', Math.floor(scorta / R.colpo) + ' colpi')); cont.appendChild(hm);
+        hm.appendChild(el('span', 'mono', (R.colpo ? Math.floor(scorta / R.colpo) + ' colpi' : 'colpi illimitati'))); cont.appendChild(hm);
         if (P0 && P0.lat != null) cont.appendChild(el('small', 'hint mono', 'Posizione del mortaio: ' + utmDi(P0.lat, P0.lon)));
         // missioni ricevute
         var ric = s.richieste.filter(function (q) { return q.team === ctx.team; }).slice(-5).reverse();
@@ -1997,6 +2010,314 @@
     });
   }
 
+  // ================= ESERCITAZIONE BANDIERE (in un allenamento)
+  // Fase 1: i rossi difendono 2 bandiere, i blu (tag + pattuglie) le attaccano; allo scadere vince chi le tiene tutte e due.
+  // Fase 2: dall'HQ si tira col mortaio sulle bandiere; chi è colpito non conta più finché non scansiona il QR di rinascita.
+  // Stato: allenamenti/{id}.esercizio (fasi, scritto da chi organizza) · esercizi/{id} (bandiere, HQ, pattuglie: dal telefono collegato all'HQ)
+  // · esercizi/{id}/eventi (mortaio, colpiti, rinascite, fazione scelta).
+  var ES_SITO = 'https://softair-giocate.web.app/';
+  var ES_R = { letale: 15, vicino: 40 };
+  function esAttivo(a) { var f = a && a.esercizio && a.esercizio.fase; return f === 'f1' || f === 'f1fine' || f === 'f2'; }
+  function esercizioInCorso() { return D.allenamenti.filter(esAttivo).sort(function (x, y) { return (y.esercizio.inizio || 0) - (x.esercizio.inizio || 0); })[0] || null; }
+  function esNomeFaz(f) { return f === 'blu' ? 'BLU' : f === 'rossa' ? 'ROSSI' : '—'; }
+  function esMorti(eventi) {
+    // ultimo evento colpito/rinascita per ciascuno: true = fuori gioco
+    var u = {};
+    eventi.filter(function (e) { return e.tipo === 'colpito' || e.tipo === 'rinascita' || e.tipo === 'rinascitaTutti'; }).sort(function (x, y) { return x.t - y.t; })
+      .forEach(function (e) { if (e.tipo === 'rinascitaTutti') u = {}; else u[e.uid] = e.tipo === 'colpito' ? e : null; });
+    Object.keys(u).forEach(function (k) { if (!u[k]) delete u[k]; });
+    return u;
+  }
+  function pagEsercizio(arg) {
+    var parti = String(arg || '').split('~'), aid = parti[0], azione = parti[1] || '';
+    var a0 = D.allenamenti.filter(function (x) { return x.id === aid; })[0];
+    testata('Esercitazione');
+    if (!a0) { app.appendChild(el('p', 'hint', 'Esercitazione non trovata.')); return; }
+    if (!a0.campo) { app.appendChild(el('p', 'hint', 'Serve la cartina nell\'allenamento.')); return; }
+    var st = S.stato(), uid = st.user.uid, org = P('allenamenti');
+    var live = {}, eventi = [], reg = [], cm = null, v = null, stopL = null, stopE = null, stopR = null, giro = null, visti = {}, aperto = Date.now();
+    function es() { var a = D.allenamenti.filter(function (x) { return x.id === aid; })[0] || a0; return a.esercizio || { fase: 'prep' }; }
+    function mioTag() { return reg.filter(function (r) { return r.uid === uid; })[0] || null; }
+    function miaFaz() {
+      var t = mioTag(); if (t && (t.f === 'blu' || t.f === 'rossa')) return t.f;
+      var e = eventi.filter(function (x) { return x.tipo === 'fazione' && x.uid === uid; }).sort(function (x, y) { return y.t - x.t; })[0];
+      return e ? e.f : null;
+    }
+    function scrivi(e) { e.t = e.t || Date.now(); if (!e.uid) e.uid = uid; return S.eventoEsercizio(aid, e); }
+    // --- motore del mortaio (solo fase 2): mortaio all'HQ per entrambe le fazioni, gratis, colpi senza limite
+    var cMort = { mortaio: 'realistico', regole: { mortaio: { iniziali: 1e6, max: 1e6, costo: 0, colpo: 0, costruzione: 0, periodo: 1e6, reddito: 0, cadenza: 10 } } };
+    var PM = [];   // sempre lo stesso array: il pannello del mortaio lo tiene e lo vede aggiornato
+    function puntiM() { var h = live.hq; PM.length = 0; if (h && h.lat != null) PM.push({ id: 'hq-blu', tipo: 'mob', fazione: 'blu', nome: 'HQ', lat: h.lat, lon: h.lon, raggio: 25 }, { id: 'hq-rossa', tipo: 'mob', fazione: 'rossa', nome: 'HQ', lat: h.lat, lon: h.lon, raggio: 25 }); return PM; }
+    function statoM() { var e0 = es(), t0 = e0.f2inizio || Date.now(); return window.AC_MORT.stato(cMort, puntiM(), eventi.filter(function (e) { return e.t >= t0; }), Date.now(), {}, t0); }
+    function mioModo() { var e = eventi.filter(function (x) { return x.tipo === 'mortaio' && x.azione === 'costruisci' && x.uid === uid && x.t >= (es().f2inizio || 0); }).sort(function (x, y) { return y.t - x.t; })[0]; return e ? e.modo || 'realistico' : null; }
+    // --- pagina
+    var testa = el('div', 'es-testa'); app.appendChild(testa);
+    var stato = el('div', 'es-stato'); app.appendChild(stato);
+    var mapBox = el('div', 'all-mappa es-mappa'); app.appendChild(mapBox);
+    var mortBox = el('div', 'mort-pan'); app.appendChild(mortBox);
+    var spieg = el('div', 'es-spieg'); app.appendChild(spieg);
+    var regia = el('div', 'es-regia'); if (org) app.appendChild(regia);
+    var pan = null, panModo = null, scegliCb = null;
+    stopR = S.ascoltaBeacon(function (r) { reg = r || []; aggiorna(); });
+    stopL = S.ascoltaEsercizio(aid, function (d) { live = d || {}; if (v) v.ridisegna(); aggiorna(); });
+    stopE = S.ascoltaEventiEsercizio(aid, function (ev) { eventi = ev; if (pan && pan.aggiorna) pan.aggiorna(); aggiorna(); });
+    conCampo(a0.campo, mapBox, function (cm0) {
+      cm = Object.assign({}, cm0, { punti: [] });
+      var g0 = { inizio: Date.now() + 864e5, durata: 60, fazioni: [{ team: 'blu', mob: null, partenza: [] }, { team: 'rossa', mob: null, partenza: [] }] };
+      v = F.vista(mapBox, { g: g0, campo: cm, team: null, colori: COLORI, nomi: {}, ora: Date.now, anteprima: true, mobile: true, allenamento: true, gps: true,
+        inquadra: function () { var o = []; Object.keys(live.bandiere || {}).forEach(function (k) { var b = live.bandiere[k]; if (b.lat != null) o.push(b); }); if (live.hq && live.hq.lat != null) o.push(live.hq); return o; },
+        segni: segni,
+        onTocco: function (lat, lon) { if (scegliCb) { var f0 = scegliCb; scegliCb = null; mapBox.classList.remove('scegli'); f0({ lat: lat, lon: lon }); } } });
+      setTimeout(function () { if (v) v.centra(); }, 1500);
+    });
+    function segni() {
+      var out = [], fz = miaFaz(), now = Date.now(), e0 = es();
+      Object.keys(live.bandiere || {}).sort().forEach(function (k) {
+        var b = live.bandiere[k]; if (b.lat == null) return;
+        var vecchia = now - (b.t || 0) > 90000;
+        out.push({ tipo: 'area', lat: b.lat, lon: b.lon, r: 15, colore: b.owner ? COLORI[b.owner] : '#9a9a8a', pct: b.conq && b.pct ? b.pct : 0, colConq: COLORI[b.conq] || '#fff', contesa: !!b.contesa,
+          sim: '⚑', nome: b.nome || k, sotto: vecchia ? 'nessun segnale' : (b.blu || b.rossi ? 'B' + (b.blu || 0) + ' · R' + (b.rossi || 0) : '') });
+      });
+      if (live.hq && live.hq.lat != null) out.push({ tipo: 'area', lat: live.hq.lat, lon: live.hq.lon, r: 12, colore: '#c9a227', sim: 'HQ', nome: 'HQ' });
+      // pattuglie: solo ai blu (e a chi organizza)
+      if (fz === 'blu' || org) Object.keys(live.pattuglie || {}).forEach(function (k) { var p = live.pattuglie[k]; if (p.lat != null && now - (p.t || 0) < 300000) out.push({ tipo: 'pallino', lat: p.lat, lon: p.lon, colore: COLORI.blu, nome: p.nome || 'P' }); });
+      if (e0.fase === 'f2' || e0.fase === 'fine') { var sm = statoM(); segniMortaio(sm, fz, puntiM(), now, org).forEach(function (q) { out.push(q); }); }
+      return out;
+    }
+    function mmss(ms) { ms = Math.max(0, ms); var s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2); }
+    var ultimoUI = '';
+    function aggiorna() {
+      var e0 = es(), now = Date.now(), fz = miaFaz(), morti = esMorti(eventi), ioMorto = !!morti[uid], firma = JSON.stringify([e0, fz, ioMorto, !!mioModo(), Math.floor(now / 1000)]);
+      if (firma === ultimoUI) return; ultimoUI = firma;
+      // testata: fase e tempo
+      testa.innerHTML = '';
+      var fine1 = e0.inizio ? e0.inizio + (e0.durata || 30) * 60000 : 0;
+      if (e0.fase === 'f1') { testa.className = 'es-testa f1'; testa.appendChild(el('small', null, 'FASE 1 · CONQUISTA')); testa.appendChild(el('b', null, now < fine1 ? mmss(fine1 - now) : 'TEMPO!')); }
+      else if (e0.fase === 'f1fine') { testa.className = 'es-testa fine'; testa.appendChild(el('small', null, 'FASE 1 CONCLUSA')); testa.appendChild(el('b', null, e0.vincitore === 'pari' ? 'PAREGGIO' : 'VINCONO I ' + esNomeFaz(e0.vincitore))); }
+      else if (e0.fase === 'f2') { testa.className = 'es-testa f2'; testa.appendChild(el('small', null, 'FASE 2 · MORTAIO')); testa.appendChild(el('b', null, e0.vincitore ? 'Fase 1: ' + (e0.vincitore === 'pari' ? 'pareggio' : 'vincono i ' + esNomeFaz(e0.vincitore)) : 'in corso')); }
+      else if (e0.fase === 'fine') { testa.className = 'es-testa fine'; testa.appendChild(el('small', null, 'ESERCITAZIONE FINITA')); testa.appendChild(el('b', null, e0.vincitore ? (e0.vincitore === 'pari' ? 'Fase 1: pareggio' : 'Fase 1: vincono i ' + esNomeFaz(e0.vincitore)) : 'Grazie a tutti')); }
+      else { testa.className = 'es-testa'; testa.appendChild(el('small', null, 'IN PREPARAZIONE')); testa.appendChild(el('b', null, 'Si parte al via')); }
+      // chi sono
+      stato.innerHTML = '';
+      var t = mioTag();
+      if (!fz) {
+        stato.className = 'es-stato chi';
+        stato.appendChild(el('b', null, 'Di che fazione sei?'));
+        var r2 = el('div', 'riga2');
+        r2.appendChild(bottone('ROSSI · difesa', 'es-rossa big', function () { scrivi({ tipo: 'fazione', f: 'rossa' }); }));
+        r2.appendChild(bottone('BLU · attacco', 'es-blu big', function () { scrivi({ tipo: 'fazione', f: 'blu' }); }));
+        stato.appendChild(r2);
+      } else if (ioMorto && (e0.fase === 'f2')) {
+        stato.className = 'es-stato morto';
+        stato.appendChild(el('b', null, 'SEI COLPITO'));
+        stato.appendChild(el('span', null, 'Non conti più per le bandiere. Vai all\'HQ e scansiona il QR di rinascita.'));
+        stato.appendChild(bottone('📷 Scansiona il QR di rinascita', 'big', function () { apriScanner('QR di rinascita', function (txt) { if (!/#rinascita/.test(txt)) return { ok: false, titolo: 'Non è il QR di rinascita', testo: '' }; rinasci(); return { ok: true, titolo: 'Sei di nuovo in gioco' }; }); }));
+      } else {
+        stato.className = 'es-stato ' + fz;
+        stato.appendChild(el('b', null, 'Sei ' + (fz === 'blu' ? 'BLU · attacco' : 'ROSSO · difesa')));
+        stato.appendChild(el('span', null, t ? 'Il tuo tag: ' + (t.f === 'blu' ? 'B' : 'R') + t.n + ' · tienilo in alto, fuori dalla tasca' : 'Senza tag: per le bandiere non conti'));
+      }
+      // spiegazione: la fase 2 si vede solo a fase 1 finita
+      spieg.innerHTML = '';
+      var k1 = el('div', 'carta es-k'); k1.appendChild(el('h3', null, 'Fase 1 · Conquista delle bandiere'));
+      k1.appendChild(el('p', null, 'Due bandiere a circa 100 m l\'una dall\'altra. All\'inizio sono dei ROSSI, che le difendono. I BLU attaccano: per conquistarne una devono restarle vicini col tag, senza rossi intorno, finché la barra non si riempie (sul display della bandiera e qui sulla mappa). Se ci sono blu e rossi insieme è CONTESA: tutto fermo.'));
+      k1.appendChild(el('p', null, 'Allo scadere del tempo vince chi tiene TUTTE E DUE le bandiere; una a testa è pareggio. I blu vedono sulla mappa le loro due pattuglie.'));
+      if (e0.fase === 'f1fine' || e0.fase === 'f2' || e0.fase === 'fine') {
+        var k2 = el('div', 'carta es-k'); k2.appendChild(el('h3', null, 'Fase 2 · Mortaio sulle bandiere'));
+        k2.appendChild(el('p', null, 'All\'HQ, sul display, c\'è un QR: inquadralo col telefono e scegli il mortaio facile o difficile. Poi tira sulle bandiere (le coordinate le leggi sulla carta o te le passano via radio).'));
+        k2.appendChild(el('p', null, 'Chi è vicino a una bandiera dice via radio se il colpo l\'ha preso. Entro ' + ES_R.letale + ' m dall\'impatto sei COLPITO: il telefono suona, la bandiera lampeggia e fischia. Chi è colpito non conta più per nessuna bandiera finché non torna all\'HQ e scansiona il QR di rinascita.'));
+        spieg.appendChild(k2);
+      }
+      spieg.appendChild(k1);
+      // mortaio (fase 2)
+      if (e0.fase === 'f2') mortaio(); else { mortBox.innerHTML = ''; pan = null; }
+      if (org) disegnaRegia();
+    }
+    function mortaio() {
+      var modo = mioModo(), fz = miaFaz();
+      if (!fz) { mortBox.innerHTML = ''; pan = null; return; }
+      if (!modo) {
+        if (pan === 'scelta') return;
+        mortBox.innerHTML = ''; pan = null;
+        var k = el('div', 'carta es-mort');
+        if (azione === 'm') {
+          k.appendChild(el('h3', null, 'Mortaio: che versione?'));
+          var r = el('div', 'riga2');
+          r.appendChild(bottone('FACILE · distanza e direzione', 'accent big', function () { compra('semplice'); }));
+          r.appendChild(bottone('DIFFICILE · deriva, alzo, carica', 'big', function () { compra('realistico'); }));
+          k.appendChild(r); pan = 'scelta';
+        } else {
+          k.appendChild(el('b', null, '✹ Mortaio'));
+          k.appendChild(el('p', 'hint', 'Per usarlo vai all\'HQ e inquadra il QR sul display.'));
+          k.appendChild(bottone('📷 Scansiona il QR del mortaio', '', function () { apriScanner('QR del mortaio (display dell\'HQ)', function (txt) { if (!/#mortaio/.test(txt)) return { ok: false, titolo: 'Non è il QR del mortaio', testo: '' }; azione = 'm'; ultimoUI = ''; aggiorna(); return { ok: true, titolo: 'Mortaio' }; }); }));
+        }
+        mortBox.appendChild(k); return;
+      }
+      if (pan && pan !== 'scelta' && panModo === modo) return;
+      mortBox.innerHTML = ''; panModo = modo;
+      pan = pannelloMortaio(mortBox, {
+        prova: false, ovunque: true, modo: modo, sel: { scheda: 'tiro', deriva: 0, alzo: 1200, carica: 1, missione: null, coord: '', testo: '', mortaio: null }, campo: cm, punti: puntiM(), team: fz, uid: uid, ora: Date.now, zona: function () { return null; }, owner: function () { return {}; }, puoCostruire: true,
+        stato: statoM,
+        scrivi: function (e) { e.uid = uid; e.team = fz; e.t = Date.now(); return scrivi(e); },
+        scegli: function (cb) { scegliCb = cb; mapBox.classList.add('scegli'); mapBox.scrollIntoView({ behavior: 'smooth' }); toast('Tocca il bersaglio sulla mappa'); }
+      });
+      var cambia = el('div', 'riga2'); cambia.appendChild(bottone('Passa al mortaio ' + (modo === 'semplice' ? 'difficile' : 'facile'), 'link', function () { compra(modo === 'semplice' ? 'realistico' : 'semplice'); })); mortBox.appendChild(cambia);
+    }
+    function compra(modo) {
+      if (!live.hq || live.hq.lat == null) { toast('Posizione dell\'HQ non ancora nota: aspetta il GPS dell\'HQ'); }
+      var fz = miaFaz(); pan = null; scrivi({ tipo: 'mortaio', azione: 'costruisci', team: fz, pt: 'hq-' + fz, modo: modo }).then(function () { toast('Mortaio pronto all\'HQ'); });
+    }
+    function rinasci() {
+      if (!esMorti(eventi)[uid]) { toast('Non risulti colpito: sei già in gioco'); return; }
+      scrivi({ tipo: 'rinascita' }).then(function () { toast('Sei di nuovo in gioco'); suonoImpatto(false); });
+    }
+    if (azione === 'r') setTimeout(function () { var giaFatto = false; var w = setInterval(function () { if (giaFatto || !eventi) return; giaFatto = true; clearInterval(w); rinasci(); }, 1500); }, 0);
+    // impatti: il mio telefono controlla se mi hanno colpito (GPS)
+    function controllaColpi() {
+      var e0 = es(); if (e0.fase !== 'f2' || !v) return;
+      var sm = statoM(), now = Date.now(), mia = v.miaPos();
+      sm.colpi.forEach(function (cp) {
+        if (visti[cp.id] || cp.arrivo > now) return; visti[cp.id] = true;
+        if (cp.arrivo < aperto - 5000) return;
+        if (!mia || esMorti(eventi)[uid]) return;
+        var hq = puntiM()[0]; if (hq && window.AC_MORT.misura(hq, cp).dist <= 25) return;   // HQ protetto
+        var d = window.AC_MORT.misura(mia, cp).dist;
+        if (d <= ES_R.letale) { allarmeColpito(d, false); scrivi({ tipo: 'colpito', da: 'gps', colpo: cp.id, dist: Math.round(d) }); }
+        else if (d <= ES_R.vicino) { toast('Colpi di mortaio vicini (' + Math.round(d) + ' m): al riparo!'); suonoImpatto(false); try { if (navigator.vibrate) navigator.vibrate([200, 80, 200]); } catch (e) {} }
+      });
+    }
+    // --------------- REGIA (chi organizza): fasi, collegamento all'HQ, ponte HQ -> app, mortaio -> bandiere
+    var R = { durata: 30, tempo: 60, ultimoScritto: {}, pend: {}, vistiR: {}, inviati: '', ultimoMorti: 0, avviata: Date.now() };
+    try { var sv = JSON.parse(localStorage.getItem('es-regia') || '{}'); if (sv.durata) R.durata = sv.durata; if (sv.tempo) R.tempo = sv.tempo; } catch (e) {}
+    function salvaR() { try { localStorage.setItem('es-regia', JSON.stringify({ durata: R.durata, tempo: R.tempo })); } catch (e) {} }
+    function setFase(o) { var e0 = Object.assign({}, es(), o); return S.statoEsercizio(aid, e0); }
+    function aBand(lista) { lista.forEach(function (c, i) { setTimeout(function () { bancoInvia(c); }, i * 2500); }); }
+    function vincitoreOra() {
+      var ow = Object.keys(live.bandiere || {}).map(function (k) { return live.bandiere[k].owner || null; });
+      if (ow.length && ow.every(function (o) { return o === 'rossa'; })) return 'rossa';
+      if (ow.length && ow.every(function (o) { return o === 'blu'; })) return 'blu';
+      return 'pari';
+    }
+    var regDis = '';
+    function disegnaRegia() {
+      var b = BANCO, e0 = es(), bands = Object.keys(live.bandiere || {}).sort();
+      var firma = JSON.stringify([e0, b.via, b.hq && b.hq.lat, bands.map(function (k) { var x = live.bandiere[k]; return [k, x.owner, x.lat != null, Math.floor((Date.now() - x.t) / 30000)]; }), live.hq && live.hq.lat != null, Object.keys(live.pattuglie || {}).length, R.durata, R.tempo]);
+      if (firma === regDis) return; regDis = firma;
+      regia.innerHTML = '';
+      var k = el('div', 'carta'); regia.appendChild(k);
+      k.appendChild(el('h3', null, '⚙ Regia'));
+      var ok = !!b.via;
+      k.appendChild(el('div', 'banco-st ' + (ok ? 'on' : 'off'), ok ? 'HQ collegato via ' + b.via + (b.hq ? ' · ' + b.hq.hq : '') : 'HQ non collegato: tieni questo telefono collegato all\'HQ per tutta l\'esercitazione'));
+      var bt = el('div', 'riga2'); bt.appendChild(bottone('Bluetooth (HQ)', ok ? '' : 'accent', bancoBle)); bt.appendChild(bottone('USB', '', bancoUsb)); k.appendChild(bt);
+      var righe = [];
+      bands.forEach(function (id) { var x = live.bandiere[id]; righe.push('⚑ ' + (x.nome || id) + ' (' + id + '): ' + (x.lat != null ? 'GPS ok' : 'senza posizione') + ' · ' + (x.owner ? esNomeFaz(x.owner) : 'neutra') + ' · ' + Math.round((Date.now() - (x.t || 0)) / 1000) + ' s fa'); });
+      righe.push('HQ: ' + (live.hq && live.hq.lat != null ? 'posizione ok' : 'posizione sconosciuta'));
+      righe.push('Pattuglie: ' + (Object.keys(live.pattuglie || {}).map(function (p) { return live.pattuglie[p].nome; }).join(', ') || 'nessuna'));
+      if (bands.length >= 2) { var x1 = live.bandiere[bands[0]], x2 = live.bandiere[bands[1]]; if (x1.lat != null && x2.lat != null) { var d = Math.round(window.AC_MORT.misura(x1, x2).dist); righe.push('Distanza tra le bandiere: ' + d + ' m' + (d < 100 ? ' ⚠ troppo vicine' : '')); } }
+      k.appendChild(el('pre', 'es-righe', righe.join('\n')));
+      k.appendChild(bottone('📍 HQ qui (GPS di questo telefono)', 'mini', function () {
+        var p = v && v.miaPos(); if (!p) { toast('GPS del telefono non pronto'); return; }
+        S.aggiornaEsercizio(aid, { hq: { lat: p.lat, lon: p.lon, t: Date.now(), da: 'telefono' } }).then(function () { toast('HQ posizionato'); }, errore);
+      }));
+      if (e0.fase === 'prep' || !e0.fase || e0.fase === 'fine') {
+        var sd = select([['15', '15 min'], ['20', '20 min'], ['30', '30 min'], ['45', '45 min'], ['60', '60 min']], String(R.durata)); sd.onchange = function () { R.durata = +sd.value; salvaR(); };
+        var stp = select([['30', '30 s'], ['60', '60 s'], ['90', '90 s'], ['120', '2 min']], String(R.tempo)); stp.onchange = function () { R.tempo = +stp.value; salvaR(); };
+        var due = el('div', 'tre'); due.appendChild(campoForm('Durata fase 1', sd)); due.appendChild(campoForm('Tempo di conquista', stp)); k.appendChild(due);
+        k.appendChild(bottone('▶ AVVIA FASE 1', 'accent big', function () {
+          if (!confirm('Avviare la fase 1? Le bandiere passano ai ROSSI e parte il tempo per tutti.')) return;
+          setFase({ fase: 'f1', inizio: Date.now(), durata: R.durata, tempo: R.tempo, vincitore: null, f2inizio: null }).then(function () { toast('Fase 1 avviata'); }, errore);
+          if (BANCO.via) aBand(['qr -', 'cmd tutte posizione 0', 'cmd tutte tempo ' + R.tempo, 'cmd tutte morti -', 'cmd tutte ogni 10', 'cmd tutte fazione 2']);
+          else toast('HQ non collegato: i comandi alle bandiere non partono');
+        }));
+        k.appendChild(bottone('🖨 Stampa il QR di rinascita', '', stampaRinascita));
+      }
+      if (e0.fase === 'f1') k.appendChild(bottone('■ Termina la fase 1 adesso', 'pericolo', function () { if (confirm('Chiudere la fase 1 adesso?')) chiudiF1(); }));
+      if (e0.fase === 'f1fine') k.appendChild(bottone('▶ AVVIA FASE 2 · MORTAIO', 'accent big', function () {
+        setFase({ fase: 'f2', f2inizio: Date.now() }).then(function () { toast('Fase 2 avviata'); }, errore);
+        if (BANCO.via) aBand(['qr ' + ES_SITO + '#mortaio', 'cmd tutte morti -', 'cmd tutte ogni 10']); else toast('HQ non collegato: il QR non compare sul display');
+      }));
+      if (e0.fase === 'f2') {
+        k.appendChild(bottone('Fai rinascere tutti', '', function () { scrivi({ tipo: 'rinascitaTutti', uid: 'tutti' }); }));
+        k.appendChild(bottone('Rimetti il QR sul display dell\'HQ', 'mini', function () { bancoInvia('qr ' + ES_SITO + '#mortaio'); }));
+        k.appendChild(bottone('■ Termina l\'esercitazione', 'pericolo', function () { if (!confirm('Finire l\'esercitazione?')) return; setFase({ fase: 'fine' }); if (BANCO.via) aBand(['qr -', 'cmd tutte morti -', 'cmd tutte ogni 20']); }));
+      }
+      if (e0.fase && e0.fase !== 'prep') k.appendChild(bottone('Azzera (torna in preparazione)', 'link', function () { if (confirm('Azzerare l\'esercitazione? Le fasi ricominciano da capo.')) setFase({ fase: 'prep', inizio: null, vincitore: null, f2inizio: null }); }));
+    }
+    function chiudiF1() { return setFase({ fase: 'f1fine', vincitore: vincitoreOra(), chiusa: Date.now() }); }
+    function stampaRinascita() {
+      var m = window.QR.encode(ES_SITO + '#rinascita', 'M'), n = m.size, s = '';
+      for (var y = 0; y < n; y++) for (var x = 0; x < n; x++) if (m.get(x, y)) s += 'M' + x + ' ' + y + 'h1v1h-1z';
+      var w = window.open('', '_blank'); if (!w) { toast('Consenti le finestre per stampare'); return; }
+      w.document.write('<!doctype html><meta charset="utf-8"><title>QR rinascita</title><style>body{font-family:sans-serif;text-align:center;margin:30px}svg{width:12cm;height:12cm}h1{font-size:40px;margin:10px}p{font-size:20px}</style>' +
+        '<h1>RINASCITA</h1><p>Colpito dal mortaio? Inquadra questo QR col telefono e torni in gioco.</p><svg viewBox="-4 -4 ' + (n + 8) + ' ' + (n + 8) + '"><rect x="-4" y="-4" width="' + (n + 8) + '" height="' + (n + 8) + '" fill="#fff"/><path d="' + s + '" fill="#000"/></svg><p>Airsoft Conflict · ' + escB(a0.titolo || 'Allenamento') + '</p><script>setTimeout(function(){print()},400)<\/script>');
+      w.document.close();
+    }
+    // ponte: dati dall'HQ -> esercizi/{id} (solo chi organizza, solo col collegamento attivo)
+    function ponte() {
+      var b = BANCO, now = Date.now(), su = {};
+      if (!b.via) return;
+      var nomi = ['ALFA', 'BRAVO', 'CHARLIE', 'DELTA'];
+      Object.keys(b.band).sort().forEach(function (id, i) {
+        var j = b.band[id], vec = (live.bandiere || {})[id] || {}, u = R.ultimoScritto[id] || {};
+        var dentro = (j.tag || []).filter(function (t) { return t.rssi >= j.soglia; }).map(function (t) { return { f: t.f, n: t.n, m: t.m ? 1 : 0 }; });
+        var x = { owner: j.owner || null, conq: j.conq || null, pct: j.pct || 0, contesa: !!j.contesa, blu: j.blu || 0, rossi: j.rossi || 0, t: j._t, nome: vec.nome || nomi[i] || id, tag: dentro, batt: j.batt };
+        if (j.gpsFisso && j.lat) { x.lat = j.lat; x.lon = j.lon; } else if (vec.lat != null) { x.lat = vec.lat; x.lon = vec.lon; }
+        if (u.t === j._t && now - (u.w || 0) < 60000) return;
+        R.ultimoScritto[id] = { t: j._t, w: now }; su[id] = x;
+      });
+      var out = {};
+      if (Object.keys(su).length) out.bandiere = su;
+      if (b.hq && b.hq.lat && (!live.hq || live.hq.da !== 'telefono') && now - (R.hqW || 0) > 30000) { out.hq = { lat: b.hq.lat, lon: b.hq.lon, t: now }; R.hqW = now; }
+      var pt = {};
+      Object.keys(b.pat || {}).forEach(function (id, i) { var p = b.pat[id]; if (!p.fix || (R.ultimoScritto['p' + id] || 0) === p._t) return; R.ultimoScritto['p' + id] = p._t; pt[id] = { lat: p.lat, lon: p.lon, nome: 'P' + (i + 1), t: p._t }; });
+      if (Object.keys(pt).length) out.pattuglie = pt;
+      if (Object.keys(out).length) S.aggiornaEsercizio(aid, out).catch(function () {});
+    }
+    // mortaio -> bandiere: avvisa le bandiere vicine all'impatto; chi era dentro una bandiera colpita è colpito
+    function regiaMortaio() {
+      var e0 = es(); if (e0.fase !== 'f2' || !BANCO.via) return;
+      var sm = statoM(), now = Date.now();
+      sm.colpi.forEach(function (cp) {
+        if (R.vistiR[cp.id] || cp.arrivo > now) return; R.vistiR[cp.id] = true;
+        if (cp.arrivo < R.avviata - 5000) return;
+        Object.keys(live.bandiere || {}).forEach(function (id) {
+          var x = live.bandiere[id]; if (x.lat == null) return;
+          var d = Math.round(window.AC_MORT.misura(x, cp).dist); if (d > ES_R.vicino) return;
+          bancoInvia('cmd ' + id + ' colpo ' + d + ' ' + ES_R.letale + ' ' + ES_R.vicino);
+          if (d <= ES_R.letale) R.pend[id] = { t: now, colpo: cp.id };
+        });
+      });
+      // colpita: chi risulta dentro nel primo stato dopo il colpo (la bandiera lo manda subito) o, dopo 12 s, nell'ultimo
+      Object.keys(R.pend).forEach(function (id) {
+        var p = R.pend[id], j = BANCO.band[id]; if (!j) { delete R.pend[id]; return; }
+        if (!(j._t > p.t + 300 || now - p.t > 12000)) return;
+        delete R.pend[id];
+        (j.tag || []).filter(function (t) { return t.rssi >= j.soglia && !t.m; }).forEach(function (t) {
+          var r = reg.filter(function (q) { return q.f === t.f && +q.n === +t.n; })[0];
+          scrivi({ tipo: 'colpito', uid: r && r.uid ? r.uid : 'tag:' + t.f + t.n, da: 'bandiera', band: id, colpo: p.colpo, f: t.f, n: t.n });
+        });
+      });
+      // lista dei colpiti alle bandiere (completa: chi rinasce sparisce dalla lista)
+      var m = esMorti(eventi), tags = [];
+      Object.keys(m).forEach(function (u) {
+        if (u.indexOf('tag:') === 0) { var q = /^tag:(blu|rossa)(\d+)$/.exec(u); if (q) tags.push((q[1] === 'blu' ? 'b' : 'r') + q[2]); return; }
+        reg.filter(function (r) { return r.uid === u; }).forEach(function (r) { tags.push((r.f === 'blu' ? 'b' : 'r') + r.n); });
+      });
+      var lista = tags.sort().join(',') || '-';
+      if (lista !== R.inviati || (lista !== '-' && now - R.ultimoMorti > 45000)) { R.inviati = lista; R.ultimoMorti = now; bancoInvia('cmd tutte morti ' + lista); }
+    }
+    giro = setInterval(function () {
+      aggiorna(); controllaColpi();
+      if (v) v.ridisegna();
+      if (org) {
+        ponte(); regiaMortaio();
+        var e0 = es(); if (e0.fase === 'f1' && e0.inizio && Date.now() > e0.inizio + (e0.durata || 30) * 60000 && !R.chiudendo) { R.chiudendo = true; chiudiF1().then(function () { R.chiudendo = false; }, function () { R.chiudendo = false; }); }
+      }
+    }, 1000);
+    aggiorna();
+    var prima = chiusura; chiusura = function () { clearInterval(giro); if (stopL) stopL(); if (stopE) stopE(); if (stopR) stopR(); if (v) v.chiudi(); if (prima) prima(); };
+  }
+
   // ================= POST DELLA BACHECA (organizzatore)
   function editorPost(c, p) {
     p = p || { tipo: 'storia', titolo: '', testo: '', img: '', pubblica: null };
@@ -2779,6 +3100,8 @@
     hero.appendChild(lg);
     if (faseAll(a) === 'finito') hero.appendChild(el('div', 'conf-fine', 'ALLENAMENTO CONCLUSO'));
     app.appendChild(hero);
+    if (esAttivo(a)) app.appendChild(bottone('⚑ ESERCITAZIONE IN CORSO · apri', 'accent big es-home', function () { vai('esercizio', a.id); }));
+    else if (P('allenamenti') && a.campo) app.appendChild(bottone('⚑ Esercitazione bandiere (regia)', '', function () { vai('esercizio', a.id); }));
     if (S.stato().me.team && (a.team || []).indexOf(S.stato().me.team) >= 0 && faseAll(a) !== 'finito') {
       var mia = miaAdesione('a:' + a.id);
       if (!mia || mia.dopo) { var rk = el('div', 'carta'); rk.appendChild(el('b', null, 'Ci sarai?')); rk.appendChild(treRisposte(a.id, 'allenamenti', function () { mostra(); })); app.appendChild(rk); }

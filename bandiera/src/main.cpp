@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.1.0"
+#define VERSIONE "1.2.0"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -139,6 +139,27 @@ bool leggiUuid(const char *s, uint8_t *out) {
     k++;
   }
   return k == 32;
+}
+
+// ---------------------------------------------------------------- coordinate UTM (WGS84), come sul Garmin e sulla carta
+struct Utm { int zona; char banda; double E, N; };
+Utm aUtm(double lat, double lon) {
+  Utm u; u.zona = (int)((lon + 180) / 6) + 1;
+  const char *bande = "CDEFGHJKLMNPQRSTUVWX"; u.banda = bande[constrain((int)((lat + 80) / 8), 0, 19)];
+  const double a = 6378137.0, f = 1 / 298.257223563, k0 = 0.9996, e2 = f * (2 - f), ep2 = e2 / (1 - e2);
+  double phi = lat * DEG_TO_RAD, lam = lon * DEG_TO_RAD, lam0 = ((u.zona - 1) * 6 - 180 + 3) * DEG_TO_RAD;
+  double sp = sin(phi), cp = cos(phi), tp = tan(phi);
+  double Nn = a / sqrt(1 - e2 * sp * sp), T = tp * tp, C = ep2 * cp * cp, A = cp * (lam - lam0);
+  double M = a * ((1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * e2 * e2 * e2 / 256) * phi - (3 * e2 / 8 + 3 * e2 * e2 / 32 + 45 * e2 * e2 * e2 / 1024) * sin(2 * phi)
+                  + (15 * e2 * e2 / 256 + 45 * e2 * e2 * e2 / 1024) * sin(4 * phi) - (35 * e2 * e2 * e2 / 3072) * sin(6 * phi));
+  u.E = k0 * Nn * (A + (1 - T + C) * A * A * A / 6 + (5 - 18 * T + T * T + 72 * C - 58 * ep2) * pow(A, 5) / 120) + 500000;
+  u.N = k0 * (M + Nn * tp * (A * A / 2 + (5 - T + 9 * C + 4 * C * C) * pow(A, 4) / 24 + (61 - 58 * T + T * T + 600 * C - 330 * ep2) * pow(A, 6) / 720));
+  if (lat < 0) u.N += 10000000;
+  return u;
+}
+double distanzaM(double la1, double lo1, double la2, double lo2) {
+  double r = DEG_TO_RAD, x = (lo2 - lo1) * r * cos((la1 + la2) / 2 * r), y = (la2 - la1) * r;
+  return sqrt(x * x + y * y) * 6371000.0;
 }
 
 // ---------------------------------------------------------------- LoRa (bandiera e HQ)
@@ -278,6 +299,27 @@ bool urgente = false;          // qualcosa è cambiato (conquista, contesa, pers
 uint8_t colpoTipo = 0; int colpoDist = 0; uint32_t colpoDa = 0;
 #define COLPITA_MS 12000
 #define VICINO_MS  5000
+// schermata POSIZIONE (per confrontare il GPS della bandiera con un Garmin): all'accensione per 20 minuti,
+// col pulsante per 1 minuto; il comando "posizione 0" (inizio partita) la spegne
+uint32_t posFino = 20UL * 60000UL;
+// le altre bandiere, sentite via radio: servono per avvisare se sono troppo vicine
+#define DIST_MIN 100
+struct Altra { uint16_t id; double lat, lon; uint32_t t; };
+Altra altre[6]; int nAltre = 0;
+// giocatori colpiti dal mortaio (lista mandata dall'app): i loro tag non contano finché non rinascono
+struct Morto { uint8_t f; uint16_t n; };
+Morto morti[40]; int nMorti = 0;
+bool morto(uint8_t f, uint16_t n) { for (int i = 0; i < nMorti; i++) if (morti[i].f == f && morti[i].n == n) return true; return false; }
+// l'altra bandiera più vicina (distanza in metri, -1 = nessuna con posizione)
+int piuVicina(uint16_t &chi) {
+  int best = -1; if (nPos < 10) return -1;
+  for (int i = 0; i < nAltre; i++) {
+    if (millis() - altre[i].t > 120000UL) continue;
+    int d = (int)distanzaM(mLat, mLon, altre[i].lat, altre[i].lon);
+    if (best < 0 || d < best) { best = d; chi = altre[i].id; }
+  }
+  return best;
+}
 bool allarmeMortaio() { return colpoDa && ((colpoTipo == 1 && millis() - colpoDa < COLPITA_MS) || (colpoTipo == 2 && millis() - colpoDa < VICINO_MS)); }
 
 // impostazioni (salvate sulla scheda)
@@ -332,7 +374,7 @@ void conta() {
   for (int i = 0; i < nTag; i++) {
     Tag &t = tags[i];
     if (ora - t.visto > 5 * validoMs) { tags[i] = tags[nTag - 1]; nTag--; i--; continue; }
-    if (ora - t.visto < validoMs && t.rssi >= soglia) { if (t.major == 1) b++; else r++; }
+    if (ora - t.visto < validoMs && t.rssi >= soglia && !morto(t.major, t.minor)) { if (t.major == 1) b++; else r++; }
   }
   portEXIT_CRITICAL(&muxTag);
   blu = b; rossi = r;
@@ -425,7 +467,7 @@ String jsonStato() {
   portENTER_CRITICAL(&muxTag);
   for (int i = 0; i < nTag; i++) {
     if (ora - tags[i].visto >= validoMs) continue;
-    char b[64]; snprintf(b, sizeof(b), "%s{\"n\":%u,\"f\":\"%s\",\"rssi\":%d}", primo ? "" : ",", tags[i].minor, nomeFaz(tags[i].major), (int)tags[i].rssi);
+    char b[72]; snprintf(b, sizeof(b), "%s{\"n\":%u,\"f\":\"%s\",\"rssi\":%d%s}", primo ? "" : ",", tags[i].minor, nomeFaz(tags[i].major), (int)tags[i].rssi, morto(tags[i].major, tags[i].minor) ? ",\"m\":1" : "");
     s += b; primo = false;
   }
   portEXIT_CRITICAL(&muxTag);
@@ -442,7 +484,7 @@ void invia() {
     // nel messaggio vanno anche i tag sentiti ma sotto soglia: servono per tarare la soglia dall'HQ
     if (ora - t.visto >= validoMs) continue;
     uint8_t *q = p + TESTA + 4 * n;
-    q[0] = t.minor >> 8; q[1] = t.minor & 0xFF; q[2] = t.major; q[3] = (uint8_t)(int8_t)constrain((int)t.rssi, -127, 0);
+    q[0] = t.minor >> 8; q[1] = t.minor & 0xFF; q[2] = t.major | (morto(t.major, t.minor) ? 0x80 : 0); q[3] = (uint8_t)(int8_t)constrain((int)t.rssi, -127, 0);
     n++;
   }
   portEXIT_CRITICAL(&muxTag);
@@ -479,6 +521,22 @@ void aggiornaDisplay() {
     oled.display(); return;
   }
   oled.setTextColor(SSD1306_WHITE);
+  uint16_t chiV = 0; int dV = piuVicina(chiV); bool vicina = dV >= 0 && dV < DIST_MIN;
+  if (ora < posFino && !blu && !rossi && !progF && !contesa) {
+    // POSIZIONE: UTM grande (come la legge il Garmin), sotto i gradi o l'avviso di distanza
+    bool fis = posFissa(), ok = fis || gps.location.isValid();
+    double la = fis ? mLat : gps.location.lat(), lo = fis ? mLon : gps.location.lng();
+    oled.setTextSize(1); oled.setCursor(0, 0);
+    oled.print("POSIZIONE " + idTesto(mioId) + " s" + String(gps.satellites.value()));
+    if (!ok) { centrato("NO GPS", 20, 2); centrato("cielo aperto, attendi", 44, 1); centrato("pulsante: invio stato", 56, 1); oled.display(); return; }
+    Utm u = aUtm(la, lo); char e[12], n[12]; snprintf(e, sizeof(e), "E%07ld", (long)lround(u.E)); snprintf(n, sizeof(n), "N%07ld", (long)lround(u.N));
+    oled.setCursor(0, 10); oled.print("UTM " + String(u.zona) + String(u.banda) + (fis ? "  media ok" : "  media " + String(nPos) + "/10"));
+    oled.setTextSize(2); oled.setCursor(0, 20); oled.print(e); oled.setCursor(0, 37); oled.print(n);
+    oled.setTextSize(1); oled.setCursor(0, 56);
+    if (dV >= 0 && (ora / 2500) % 2) oled.print(vicina ? "TROPPO VICINA " + String(dV) + "m!" : "Altra band. " + String(dV) + " m ok");
+    else oled.print(String(la, 5) + " " + String(lo, 5));
+    oled.display(); return;
+  }
   // persone dentro
   oled.setTextSize(2); oled.setCursor(0, 0); oled.print("B" + String(blu));
   String r = "R" + String(rossi); oled.setCursor(128 - r.length() * 12, 0); oled.print(r);
@@ -500,6 +558,12 @@ void aggiornaDisplay() {
   else if (progF && prog > 0) n1 = String(progF == 1 ? "Conquistano i BLU" : "Conquistano i ROSSI");
   else if (owner) n1 = String("Tenuta dai ") + (owner == 1 ? "BLU" : "ROSSI");
   else n1 = (blu || rossi) ? String("...") : String("Nessuno nell'area");
+  // colpiti dal mortaio che sono qui: non contano
+  String mq; portENTER_CRITICAL(&muxTag);
+  for (int i = 0; i < nTag; i++) if (ora - tags[i].visto < validoMs && tags[i].rssi >= soglia && morto(tags[i].major, tags[i].minor)) mq += String(tags[i].major == 1 ? " B" : " R") + String(tags[i].minor);
+  portEXIT_CRITICAL(&muxTag);
+  if (mq.length() && (ora / 3000) % 2) n1 = "Colpiti:" + mq;
+  if (vicina && (ora / 2000) % 2) n1 = "TROPPO VICINA " + String(dV) + "m!";
   oled.setCursor(0, 48); oled.print(n1);
   oled.setCursor(0, 57); oled.print(statoLoRa ? diagnosi : gpsTesto() + " " + loraTesto() + " " + battTesto(batteria()) + (muto ? " MUTO" : ""));
   oled.display();
@@ -521,6 +585,18 @@ String comando(String c) {
   if (k == "test") { testFino = millis() + 4000; return "prova luce e cicalino per 4 s"; }
   if (k == "invia") { ultimoInvio = 0; return "invio subito"; }
   if (k == "ogni" && v.length()) { invioMs = constrain(v.toInt(), 3, 120) * 1000UL; ultimoInvio = 0; return "stato ogni " + String(invioMs / 1000) + " s (fino al riavvio)"; }
+  if (k == "posizione") { posFino = v.length() && v.toInt() == 0 ? 0 : millis() + (v.length() ? v.toInt() : 60) * 1000UL; return posFino ? "schermata posizione" : "schermata di gioco"; }
+  if (k == "morti") {
+    // morti b3,r12 (lista completa, sostituisce la precedente) · morti - (nessuno)
+    nMorti = 0; String l = v + ",";
+    int da = 0, ix;
+    while ((ix = l.indexOf(',', da)) >= 0 && nMorti < 40) {
+      String t = l.substring(da, ix); t.trim(); da = ix + 1;
+      if (t.length() >= 2 && (t[0] == 'b' || t[0] == 'r')) { morti[nMorti].f = t[0] == 'b' ? 1 : 2; morti[nMorti].n = t.substring(1).toInt(); nMorti++; }
+    }
+    urgente = true;
+    return "colpiti fuori gioco: " + String(nMorti);
+  }
   if (k == "colpo" || k == "mortaio") {
     // colpo <metri dall'impatto> [raggio colpita] [raggio vicino]: senza numeri = colpo in pieno
     int a = v.indexOf(' '), b2 = a < 0 ? -1 : v.indexOf(' ', a + 1);
@@ -532,7 +608,7 @@ String comando(String c) {
   if (k == "info") return "bandiera " + idTesto(mioId) + " v" + VERSIONE + " soglia " + String(soglia) + " tempo " + String(tempoConq) + " luce " + String(luce) +
                           (muto ? " muto" : "") + (buzBasso ? " buzzer-basso" : "") + " area " + nomeFaz(owner) + " tag " + String(nTag);
   if (k == "riavvia") { delay(200); ESP.restart(); }
-  return "comandi: info, soglia -75, tempo 60, luce 120, muto, buzzer, reset, fazione 1|2|0, test, invia, ogni 5, colpo 10, riavvia";
+  return "comandi: info, soglia -75, tempo 60, luce 120, muto, buzzer, reset, fazione 1|2|0, test, invia, ogni 5, colpo 10, posizione 0|60, morti b3,r1|-, riavvia";
 }
 
 void ascoltaRadio() {
@@ -541,6 +617,15 @@ void ascoltaRadio() {
   uint8_t p[120]; size_t len = radio.getPacketLength();
   int st = radio.readData(p, min(len, sizeof(p) - 1));
   radio.startReceive();
+  if (st == RADIOLIB_ERR_NONE && len >= TESTA && p[0] == 'A' && p[1] == 'C' && p[2] == T_STATO) {
+    // stato di un'altra bandiera: ci interessa solo la sua posizione
+    uint16_t o = (p[3] << 8) | p[4]; int32_t la, lo; memcpy(&la, p + 10, 4); memcpy(&lo, p + 14, 4);
+    if (o == mioId || (!la && !lo)) return;
+    int i = 0; for (; i < nAltre; i++) if (altre[i].id == o) break;
+    if (i == nAltre) { if (nAltre < 6) nAltre++; else i = 0; }
+    altre[i] = { o, la / 1e6, lo / 1e6, millis() };
+    return;
+  }
   if (st != RADIOLIB_ERR_NONE || len < 6 || p[0] != 'A' || p[1] != 'C' || p[2] != T_CMD) return;
   uint16_t a = (p[3] << 8) | p[4];
   if (a != 0xFFFF && a != mioId) return;
@@ -587,7 +672,7 @@ void loop() {
   String riga; if (leggiRiga(riga)) Serial.println("> " + comando(riga));
   ascoltaRadio();
   int b = pulsante();
-  if (b == 1) ultimoInvio = 0;
+  if (b == 1) { ultimoInvio = 0; posFino = millis() + 60000UL; aggiornaDisplay(); }
   if (b == 2) Serial.println("> " + comando("reset"));
   static uint32_t ultimoPasso = millis(), ultimoDisp = 0;
   // conteggio ogni secondo (prima solo a ogni invio, ogni 20 s: per questo l'uscita dall'area era lenta)
@@ -612,6 +697,9 @@ void loop() {
 
 #ifdef RUOLO_HQ
 // ================================================================ HQ
+#include "qrgen.h"
+TinyGPSPlus gps;
+String qrTesto = "";   // se c'è, il display mostra il QR (es. per il mortaio); comando "qr <testo>" / "qr -" 
 // Bluetooth: servizio "UART" Nordic (lo stesso di tante app): l'app riceve righe JSON, manda comandi di testo.
 #define NUS_SERV "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 #define NUS_RX   "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
@@ -652,6 +740,22 @@ void registro(const String &s) { String e = s; e.replace("\\", "/"); e.replace("
 void mostra() {
   if (!haOled) return;
   oled.clearDisplay(); oled.setTextColor(SSD1306_WHITE); oled.setTextSize(1);
+  if (qrTesto.length()) {
+    // QR a sinistra (fondo chiaro, quadretti scuri, 2 pixel per quadretto), testo a destra
+    static QRCode q; static uint8_t buf[300]; static String fatto;
+    static int8_t ok = -1; if (fatto != qrTesto) { ok = -1; for (uint8_t v = 3; v <= 4 && ok != 0; v++) ok = qrcode_initText(&q, buf, v, ECC_LOW, qrTesto.c_str()); fatto = qrTesto; }
+    if (ok == 0) {
+      int sc = q.size * 2 <= 60 ? 2 : 1, w = q.size * sc, o = (64 - w) / 2;
+      oled.fillRect(0, 0, 64, 64, SSD1306_WHITE);
+      for (uint8_t y = 0; y < q.size; y++) for (uint8_t x = 0; x < q.size; x++) if (qrcode_getModule(&q, x, y)) oled.fillRect(o + x * sc, o + y * sc, sc, sc, SSD1306_BLACK);
+    }
+    oled.setCursor(68, 2); oled.print("MORTAIO");
+    oled.setCursor(68, 14); oled.print("Inquadra");
+    oled.setCursor(68, 24); oled.print("il QR col");
+    oled.setCursor(68, 34); oled.print("telefono");
+    oled.setCursor(68, 52); oled.printf("%s %d", bleConnesso ? "BT" : "--", nBand);
+    oled.display(); return;
+  }
   oled.setCursor(0, 0); oled.printf("HQ %s %s pk%d P%d%s", bleConnesso ? "BT" : "--", idTesto(mioId).c_str(), nPacchetti, nPat, statoLoRa ? " LORA!" : "");
   if (statoLoRa) { oled.setCursor(0, 44); oled.printf("LoRa ERR %d %s", statoLoRa, pmuNome); oled.setCursor(0, 54); oled.print(diagnosi); }
   for (int i = 0; i < nBand && i < 5; i++) {
@@ -683,8 +787,9 @@ void comando(String c) {
     for (int i = 0; i < nBand; i++) registro(" " + idTesto(band[i].id) + " B" + String(band[i].blu) + " R" + String(band[i].rossi) + " " + String((millis() - band[i].visto) / 1000) + " s fa, " + String((int)band[i].rssi) + " dBm");
     return;
   }
+  if (low.startsWith("qr")) { String t = c.substring(2); t.trim(); qrTesto = (t == "-" ? "" : t); registro(qrTesto.length() ? "QR sul display: " + qrTesto : "QR tolto"); mostra(); return; }
   if (low == "riavvia") { delay(200); ESP.restart(); }
-  registro("comandi: info · cmd <id|tutte> <comando> (es. cmd tutte soglia -75, cmd A1B2 test) · riavvia");
+  registro("comandi: info · qr <testo>|- · cmd <id|tutte> <comando> (es. cmd tutte soglia -75, cmd A1B2 test) · riavvia");
 }
 
 void setup() {
@@ -700,6 +805,7 @@ void setup() {
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
   adv->addServiceUUID(NUS_SERV); adv->setScanResponse(true);
   adv->start();
+  Serial1.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
   if (!accendiLoRa()) { scrivi("HQ", "ERRORE", "LoRa non partita"); return; }
   radio.startReceive();
   scrivi("AIRSOFT CONFLICT", "HQ", "In ascolto", String(LORA_FREQ, 3) + " MHz", "BT: AC-HQ-" + idTesto(mioId));
@@ -709,6 +815,7 @@ void setup() {
 void loop() {
   static uint32_t ultimoDisplay = 0;
   if (millis() - ultimoDisplay > 1000) { ultimoDisplay = millis(); mostra(); }
+  while (Serial1.available()) gps.encode(Serial1.read());
   String riga; if (leggiRiga(riga)) comando(riga);
   String bl; portENTER_CRITICAL(&muxBle); bl = daBle; daBle = ""; portEXIT_CRITICAL(&muxBle);
   static String bufBle; bufBle += bl;
@@ -716,7 +823,8 @@ void loop() {
   if (bufBle.length() && bl.length() == 0) { comando(bufBle); bufBle = ""; }   // comando senza "a capo"
   // battito ogni 10 s: l'app capisce che l'HQ è vivo anche senza bandiere
   static uint32_t battito = 0;
-  if (millis() - battito > 10000) { battito = millis(); esci("{\"hq\":\"" + idTesto(mioId) + "\",\"pacchetti\":" + String(nPacchetti) + ",\"scartati\":" + String(nScartati) + ",\"irq\":" + String(nIrq) + ",\"lora\":" + String(statoLoRa) + ",\"pmu\":\"" + pmuNome + "\",\"radio\":\"" + chipRadio + "\",\"diag\":\"" + diagnosi + "\",\"batt\":" + String(batteria()) + "}"); }
+  if (millis() - battito > 10000) { battito = millis(); esci("{\"hq\":\"" + idTesto(mioId) + "\",\"pacchetti\":" + String(nPacchetti) + ",\"scartati\":" + String(nScartati) + ",\"irq\":" + String(nIrq) + ",\"lora\":" + String(statoLoRa) + ",\"pmu\":\"" + pmuNome + "\",\"radio\":\"" + chipRadio + "\",\"diag\":\"" + diagnosi + "\",\"batt\":" + String(batteria()) +
+                     (gps.location.isValid() && gps.location.age() < 10000 && gps.hdop.hdop() < 3 ? ",\"lat\":" + String(gps.location.lat(), 6) + ",\"lon\":" + String(gps.location.lng(), 6) : String("")) + ",\"sat\":" + String(gps.satellites.value()) + "}"); }
   if (!arrivato) { delay(5); return; }
   arrivato = false;
   uint8_t p[TESTA + 4 * MAX_TAG_PACCHETTO + 8];
@@ -755,7 +863,7 @@ void loop() {
   int n = min((int)p[9], (int)((len - TESTA) / 4));
   for (int k = 0; k < n; k++) {
     uint8_t *q = p + TESTA + 4 * k; char t[60];
-    snprintf(t, sizeof(t), "%s{\"n\":%u,\"f\":\"%s\",\"rssi\":%d}", k ? "," : "", (q[0] << 8) | q[1], q[2] == 1 ? "blu" : "rossa", (int8_t)q[3]);
+    snprintf(t, sizeof(t), "%s{\"n\":%u,\"f\":\"%s\",\"rssi\":%d%s}", k ? "," : "", (q[0] << 8) | q[1], (q[2] & 0x7F) == 1 ? "blu" : "rossa", (int8_t)q[3], (q[2] & 0x80) ? ",\"m\":1" : "");
     out += t;
   }
   esci(out + "]}");
