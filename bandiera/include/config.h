@@ -29,5 +29,10 @@
 #define PIN_LED        13        // dati della striscetta WS2812B
 #define NUM_LED        8
 #define LUCE           120       // luminosità 0-255 (comando: luce 200)
-#define PIN_BUZZER     14        // segnale del cicalino attivo
+#define PIN_BUZZER     14        // segnale del cicalino attivo (tramite transistor NPN)
+#define PIN_LED_ROSSO  25        // LED semplice rosso (resistenza 150 ohm verso il LED, catodo a GND)
+#define PIN_LED_BLU    4         // LED semplice blu o verde = fazione blu (resistenza 68-100 ohm)
+
+// ---- Pattuglia (T-Beam del caposquadra): ogni quanto manda la posizione via LoRa
+#define PATTUGLIA_MS   15000
 #define BUZZER_BASSO   0         // 1 se il modulo cicalino suona col segnale basso (comando: buzzer inverti)

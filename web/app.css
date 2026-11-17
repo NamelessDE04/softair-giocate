@@ -867,3 +867,5 @@ main > .btn.big { margin-bottom: 6px; }
 .bp-grezzo { grid-column: 1 / -1; font-size: 11px; color: var(--muto); word-break: break-all; }
 
 .copia-da { margin-bottom: 12px; } .copia-da .hint { display: block; margin-top: 4px; }
+
+.banco-patr { display: grid; grid-template-columns: auto 1fr 70px; gap: 6px; align-items: center; margin: 6px 0; } .banco-patr small { grid-column: 1 / -1; }

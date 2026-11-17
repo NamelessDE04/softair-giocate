@@ -6,6 +6,7 @@
 //           Dall'app o da USB si mandano comandi alle bandiere (es. "cmd tutte soglia -75").
 // TAG:      fa finta di essere il tag di un giocatore (per provare senza tag veri). Pulsante: corto = cambia fazione,
 //           lungo = numero successivo.
+// PATTUGLIA: T-Beam del caposquadra: manda la sua posizione GPS via LoRa ogni 15 s; l'HQ la passa all'app (pallino sulla mappa).
 // INIETTORE: programma i tag veri DX-SMART (UUID, fazione, numero) via Bluetooth, senza l'app del produttore.
 //
 // Scheda: LILYGO T-Beam v1.1/v1.2 (ESP32, SX1278 433 MHz, GPS, display OLED facoltativo).
@@ -26,11 +27,11 @@
 #include <Adafruit_NeoPixel.h>
 #endif
 
-#if !defined(RUOLO_BANDIERA) && !defined(RUOLO_HQ) && !defined(RUOLO_TAG) && !defined(RUOLO_INIETTORE)
-#error "Scegli l'ambiente bandiera, hq, tag o iniettore in PlatformIO"
+#if !defined(RUOLO_BANDIERA) && !defined(RUOLO_HQ) && !defined(RUOLO_TAG) && !defined(RUOLO_INIETTORE) && !defined(RUOLO_PATTUGLIA)
+#error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "0.9.9"
+#define VERSIONE "1.0.0"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -141,7 +142,7 @@ bool leggiUuid(const char *s, uint8_t *out) {
 }
 
 // ---------------------------------------------------------------- LoRa (bandiera e HQ)
-#if defined(RUOLO_BANDIERA) || defined(RUOLO_HQ)
+#if defined(RUOLO_BANDIERA) || defined(RUOLO_HQ) || defined(RUOLO_PATTUGLIA)
 // Il T-Beam a 433 MHz può avere due chip radio: SX1278 (il più comune) o SX1268 (alcune V1.2). Si prova il primo, poi il secondo.
 SX1278 r78 = new Module(LORA_CS, LORA_DIO0, LORA_RST, LORA_DIO1, SPI);
 SX1262 r62 = new Module(LORA_CS, LORA_DIO1, LORA_RST, 32, SPI);   // 32 = BUSY
@@ -228,9 +229,11 @@ int trasmetti(const uint8_t *p, size_t n) {
 //   10-13 lat ×1e6 · 14-17 lon ×1e6 · 18 fazione che tiene l'area (0/1/2) · 19 fazione che sta conquistando
 //   20 conquista % · 21 bit0 contesa · 22 soglia (dBm, con segno) · 23-24 secondi per conquistare
 //   poi 4 byte per tag: minor (2), major (1), rssi (1)
+//  tipo 3 = posizione di una pattuglia (vedi T_PAT)
 //  tipo 0x10 = comando dall'HQ: 3-4 id bandiera (FFFF = tutte) · poi il testo del comando
 //  tipo 0x11 = risposta di una bandiera a un comando: 3-4 id · poi il testo
 #define T_STATO 2
+#define T_PAT 3     // posizione di una pattuglia: 3-4 id · 5 progressivo · 6 batteria · 7-10 lat · 11-14 lon · 15 satelliti · 16 hdop×10 · 17 bit0 posizione valida
 #define T_CMD 0x10
 #define T_RISP 0x11
 #define TESTA 25
@@ -367,6 +370,17 @@ void disegnaLuce() {
     for (int i = 0; i < NUM_LED; i++) led.setPixelColor(i, coloreDi(owner, 255));
   }
   led.show();
+  // LED semplici (rosso = fazione rossa, blu/verde = fazione blu)
+  bool lr = false, lb = false;
+  if (ora < testFino) { bool a = (ora / 250) % 2; lr = a; lb = !a; }
+  else if (contesa) { bool a = (ora / 400) % 2; lr = a; lb = !a; }
+  else if (progF && prog > 0) {
+    uint32_t per = 1000 - (uint32_t)(700 * min(1.0f, prog / tempoConq));   // lampeggia sempre più veloce
+    bool on = (ora % per) < per / 2;
+    if (progF == 1) lb = on; else lr = on;
+  } else if (owner) { lb = owner == 1; lr = owner == 2; }
+  else { bool lampo = (ora % 3000) < 60; lr = lb = lampo; }   // neutra: un lampo ogni 3 s, per dire che è accesa
+  digitalWrite(PIN_LED_ROSSO, lr); digitalWrite(PIN_LED_BLU, lb);
 }
 // cicalino: in conquista bip sempre più fitti, contesa bip veloci, conquistata un bip lungo
 void suona() {
@@ -481,6 +495,7 @@ void setup() {
   muto = pref.getBool("muto", false); buzBasso = pref.getBool("buzBasso", BUZZER_BASSO);
   pinMode(PIN_BUZZER, OUTPUT); digitalWrite(PIN_BUZZER, buzBasso ? HIGH : LOW);
   led.begin(); led.clear(); led.show();
+  pinMode(PIN_LED_ROSSO, OUTPUT); pinMode(PIN_LED_BLU, OUTPUT);
   testFino = millis() + 1500;   // all'accensione: giro di colori e due bip, per vedere che luce e cicalino vanno
   if (!leggiUuid(TAG_UUID, uuid)) Serial.println("TAG_UUID scritto male in config.h");
   Serial1.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
@@ -534,7 +549,7 @@ void loop() {
 struct Band { uint16_t id; uint8_t blu, rossi, owner, batt; float rssi; uint32_t visto; };
 #define MAX_BAND 8
 Band band[MAX_BAND];
-int nBand = 0, nPacchetti = 0, nScartati = 0;
+int nBand = 0, nPacchetti = 0, nScartati = 0, nPat = 0;
 NimBLECharacteristic *bleTx = nullptr;
 volatile bool bleConnesso = false;
 String daBle = "";
@@ -567,7 +582,7 @@ void registro(const String &s) { String e = s; e.replace("\\", "/"); e.replace("
 void mostra() {
   if (!haOled) return;
   oled.clearDisplay(); oled.setTextColor(SSD1306_WHITE); oled.setTextSize(1);
-  oled.setCursor(0, 0); oled.printf("HQ %s %s pk%d%s", bleConnesso ? "BT" : "--", idTesto(mioId).c_str(), nPacchetti, statoLoRa ? " LORA!" : "");
+  oled.setCursor(0, 0); oled.printf("HQ %s %s pk%d P%d%s", bleConnesso ? "BT" : "--", idTesto(mioId).c_str(), nPacchetti, nPat, statoLoRa ? " LORA!" : "");
   if (statoLoRa) { oled.setCursor(0, 44); oled.printf("LoRa ERR %d %s", statoLoRa, pmuNome); oled.setCursor(0, 54); oled.print(diagnosi); }
   for (int i = 0; i < nBand && i < 5; i++) {
     Band &b = band[i];
@@ -648,6 +663,14 @@ void loop() {
     esci("{\"risposta\":\"" + idTesto(id) + "\",\"testo\":\"" + t + "\",\"rssiLora\":" + String((int)rs) + "}");
     return;
   }
+  if (p[2] == T_PAT && len >= 18) {
+    int32_t la, lo; memcpy(&la, p + 7, 4); memcpy(&lo, p + 11, 4);
+    char h[260];
+    snprintf(h, sizeof(h), "{\"pattuglia\":\"%s\",\"seq\":%u,\"batt\":%u,\"fix\":%s,\"lat\":%.6f,\"lon\":%.6f,\"sat\":%u,\"hdop\":%.1f,\"rssiLora\":%.0f,\"snr\":%.1f}",
+             idTesto(id).c_str(), p[5], p[6], (p[17] & 1) ? "true" : "false", la / 1e6, lo / 1e6, p[15], p[16] / 10.0, rs, sn);
+    nPat++; esci(h);
+    return;
+  }
   if (p[2] != T_STATO || len < TESTA) { nScartati++; registro("pacchetto di tipo sconosciuto " + String(p[2])); return; }
   int i = 0; for (; i < nBand; i++) if (band[i].id == id) break;
   if (i == nBand) { if (nBand >= MAX_BAND) i = 0; else nBand++; }
@@ -666,6 +689,55 @@ void loop() {
     out += t;
   }
   esci(out + "]}");
+}
+#endif
+
+#ifdef RUOLO_PATTUGLIA
+// ================================================================ PATTUGLIA
+TinyGPSPlus gps;
+uint8_t seq = 0;
+uint32_t ultimo = 0, inviatoFino = 0;
+int ultimoEsito = 1;
+void inviaPos() {
+  bool ok = gps.location.isValid() && gps.location.age() < 10000;
+  int32_t la = ok ? (int32_t)(gps.location.lat() * 1e6) : 0, lo = ok ? (int32_t)(gps.location.lng() * 1e6) : 0;
+  uint8_t p[18]; seq++;
+  p[0] = 'A'; p[1] = 'C'; p[2] = T_PAT; p[3] = mioId >> 8; p[4] = mioId & 0xFF; p[5] = seq; p[6] = batteria();
+  memcpy(p + 7, &la, 4); memcpy(p + 11, &lo, 4);
+  p[15] = (uint8_t)min((uint32_t)255, gps.satellites.value());
+  p[16] = (uint8_t)min(255.0, gps.hdop.isValid() ? gps.hdop.hdop() * 10 : 255.0);
+  p[17] = ok ? 1 : 0;
+  ultimoEsito = trasmetti(p, sizeof(p));
+  inviatoFino = millis() + 1200;
+  Serial.printf("[%s] posizione #%u %s -> %s\n", idTesto(mioId).c_str(), seq, ok ? (String(la / 1e6, 6) + "," + String(lo / 1e6, 6)).c_str() : "senza GPS", ultimoEsito == RADIOLIB_ERR_NONE ? "inviata" : "ERRORE LoRa");
+}
+void setup() {
+  avvioComune("PATTUGLIA");
+  Serial1.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
+  if (!accendiLoRa()) { scrivi("PATTUGLIA", "ERRORE", "LoRa non partita"); return; }
+  radio.startReceive();
+  Serial.println("Pattuglia " + idTesto(mioId) + ": manda la posizione ogni " + String(PATTUGLIA_MS / 1000) + " s. Pulsante = manda subito.");
+  ultimo = millis() - PATTUGLIA_MS + 3000;
+}
+void loop() {
+  while (Serial1.available()) gps.encode(Serial1.read());
+  bool ok = gps.location.isValid() && gps.location.age() < 10000;
+  // con il GPS ogni 15 s (+ un po' a caso, per non trasmettere sempre insieme a qualcun altro); senza, ogni 60 s solo per dire "ci sono"
+  static uint32_t attesa = PATTUGLIA_MS;
+  if (millis() - ultimo >= (ok ? attesa : 60000UL)) { ultimo = millis(); attesa = PATTUGLIA_MS + random(0, 3000); inviaPos(); }
+  if (pulsante() == 1) { ultimo = millis(); inviaPos(); }
+  static uint32_t disp = 0;
+  if (millis() - disp >= 500) {
+    disp = millis();
+    uint32_t prossimo = (ok ? attesa : 60000UL) - min(millis() - ultimo, ok ? attesa : 60000UL);
+    scrivi("PATTUGLIA " + idTesto(mioId) + " " + battTesto(batteria()),
+           millis() < inviatoFino ? String(ultimoEsito == RADIOLIB_ERR_NONE ? "INVIATA" : "ERR LoRa") : ok ? "GPS OK" : "NO GPS",
+           ok ? String(gps.location.lat(), 5) + " " + String(gps.location.lng(), 5) : String("cerco i satelliti... cielo aperto"),
+           "Satelliti " + String(gps.satellites.value()) + (gps.hdop.isValid() ? "  HDOP " + String(gps.hdop.hdop(), 1) : ""),
+           "#" + String(seq) + " " + loraTesto() + " prossima " + String(prossimo / 1000) + "s");
+  }
+  String r; if (leggiRiga(r)) { if (r == "invia") { ultimo = millis(); inviaPos(); } else if (r == "riavvia") ESP.restart(); else Serial.println("comandi: invia, riavvia"); }
+  delay(10);
 }
 #endif
 

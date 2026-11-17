@@ -29,7 +29,7 @@ jobs:
           OUT=../web/firmware/bin; mkdir -p $OUT
           VER=$(grep -o 'define VERSIONE "[^"]*"' src/main.cpp | cut -d'"' -f2)
           PK=~/.platformio/packages
-          for e in bandiera hq tag iniettore; do
+          for e in bandiera hq tag pattuglia iniettore; do
             pio run -e $e
             B=.pio/build/$e
             python $PK/tool-esptoolpy/esptool.py --chip esp32 merge_bin -o $OUT/$e.bin --flash_mode dio --flash_freq 40m --flash_size 4MB \

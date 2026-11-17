@@ -19,12 +19,14 @@ esp-web-install-button button{font-size:15px;padding:8px 14px;cursor:pointer}
 <a href="https://www.wch-ic.com/downloads/CH343SER_EXE.html">CH9102</a> o <a href="https://www.silabs.com/developers/usb-to-uart-bridge-vcp-drivers">CP210x</a>.
 Dopo il caricamento, nella stessa finestra c'è "Logs &amp; Console" per vedere cosa scrive la scheda e mandare comandi.</p>
 
-<div class="r"><b>Bandiera</b> — conta i tag, fa la conquista (luce sul pin 13, cicalino sul pin 14), manda tutto via LoRa all'HQ.<br>
+<div class="r"><b>Bandiera</b> — conta i tag, fa la conquista e manda tutto via LoRa all'HQ. Luci: striscia WS2812B sul pin 13 oppure due LED semplici (rosso sul pin 25, blu/verde sul pin 4); cicalino sul pin 14.<br>
 <esp-web-install-button manifest="bin/bandiera.json"></esp-web-install-button></div>
 <div class="r"><b>HQ</b> — riceve le bandiere via LoRa; l'app si collega all'HQ via Bluetooth (Android) o USB (computer) dalla pagina <i>Iniettore</i>.<br>
 <esp-web-install-button manifest="bin/hq.json"></esp-web-install-button></div>
 <div class="r"><b>Tag finto</b> — un T-Beam che fa finta di essere il tag di un giocatore. Pulsante centrale: corto = cambia fazione (blu/rossa), lungo = numero +1.<br>
 <esp-web-install-button manifest="bin/tag.json"></esp-web-install-button></div>
+<div class="r"><b>Pattuglia</b> — T-Beam del caposquadra: manda la sua posizione GPS via LoRa all'HQ ogni 15 s (pulsante centrale = manda subito). Nell'app diventa un pallino sulla mappa, visibile solo alla sua fazione.<br>
+<esp-web-install-button manifest="bin/pattuglia.json"></esp-web-install-button></div>
 <div class="r"><b>Iniettore</b> — programma i tag veri DX-SMART (UUID, fazione, numero) senza l'app del produttore. Si usa dalla pagina <i>Iniettore</i> dell'app (computer, cavo USB): avvicini un tag alla volta e lui lo configura.<br>
 <esp-web-install-button manifest="bin/iniettore.json"></esp-web-install-button></div>
 <p class="k">Se il tasto non compare: questo browser non può scrivere sulla porta USB (serve Chrome/Edge su computer, non telefono, non Safari/Firefox).</p>

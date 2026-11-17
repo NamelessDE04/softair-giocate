@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.65';
+  var VERSIONE = '0.66';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -682,10 +682,11 @@
     function pallini() {
       var ult = {};
       ultimi.forEach(function (e) { if (e.tipo === 'zona' && e.sim && (!ult[e.uid] || ult[e.uid].t <= e.t)) ult[e.uid] = e; });
-      return Object.keys(ult).map(function (k) { return ult[k]; }).filter(function (e) { return !e.via; })
+      return Object.keys(ult).map(function (k) { return ult[k]; }).filter(function (e) { return !e.via && (!e.pat || P('conflitti') || e.team === f); })
         .map(function (e) { return { id: e.uid, team: e.team, x: e.x, y: e.y, nome: e.nome, pt: e.pt }; });
     }
     function muoviPallino(id, x, y, pt) {
+      if (String(id).indexOf('sim-pat-') === 0) { mostra(); return; }   // le pattuglie le muove il GPS
       var b = pallini().filter(function (q) { return q.id === id; })[0]; if (!b) return;
       S.scriviEvento(c.id, { tipo: 'zona', uid: id, team: b.team, pt: pt || null, x: x, y: y, sim: true, nome: b.nome, t: Date.now() });
     }
@@ -1107,7 +1108,8 @@
   var NUS = { s: '6e400001-b5a3-f393-e0a9-e50e24dcca9e', rx: '6e400002-b5a3-f393-e0a9-e50e24dcca9e', tx: '6e400003-b5a3-f393-e0a9-e50e24dcca9e' };
   var BANCO = { via: null, porta: null, lettore: null, scrittore: null, dev: null, rx: null, righe: [], band: {}, hq: null, tag: null, cb: null,
     cid: null, cm: null, mappa: {}, attivo: false, ultimoPt: {}, scritti: 0, storia: [], visto: {}, avvio: null,
-    inj: { fatti: [], auto: null, vicini: null, info: null } };
+    inj: { fatti: [], auto: null, vicini: null, info: null }, pat: {}, patCfg: {} };
+  try { BANCO.patCfg = JSON.parse(localStorage.getItem('ac-pattuglie') || '{}') || {}; } catch (e) {}
   function bancoRiga(s, da) {
     s = String(s).replace(/\s+$/, ''); if (!s) return;
     var t = new Date(), hh = ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2) + ':' + ('0' + t.getSeconds()).slice(-2);
@@ -1124,6 +1126,7 @@
         else if (j.vicino) { BANCO.avvio = 'INIETTORE'; BANCO.inj.vicino = j.vicino; BANCO.inj.seqV = (BANCO.inj.seqV || 0) + 1; }
         else if (j.vicini) { BANCO.avvio = 'INIETTORE'; BANCO.inj.vicini = j.vicini; BANCO.inj.viciniT = Date.now(); }
         else if (j.auto != null) { BANCO.avvio = 'INIETTORE'; BANCO.inj.auto = j.auto ? j : null; }
+        else if (j.pattuglia) { BANCO.pat[j.pattuglia] = j; bancoPattuglia(j); }
         else if (j.risposta) { BANCO.visto.risposta = 1; BANCO.storia.push({ t: Date.now(), testo: 'Risposta via radio da ' + j.risposta + ': ' + j.testo }); }
         else if (j.hq) { BANCO.hq = j; BANCO.avvio = 'HQ'; }
         else if (j.tag != null) { if (!BANCO.avvio) BANCO.avvio = 'TAG'; BANCO.tag = j; }
@@ -1208,6 +1211,13 @@
       S.scriviEvento(b.cid, { tipo: 'zona', uid: uid, team: f, pt: null, sim: true, via: true, t: Date.now() }).catch(function () {});
     });
   }
+  // pattuglie (T-Beam dei caposquadra): la posizione GPS diventa un pallino sulla mappa del conflict di prova (pt nullo: non conta per le aree)
+  function bancoPattuglia(j) {
+    var b = BANCO, cfg = b.patCfg[j.pattuglia]; if (!b.attivo || !b.cid || !b.cm || !b.cm.geo || !j.fix || !cfg || !cfg.f) return;
+    var g0 = b.cm.geo, x = g0.cx[0] * j.lon + g0.cx[1] * j.lat + g0.cx[2], y = g0.cy[0] * j.lon + g0.cy[1] * j.lat + g0.cy[2];
+    b.scritti++;
+    S.scriviEvento(b.cid, { tipo: 'zona', uid: 'sim-pat-' + j.pattuglia, team: cfg.f, pt: null, x: x, y: y, sim: true, pat: true, nome: cfg.nome || 'P', lat: j.lat, lon: j.lon, t: Date.now() });
+  }
   function bancoSvuota() {
     var b = BANCO; if (!b.cid) return;
     Object.keys(b.ultimoPt).forEach(function (uid) { S.scriviEvento(b.cid, { tipo: 'zona', uid: uid, team: uid.split('-')[2], pt: null, sim: true, via: true, t: Date.now() }).catch(function () {}); });
@@ -1280,6 +1290,23 @@
     var selC = select([['', '— nessuno —']].concat(prove.map(function (c) { return [c.id, c.nome || c.titolo || c.id]; })), b.cid || '');
     inol.appendChild(campoForm('Conflict', selC));
     var mapBox = el('div'); inol.appendChild(mapBox);
+    var patBox = el('div', 'banco-pat'); inol.appendChild(patBox);
+    function disegnaPat() {
+      patBox.innerHTML = '';
+      var ids = Object.keys(b.pat); if (!ids.length) { patBox.appendChild(el('p', 'hint', 'Pattuglie: quando l\'HQ sente un T-Beam «Pattuglia», qui scegli fazione e nome.')); return; }
+      ids.forEach(function (id, i) {
+        var j = b.pat[id], cfg = b.patCfg[id] || (b.patCfg[id] = { f: '', nome: 'P' + (i + 1) });
+        var r = el('div', 'banco-patr');
+        r.appendChild(el('b', null, '🛰 ' + id));
+        var sf = select([['', 'fazione?'], ['blu', 'Blu'], ['rossa', 'Rossa']], cfg.f || ''), nm = el('input'); nm.value = cfg.nome || ''; nm.maxLength = 4; nm.placeholder = 'nome';
+        function salvaCfg() { cfg.f = sf.value; cfg.nome = nm.value.trim().toUpperCase().slice(0, 4); try { localStorage.setItem('ac-pattuglie', JSON.stringify(b.patCfg)); } catch (e) {} }
+        sf.onchange = salvaCfg; nm.onchange = salvaCfg;
+        r.appendChild(sf); r.appendChild(nm);
+        r.appendChild(el('small', 'hint', (j.fix ? 'GPS ok · ' + j.sat + ' sat' : 'senza GPS') + ' · ' + Math.round((Date.now() - j._t) / 1000) + ' s fa · ' + j.rssiLora + ' dBm' + (j.batt <= 100 ? ' · batt ' + j.batt + '%' : '')));
+        patBox.appendChild(r);
+      });
+    }
+    disegnaPat();
     var att = el('label', 'banco-chk'), chk = el('input'); chk.type = 'checkbox'; chk.checked = b.attivo; att.appendChild(chk); att.appendChild(document.createTextNode(' manda le presenze')); inol.appendChild(att);
     chk.onchange = function () { b.attivo = chk.checked; if (!b.attivo) bancoSvuota(); };
     inol.appendChild(bottone('Togli i pallini dei tag', 'mini', bancoSvuota));
@@ -1351,6 +1378,8 @@
         h += '</table>';
       }
       tab.innerHTML = h;
+      // pattuglie: si ridisegnano solo se non si sta scrivendo un nome
+      if (!patBox.contains(document.activeElement)) disegnaPat();
       disegnaInj();
       if (b.cm && String(mapBox.dataset.n) !== String(ids.length)) disegnaMappa();
       else if (b.cm) aggiornaGps();
