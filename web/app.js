@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.68';
+  var VERSIONE = '0.69';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -2076,7 +2076,7 @@
         var b = live.bandiere[k]; if (b.lat == null) return;
         var vecchia = now - (b.t || 0) > 90000;
         out.push({ tipo: 'area', lat: b.lat, lon: b.lon, r: 15, colore: b.owner ? COLORI[b.owner] : '#9a9a8a', pct: b.conq && b.pct ? b.pct : 0, colConq: COLORI[b.conq] || '#fff', contesa: !!b.contesa,
-          sim: '⚑', nome: b.nome || k, sotto: vecchia ? 'nessun segnale' : (b.blu || b.rossi ? 'B' + (b.blu || 0) + ' · R' + (b.rossi || 0) : '') });
+          sim: '⚑', nome: b.nome || k, sotto: vecchia ? 'nessun segnale' : (org && (b.blu || b.rossi) ? 'B' + (b.blu || 0) + ' · R' + (b.rossi || 0) : '') });   // quanti ce ne sono: solo a chi organizza (niente informazioni gratis al nemico)
       });
       if (live.hq && live.hq.lat != null) out.push({ tipo: 'area', lat: live.hq.lat, lon: live.hq.lon, r: 12, colore: '#c9a227', sim: 'HQ', nome: 'HQ' });
       // pattuglie: solo ai blu (e a chi organizza)
@@ -2094,7 +2094,7 @@
       var fine1 = e0.inizio ? e0.inizio + (e0.durata || 30) * 60000 : 0;
       if (e0.fase === 'f1') { testa.className = 'es-testa f1'; testa.appendChild(el('small', null, 'FASE 1 · CONQUISTA')); testa.appendChild(el('b', null, now < fine1 ? mmss(fine1 - now) : 'TEMPO!')); }
       else if (e0.fase === 'f1fine') { testa.className = 'es-testa fine'; testa.appendChild(el('small', null, 'FASE 1 CONCLUSA')); testa.appendChild(el('b', null, e0.vincitore === 'pari' ? 'PAREGGIO' : 'VINCONO I ' + esNomeFaz(e0.vincitore))); }
-      else if (e0.fase === 'f2') { testa.className = 'es-testa f2'; testa.appendChild(el('small', null, 'FASE 2 · MORTAIO')); testa.appendChild(el('b', null, e0.vincitore ? 'Fase 1: ' + (e0.vincitore === 'pari' ? 'pareggio' : 'vincono i ' + esNomeFaz(e0.vincitore)) : 'in corso')); }
+      else if (e0.fase === 'f2') { testa.className = 'es-testa f2'; testa.appendChild(el('small', null, 'FASE 2')); testa.appendChild(el('b', null, 'MORTAIO')); if (e0.vincitore) testa.appendChild(el('small', null, 'Fase 1: ' + (e0.vincitore === 'pari' ? 'pareggio' : 'vincono i ' + esNomeFaz(e0.vincitore)))); }
       else if (e0.fase === 'fine') { testa.className = 'es-testa fine'; testa.appendChild(el('small', null, 'ESERCITAZIONE FINITA')); testa.appendChild(el('b', null, e0.vincitore ? (e0.vincitore === 'pari' ? 'Fase 1: pareggio' : 'Fase 1: vincono i ' + esNomeFaz(e0.vincitore)) : 'Grazie a tutti')); }
       else { testa.className = 'es-testa'; testa.appendChild(el('small', null, 'IN PREPARAZIONE')); testa.appendChild(el('b', null, 'Si parte al via')); }
       // chi sono
