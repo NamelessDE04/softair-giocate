@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.0.0"
+#define VERSIONE "1.1.0"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -271,6 +271,14 @@ portMUX_TYPE muxTag = portMUX_INITIALIZER_UNLOCKED;
 uint8_t uuid[16];
 uint8_t seq = 0;
 uint32_t ultimoInvio = 0;
+uint32_t invioMs = INVIO_MS;   // ogni quanto manda lo stato (comando "ogni 5" per le prove in casa; si riazzera spegnendo)
+bool urgente = false;          // qualcosa è cambiato (conquista, contesa, persone): manda appena possibile (minimo ogni 5 s)
+
+// mortaio: l'app (tramite l'HQ) avvisa la bandiera quando un colpo cade vicino. 1 = colpita (letale), 2 = colpi vicini, 3 = lontano
+uint8_t colpoTipo = 0; int colpoDist = 0; uint32_t colpoDa = 0;
+#define COLPITA_MS 12000
+#define VICINO_MS  5000
+bool allarmeMortaio() { return colpoDa && ((colpoTipo == 1 && millis() - colpoDa < COLPITA_MS) || (colpoTipo == 2 && millis() - colpoDa < VICINO_MS)); }
 
 // impostazioni (salvate sulla scheda)
 int soglia = SOGLIA_RSSI, tempoConq = CONQUISTA_S, luce = LUCE;
@@ -332,18 +340,20 @@ void conta() {
 
 // conquista, un passo al secondo (stesse regole di base dell'app: conteso = tutto fermo; più giocatori = più veloce, max ×2)
 void passoConquista(float dt) {
+  uint8_t b0 = blu, r0 = rossi; bool c0 = contesa;
   conta();
   contesa = blu && rossi;
+  if (b0 != blu || r0 != rossi || c0 != contesa) urgente = true;
   if (contesa) return;
   uint8_t X = blu ? 1 : rossi ? 2 : 0, n = blu ? blu : rossi;
   if (!X) { if (prog > 0) { prog -= dt / 2; if (prog <= 0) { prog = 0; progF = 0; } } return; }
   if (X == owner) { if (prog > 0) { prog -= dt; if (prog <= 0) { prog = 0; progF = 0; } } return; }
-  if (progF != X) { progF = X; prog = 0; Serial.printf("Conquista iniziata: %s\n", nomeFaz(X)); }
+  if (progF != X) { progF = X; prog = 0; urgente = true; Serial.printf("Conquista iniziata: %s\n", nomeFaz(X)); }
   prog += min(2.0f, 1.0f + 0.5f * (n - 1)) * dt;
   if (prog >= tempoConq) {
     owner = X; prog = 0; progF = 0; bipLungoFino = millis() + 1500;
     Serial.printf("CONQUISTATA dai %s\n", nomeFaz(X));
-    ultimoInvio = 0;   // la notizia parte subito
+    urgente = true;   // la notizia parte subito
   }
 }
 
@@ -357,6 +367,15 @@ uint32_t coloreDi(uint8_t f, int lum) {
 void disegnaLuce() {
   uint32_t ora = millis();
   led.setBrightness(constrain(luce, 5, 255));
+  if (allarmeMortaio()) {
+    // colpita: lampi bianco/arancio velocissimi; colpi vicini: arancio a scatti
+    bool on = colpoTipo == 1 ? (ora / 90) % 2 : (ora / 250) % 2;
+    uint32_t c = colpoTipo == 1 ? ((ora / 180) % 2 ? led.Color(255, 255, 255) : led.Color(255, 90, 0)) : led.Color(255, 90, 0);
+    for (int i = 0; i < NUM_LED; i++) led.setPixelColor(i, on ? c : 0);
+    led.show();
+    digitalWrite(PIN_LED_ROSSO, on); digitalWrite(PIN_LED_BLU, on);
+    return;
+  }
   if (ora < testFino) {
     uint32_t c[] = { led.Color(0, 64, 255), led.Color(255, 0, 0), led.Color(0, 255, 0), led.Color(255, 255, 255) };
     for (int i = 0; i < NUM_LED; i++) led.setPixelColor(i, c[(ora / 500) % 4]);
@@ -385,7 +404,12 @@ void disegnaLuce() {
 // cicalino: in conquista bip sempre più fitti, contesa bip veloci, conquistata un bip lungo
 void suona() {
   uint32_t ora = millis(); bool on = false;
-  if (ora < bipLungoFino || ora < testFino) on = (ora < bipLungoFino) || ((ora / 250) % 2);
+  if (allarmeMortaio()) {
+    uint32_t d = ora - colpoDa;
+    if (colpoTipo == 1) on = d < 1500 || (ora % 400) < 250;              // fischio lungo, poi sirena a colpi
+    else on = (d % 1000) < 450 && ((d % 1000) / 150) % 2 == 0;           // tre bip al secondo
+  }
+  else if (ora < bipLungoFino || ora < testFino) on = (ora < bipLungoFino) || ((ora / 250) % 2);
   else if (contesa) on = (ora % 300) < 80;
   else if (progF && prog > 0) { uint32_t per = 1000 - (uint32_t)(600 * min(1.0f, prog / tempoConq)); on = (ora % per) < 80; }
   if (muto && ora >= testFino) on = false;
@@ -438,12 +462,47 @@ void invia() {
   Serial.println(jsonStato());
 }
 
+// display: in alto grandi quanti blu e quanti rossi ci sono, sotto di chi è la bandiera, la barra della conquista e due righe di note
+void centrato(const String &t, int y, int dim) { int w = t.length() * 6 * dim; oled.setTextSize(dim); oled.setCursor(max(0, (128 - w) / 2), y); oled.print(t); }
+String fa(uint32_t da) { uint32_t s = (millis() - da) / 1000; return s < 60 ? String(s) + "s fa" : String(s / 60) + "min fa"; }
 void aggiornaDisplay() {
-  String riga = contesa ? "CONTESA" : (progF && prog > 0) ? String(progF == 1 ? "BLU " : "ROSSI ") + String((int)(100 * prog / tempoConq)) + "%" : String("Area: ") + nomeFaz(owner);
-  scrivi("BAND " + idTesto(mioId) + " #" + String(seq) + " " + battTesto(batteria()),
-         "B" + String(blu) + "  R" + String(rossi),
-         riga, statoLoRa ? diagnosi : "Tag sentiti: " + String(nTag) + " soglia " + String(soglia),
-         gpsTesto() + " " + loraTesto() + (muto ? " MUTO" : ""));
+  if (!haOled) return;
+  uint32_t ora = millis();
+  oled.clearDisplay(); oled.setTextWrap(false);
+  if (allarmeMortaio()) {
+    bool inv = colpoTipo == 1 && (ora / 300) % 2;   // colpita: schermo che lampeggia
+    if (inv) oled.fillRect(0, 0, 128, 64, SSD1306_WHITE);
+    oled.setTextColor(inv ? SSD1306_BLACK : SSD1306_WHITE);
+    centrato("MORTAIO!", 2, 2);
+    if (colpoTipo == 1) { centrato("COLPITA", 22, 2); centrato("Chi e' qui: colpito,", 44, 1); centrato("torna al rientro", 54, 1); }
+    else { centrato("COLPI VICINI", 24, 1); centrato(String(colpoDist) + " m", 34, 2); centrato("al riparo!", 54, 1); }
+    oled.display(); return;
+  }
+  oled.setTextColor(SSD1306_WHITE);
+  // persone dentro
+  oled.setTextSize(2); oled.setCursor(0, 0); oled.print("B" + String(blu));
+  String r = "R" + String(rossi); oled.setCursor(128 - r.length() * 12, 0); oled.print(r);
+  oled.setTextSize(1); centrato(String(seq), 4, 1);
+  // di chi è
+  if (owner) { oled.fillRect(0, 17, 128, 17, SSD1306_WHITE); oled.setTextColor(SSD1306_BLACK); centrato(owner == 1 ? "BLU" : "ROSSA", 18, 2); oled.setTextColor(SSD1306_WHITE); }
+  else { oled.drawRect(0, 17, 128, 17, SSD1306_WHITE); centrato("NEUTRA", 18, 2); }
+  // barra della conquista
+  int pct = (int)(100 * prog / tempoConq);
+  oled.setTextSize(1); oled.setCursor(0, 37); oled.print(contesa ? "!" : progF == 1 ? "B" : progF == 2 ? "R" : "-");
+  oled.drawRect(9, 36, 92, 10, SSD1306_WHITE);
+  if (contesa) { if ((ora / 500) % 2) { oled.fillRect(11, 38, 88, 6, SSD1306_WHITE); } }
+  else if (progF && pct > 0) oled.fillRect(11, 38, constrain(88 * pct / 100, 1, 88), 6, SSD1306_WHITE);
+  oled.setCursor(104, 37); oled.print(contesa ? "STOP" : String(progF ? pct : 0) + "%");
+  // note: prima il mortaio (per 3 minuti), poi cosa sta succedendo
+  String n1;
+  if (colpoDa && ora - colpoDa < 180000UL) n1 = colpoTipo == 1 ? "MORTAIO: colpita " + fa(colpoDa) : colpoTipo == 2 ? "Mortaio: " + String(colpoDist) + "m " + fa(colpoDa) : "Mortaio lontano " + String(colpoDist) + "m";
+  else if (contesa) n1 = "CONTESA: tutto fermo";
+  else if (progF && prog > 0) n1 = String(progF == 1 ? "Conquistano i BLU" : "Conquistano i ROSSI");
+  else if (owner) n1 = String("Tenuta dai ") + (owner == 1 ? "BLU" : "ROSSI");
+  else n1 = (blu || rossi) ? String("...") : String("Nessuno nell'area");
+  oled.setCursor(0, 48); oled.print(n1);
+  oled.setCursor(0, 57); oled.print(statoLoRa ? diagnosi : gpsTesto() + " " + loraTesto() + " " + battTesto(batteria()) + (muto ? " MUTO" : ""));
+  oled.display();
 }
 
 // comandi (da USB o via radio dall'HQ). Risponde con una riga di testo.
@@ -461,10 +520,19 @@ String comando(String c) {
   if (k == "fazione") { owner = constrain(v.toInt(), 0, 2); prog = 0; progF = 0; ultimoInvio = 0; return String("area ai ") + nomeFaz(owner); }
   if (k == "test") { testFino = millis() + 4000; return "prova luce e cicalino per 4 s"; }
   if (k == "invia") { ultimoInvio = 0; return "invio subito"; }
+  if (k == "ogni" && v.length()) { invioMs = constrain(v.toInt(), 3, 120) * 1000UL; ultimoInvio = 0; return "stato ogni " + String(invioMs / 1000) + " s (fino al riavvio)"; }
+  if (k == "colpo" || k == "mortaio") {
+    // colpo <metri dall'impatto> [raggio colpita] [raggio vicino]: senza numeri = colpo in pieno
+    int a = v.indexOf(' '), b2 = a < 0 ? -1 : v.indexOf(' ', a + 1);
+    int d = v.length() ? v.toInt() : 0, let = a > 0 ? v.substring(a + 1).toInt() : 15, vic = b2 > 0 ? v.substring(b2 + 1).toInt() : 40;
+    if (let <= 0) let = 15; if (vic < let) vic = 40;
+    colpoDist = max(0, d); colpoTipo = d <= let ? 1 : d <= vic ? 2 : 3; colpoDa = millis(); urgente = true;
+    return colpoTipo == 1 ? "MORTAIO: bandiera COLPITA (" + String(colpoDist) + " m)" : colpoTipo == 2 ? "mortaio: colpi vicini a " + String(colpoDist) + " m" : "mortaio: colpo lontano (" + String(colpoDist) + " m), nessun effetto";
+  }
   if (k == "info") return "bandiera " + idTesto(mioId) + " v" + VERSIONE + " soglia " + String(soglia) + " tempo " + String(tempoConq) + " luce " + String(luce) +
                           (muto ? " muto" : "") + (buzBasso ? " buzzer-basso" : "") + " area " + nomeFaz(owner) + " tag " + String(nTag);
   if (k == "riavvia") { delay(200); ESP.restart(); }
-  return "comandi: info, soglia -75, tempo 60, luce 120, muto, buzzer, reset, fazione 1|2|0, test, invia, riavvia";
+  return "comandi: info, soglia -75, tempo 60, luce 120, muto, buzzer, reset, fazione 1|2|0, test, invia, ogni 5, colpo 10, riavvia";
 }
 
 void ascoltaRadio() {
@@ -484,7 +552,7 @@ void ascoltaRadio() {
   uint8_t q[110]; q[0] = 'A'; q[1] = 'C'; q[2] = T_RISP; q[3] = mioId >> 8; q[4] = mioId & 0xFF;
   int n = min((int)r.length(), 100); memcpy(q + 5, r.c_str(), n);
   trasmetti(q, 5 + n);
-  ultimoInvio = millis() - INVIO_MS + 1500;   // e poi lo stato aggiornato
+  ultimoInvio = millis() - invioMs + 1500;   // e poi lo stato aggiornato
 }
 
 void setup() {
@@ -510,7 +578,7 @@ void setup() {
   sc->start(0, nullptr, false);                             // ascolto continuo
   Serial.println(comando("info"));
   Serial.println("Scrivi 'aiuto' per i comandi. Pulsante: corto = invio subito, lungo = area neutra.");
-  ultimoInvio = millis() - INVIO_MS + 5000;
+  ultimoInvio = millis() - invioMs + 5000;
 }
 
 void loop() {
@@ -527,8 +595,10 @@ void loop() {
   if (millis() - ultimoDisp >= 1000) { ultimoDisp = millis(); aggiornaDisplay(); }
   // un po' di casualità sul ritmo, così due bandiere non trasmettono sempre insieme
   static uint32_t attesa = INVIO_MS;
-  if (millis() - ultimoInvio >= attesa) { conta(); ultimoInvio = millis(); attesa = INVIO_MS + random(0, 3000); invia(); }
+  if (millis() - ultimoInvio >= attesa || (urgente && millis() - ultimoInvio >= 5000)) { conta(); ultimoInvio = millis(); attesa = invioMs + random(0, invioMs >= 10000 ? 3000 : 500); urgente = false; invia(); }
   disegnaLuce(); suona();
+  static uint32_t ultimoAll = 0;   // durante l'allarme del mortaio il display va aggiornato più spesso (lampeggia)
+  if (allarmeMortaio() && millis() - ultimoAll >= 150) { ultimoAll = millis(); aggiornaDisplay(); }
   // La radio Bluetooth scarta i pacchetti identici gia' sentiti: l'iBeacon di un tag (sempre uguale) passerebbe
   // una volta sola. Ripartire con l'ascolto ogni secondo azzera quella memoria, cosi' ogni tag viene risentito.
   // (Spegnere il filtro invece intasa la scheda con tutti i pacchetti dei telefoni intorno.)

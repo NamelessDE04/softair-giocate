@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.66';
+  var VERSIONE = '0.67';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -157,6 +157,7 @@
     voci.push(['profilo', 'Profilo', function () { vai('profilo'); }]);
     if (organizza()) voci.push(['organizza', 'Organizza', function () { vai('organizza'); }]);
     if (st.dev || P('conflitti')) voci.push(['beacon', 'Beacon prog', function () { vai('beaconProg'); }]);
+    if (st.dev) voci.push(['beacon', 'Prova bandiera', function () { vai('provaTbeam'); }]);
     if (st.dev) voci.push(['iniettore', 'Iniettore', function () { vai('banco'); }]);
     voci.push(['esci', 'Esci', function () { S.logout(); }, 'menu-esci']);
     voci.forEach(function (v) {
@@ -175,7 +176,7 @@
 
   // ================= HOME
   // pagine di debug tolte dalla home: si aprono con l'indirizzo …/#banco o …/#prova
-  var apriNascosta = { '#banco': 'banco', '#iniettore': 'banco', '#beacon': 'beaconProg', '#prova': 'provaTbeam' }[location.hash] || null;
+  var apriNascosta = { '#banco': 'banco', '#iniettore': 'banco', '#beacon': 'beaconProg', '#prova': 'provaTbeam', '#provabandiera': 'provaTbeam' }[location.hash] || null;
   // link condiviso di un evento: …/#ev=c-ID (conflict) o #ev=a-ID (allenamento). Resta in sospeso anche durante l'accesso.
   var apriEvento = null;
   (function () {
@@ -1114,6 +1115,7 @@
     s = String(s).replace(/\s+$/, ''); if (!s) return;
     var t = new Date(), hh = ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2) + ':' + ('0' + t.getSeconds()).slice(-2);
     BANCO.righe.push(hh + (da ? ' ' + da + ' ' : ' ') + s); if (BANCO.righe.length > 500) BANCO.righe.splice(0, BANCO.righe.length - 500);
+    if (!da && s.charAt(0) === '>' && /mortaio/i.test(s)) { BANCO.visto.colpo = 1; BANCO.storia.push({ t: Date.now(), testo: s.slice(1).trim() }); }   // bandiera collegata direttamente via USB
     if (s.charAt(0) === '{') {
       try {
         var j = JSON.parse(s); j._t = Date.now();
@@ -1127,7 +1129,7 @@
         else if (j.vicini) { BANCO.avvio = 'INIETTORE'; BANCO.inj.vicini = j.vicini; BANCO.inj.viciniT = Date.now(); }
         else if (j.auto != null) { BANCO.avvio = 'INIETTORE'; BANCO.inj.auto = j.auto ? j : null; }
         else if (j.pattuglia) { BANCO.pat[j.pattuglia] = j; bancoPattuglia(j); }
-        else if (j.risposta) { BANCO.visto.risposta = 1; BANCO.storia.push({ t: Date.now(), testo: 'Risposta via radio da ' + j.risposta + ': ' + j.testo }); }
+        else if (j.risposta) { BANCO.visto.risposta = 1; if (/mortaio/i.test(j.testo || '')) BANCO.visto.colpo = 1; BANCO.storia.push({ t: Date.now(), testo: 'Risposta via radio da ' + j.risposta + ': ' + j.testo }); }
         else if (j.hq) { BANCO.hq = j; BANCO.avvio = 'HQ'; }
         else if (j.tag != null) { if (!BANCO.avvio) BANCO.avvio = 'TAG'; BANCO.tag = j; }
       } catch (e) { BANCO.righe.push(hh + ' !! JSON non valido: ' + e.message); }
@@ -1218,6 +1220,31 @@
     b.scritti++;
     S.scriviEvento(b.cid, { tipo: 'zona', uid: 'sim-pat-' + j.pattuglia, team: cfg.f, pt: null, x: x, y: y, sim: true, pat: true, nome: cfg.nome || 'P', lat: j.lat, lon: j.lon, t: Date.now() });
   }
+  // mortaio nel conflict di prova: quando un colpo cade vicino a una bandiera, la bandiera lo sa (luci, cicalino, display).
+  // Posizione della bandiera: il suo GPS se fisso, altrimenti l'area collegata. Avvisa solo entro il raggio "vicino".
+  function bancoMortaio(c, cm) {
+    var b = BANCO; if (b.stopMort) { b.stopMort(); b.stopMort = null; }
+    if (!c || !cm || !cm.geo || !window.AC_MORT) return;
+    var puntiG = puntiGeo(cm), visti = {}, partito = Date.now(), ultimi = null;
+    var stopE = S.ascoltaEventi(c.id, function (ev) { ultimi = ev; controlla(); }), tk = setInterval(controlla, 1000);
+    b.stopMort = function () { clearInterval(tk); stopE(); };
+    function controlla() {
+      if (!ultimi) return;
+      var now = Date.now(), g = motore(c), own = F.stato(g, cm, ultimi, now).owner, st0 = window.AC_MORT.stato(c, puntiG, ultimi, now, own, g.inizio);
+      st0.colpi.forEach(function (cp) {
+        if (visti[cp.id] || cp.arrivo > now) return; visti[cp.id] = true;
+        if (cp.arrivo < partito || !b.attivo) return;   // i colpi vecchi non si riavvisano
+        Object.keys(b.mappa).forEach(function (id) {
+          var j = b.band[id], p = (cm.punti || []).filter(function (q) { return q.id === b.mappa[id]; })[0];
+          var pos = j && j.gpsFisso && j.lat ? { lat: j.lat, lon: j.lon } : p && p.lat != null ? p : null; if (!pos) return;
+          var d = Math.round(window.AC_MORT.misura(pos, cp).dist);
+          if (d > st0.regole.vicino) return;
+          bancoInvia('cmd ' + id + ' colpo ' + d + ' ' + st0.regole.letale + ' ' + st0.regole.vicino);
+          b.storia.push({ t: now, testo: 'Mortaio: colpo a ' + d + ' m dalla bandiera ' + id });
+        });
+      });
+    }
+  }
   function bancoSvuota() {
     var b = BANCO; if (!b.cid) return;
     Object.keys(b.ultimoPt).forEach(function (uid) { S.scriviEvento(b.cid, { tipo: 'zona', uid: uid, team: uid.split('-')[2], pt: null, sim: true, via: true, t: Date.now() }).catch(function () {}); });
@@ -1285,7 +1312,7 @@
     // invio al conflict di prova
     var inol = el('div', 'banco-inol'); box.appendChild(inol);
     inol.appendChild(el('b', null, 'Presenze nel conflict di prova'));
-    inol.appendChild(el('p', 'hint', 'I tag dentro una bandiera diventano pallini sull\'area scelta (come i pallini di "Simula"): così si vede la conquista nell\'app. Solo conflict di prova. La conquista dell\'app è calcolata dall\'app, quella della bandiera dalla bandiera: per ora sono separate.'));
+    inol.appendChild(el('p', 'hint', 'I tag dentro una bandiera diventano pallini sull\'area scelta (come i pallini di "Simula"): così si vede la conquista nell\'app. Solo conflict di prova. La conquista dell\'app è calcolata dall\'app, quella della bandiera dalla bandiera: per ora sono separate. I colpi di mortaio che cadono vicino a una bandiera le arrivano subito (luci, cicalino, display): tieni questa pagina aperta.'));
     var prove = D.conflitti.filter(function (c) { return c.prova; });
     var selC = select([['', '— nessuno —']].concat(prove.map(function (c) { return [c.id, c.nome || c.titolo || c.id]; })), b.cid || '');
     inol.appendChild(campoForm('Conflict', selC));
@@ -1314,7 +1341,7 @@
     function caricaCampo() {
       mapBox.innerHTML = ''; b.cm = null;
       var c = prove.filter(function (x) { return x.id === b.cid; })[0]; if (!c) return;
-      conCampo(c.campo, mapBox, function (cm) { b.cm = cm; disegnaMappa(); });
+      conCampo(c.campo, mapBox, function (cm) { b.cm = cm; disegnaMappa(); bancoMortaio(c, cm); });
     }
     function disegnaMappa() {
       mapBox.innerHTML = ''; if (!b.cm) return;
@@ -1350,7 +1377,7 @@
       if (b.cm.geo && window.AC_UTM) { var q = window.AC_UTM.aPixel(b.cm.geo, p.lat, p.lon); p.x = q.x; p.y = q.y; }
       S.salvaCampo(b.cm, null).then(function () { toast('Area spostata sulla bandiera'); aggiornaGps(); }, errore);
     }
-    selC.onchange = function () { bancoSvuota(); b.cid = selC.value || null; caricaCampo(); };
+    selC.onchange = function () { bancoSvuota(); b.cid = selC.value || null; if (!b.cid && b.stopMort) { b.stopMort(); b.stopMort = null; } caricaCampo(); };
     if (b.cid) caricaCampo();
     var logT = el('div', 'banco-bt'); box.appendChild(logT);
     logT.appendChild(el('b', null, 'Righe grezze'));
@@ -1806,20 +1833,22 @@
     var prima = chiusura; chiusura = function () { clearInterval(tk); clearTimeout(timer); b.cb = null; if (stopReg) stopReg(); if (stopRep) stopRep(); if (stopU) stopU(); if (prima) prima(); };
   }
   function pagProvaTbeam() {
-    testata('Prova 3 T-Beam');
+    testata('Prova bandiera');
     if (!S.stato().dev) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
     var b = BANCO, box = el('div', 'banco p3'); app.appendChild(box);
-    var aiuto = el('details', 'p3-aiuto'); aiuto.appendChild(el('summary', null, 'Come collegare i 3 T-Beam'));
+    var aiuto = el('details', 'p3-aiuto'); aiuto.open = !b.via;
+    aiuto.appendChild(el('summary', null, 'Come si fa la prova'));
     aiuto.appendChild(el('pre', null,
-      'TELEFONO  → questa pagina → "Bluetooth" → scegli AC-HQ-…  (T-Beam con programma HQ)\n' +
-      '            qui vedi la mappa e mandi i comandi alla bandiera via radio\n' +
-      'PC        → questa pagina → "USB" → T-Beam col programma TAG FINTO\n' +
-      '            qui cambi colore, numero e potenza del tag\n' +
-      'TERZO     → programma BANDIERA, solo acceso, vicino al tag\n\n' +
-      'La bandiera manda lo stato ogni ~20 s: la mappa si aggiorna a scatti.\n' +
-      'Dopo ogni comando la bandiera risponde subito e rimanda lo stato.\n' +
-      'In stanza il segnale è fortissimo: per vedere il tag "uscire" premi Soglia stanza (-55)\n' +
-      'e porta il tag in un\'altra stanza, oppure dal PC Potenza minima.'));
+      '1. Bandiera: T-Beam col programma BANDIERA, LED e cicalino collegati.\n' +
+      '2. HQ: T-Beam col programma HQ. Telefono → "Bluetooth (HQ)" → AC-HQ-…\n' +
+      '   (oppure la bandiera col cavo USB al PC → "USB": niente HQ)\n' +
+      '3. Premi "Prova in casa": stato ogni 5 s, conquista in 20 s, soglia -60.\n' +
+      '4. I tag (programmati con Beacon prog) lontani, in un\'altra stanza.\n' +
+      '   Avvicina un BLU: B1 sul display, la barra cresce, dopo 20 s BLU.\n' +
+      '   Porta via il blu e avvicina un ROSSO: riconquista.\n' +
+      '   Blu e rosso insieme: CONTESA, tutto fermo.\n' +
+      '5. Mortaio: "Colpo in pieno" e "Colpo vicino" (luci, cicalino, display).\n\n' +
+      'In casa il segnale passa i muri: se un tag non esce, alza la soglia (-55, -50).'));
     box.appendChild(aiuto);
     var testa = el('div', 'banco-st'); box.appendChild(testa);
     var bt = el('div', 'banco-bt'); box.appendChild(bt);
@@ -1832,9 +1861,21 @@
     var tb = el('div', 'p3-tasti'); box.appendChild(tb);
     var tt = el('div', 'p3-tasti'); box.appendChild(tt);
     function aBandiera(c) { bancoInvia(b.hq || b.avvio === 'HQ' ? 'cmd tutte ' + c : c); }
-    [['Conquista veloce (20 s)', 'tempo 20'], ['Conquista normale (60 s)', 'tempo 60'], ['Soglia stanza (-55)', 'soglia -55'], ['Soglia campo (-80)', 'soglia -80'],
-     ['Area neutra', 'reset'], ['Dai ai blu', 'fazione 1'], ['Dai ai rossi', 'fazione 2'], ['Test luce/cicalino', 'test'], ['Muto sì/no', 'muto'], ['Stato subito', 'invia'], ['Info', 'info']]
+    function sequenza(lista) { lista.forEach(function (c, i) { setTimeout(function () { aBandiera(c); }, i * 2500); }); }
+    tb.appendChild(bottone('▶ Prova in casa', 'accent p3-b', function () { sequenza(['ogni 5', 'tempo 20', 'soglia -60', 'reset']); toast('Mando 4 comandi alla bandiera (10 s)'); }));
+    tb.appendChild(bottone('💥 Colpo in pieno', 'p3-b p3-mort', function () { aBandiera('colpo 4'); }));
+    tb.appendChild(bottone('Colpo vicino (25 m)', 'p3-b p3-mort', function () { aBandiera('colpo 25'); }));
+    tb.appendChild(bottone('Colpo lontano (80 m)', 'p3-b', function () { aBandiera('colpo 80'); }));
+    var sogl = el('div', 'p3-sogl'); tb.appendChild(sogl);
+    sogl.appendChild(bottone('Soglia −5', 'p3-b', function () { var j = ultima(); aBandiera('soglia ' + ((j ? j.soglia : -60) - 5)); }));
+    var soglT = el('b', null, '—'); sogl.appendChild(soglT);
+    sogl.appendChild(bottone('Soglia +5', 'p3-b', function () { var j = ultima(); aBandiera('soglia ' + ((j ? j.soglia : -60) + 5)); }));
+    [['Conquista 20 s', 'tempo 20'], ['Conquista 60 s', 'tempo 60'], ['Area neutra', 'reset'], ['Dai ai blu', 'fazione 1'], ['Dai ai rossi', 'fazione 2'],
+     ['Test luce/cicalino', 'test'], ['Muto sì/no', 'muto'], ['Stato subito', 'invia'], ['Stato ogni 20 s (campo)', 'ogni 20'], ['Info', 'info']]
       .forEach(function (x) { tb.appendChild(bottone(x[0], 'p3-b', function () { aBandiera(x[1]); })); });
+    function ultima() { var ids = Object.keys(b.band).sort(function (x, y) { return b.band[y]._t - b.band[x]._t; }); return ids.length ? b.band[ids[0]] : null; }
+    // nomi dei giocatori dal registro dei tag (Beacon prog)
+    var nomiTag = {}, stopReg = S.ascoltaBeacon ? S.ascoltaBeacon(function (r) { nomiTag = {}; (r || []).forEach(function (x) { if (x.f && x.n) nomiTag[x.f + x.n] = x.gioc || ''; }); }) : null;
     [['Tag BLU', 'f 1'], ['Tag ROSSO', 'f 2'], ['Numero +1', null], ['Potenza minima', 'pot 0'], ['Potenza media', 'pot 4'], ['Potenza massima', 'pot 7']]
       .forEach(function (x) { tt.appendChild(bottone(x[0], 'p3-b', function () { bancoInvia(x[1] || 'n ' + (((b.tag && b.tag.tag) || 0) + 1)); })); });
     var lista = el('div', 'p3-lista'); box.appendChild(lista);
@@ -1854,6 +1895,7 @@
         (b.tag ? ' · tag finto: ' + b.tag.f.toUpperCase() + ' #' + b.tag.tag + ' potenza ' + b.tag.pot + ' dBm' : '');
       testa.className = 'banco-st ' + (b.via ? 'on' : 'off');
       tb.hidden = !(b.hq || b.avvio === 'HQ' || b.avvio === 'BANDIERA');
+      soglT.textContent = j ? 'soglia ' + j.soglia + ' dBm' : 'soglia —';
       tt.hidden = !(b.tag || b.avvio === 'TAG');
       // mappa: un punto al centro; il bordo del cerchio è la soglia; i tag più vicini al centro quanto più forte è il segnale
       var W = 360, H = 300, cx = 180, cy = 150, R = 95, s = '<svg viewBox="0 0 ' + W + ' ' + H + '"><rect width="' + W + '" height="' + H + '" fill="#2c3a22"/>';
@@ -1876,8 +1918,8 @@
           var d = Math.max(.15, Math.min(1.55, f)) * R, an = hash(t.n + (t.f === 'rossa' ? 500 : 0)), x = cx + d * Math.sin(an), y = cy - d * Math.cos(an);
           x = Math.max(14, Math.min(W - 14, x)); y = Math.max(14, Math.min(H - 14, y));
           s += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="13" fill="' + col[t.f] + '" stroke="#fff" stroke-width="2"' + (t.rssi < j.soglia ? ' stroke-dasharray="3 3" fill-opacity=".5"' : '') + '/>';
-          s += '<text x="' + x.toFixed(1) + '" y="' + (y + 4).toFixed(1) + '" font-size="11" text-anchor="middle" fill="#fff" font-weight="700">' + t.n + '</text>';
-          s += '<text x="' + x.toFixed(1) + '" y="' + (y + 25).toFixed(1) + '" font-size="10" text-anchor="middle" fill="#eee">' + t.rssi + '</text>';
+          s += '<text x="' + x.toFixed(1) + '" y="' + (y + 4).toFixed(1) + '" font-size="11" text-anchor="middle" fill="#fff" font-weight="700">' + (t.f === 'rossa' ? 'R' : 'B') + t.n + '</text>';
+          s += '<text x="' + x.toFixed(1) + '" y="' + (y + 25).toFixed(1) + '" font-size="10" text-anchor="middle" fill="#eee">' + escB((nomiTag[t.f + t.n] ? nomiTag[t.f + t.n] + ' ' : '') + t.rssi) + '</text>';
         });
         if (vecchia) s += '<rect width="' + W + '" height="22" fill="#a00"/><text x="8" y="16" fill="#fff" font-size="13">Bandiera muta da ' + eta(j._t) + ': è accesa? è lontana?</text>';
       }
@@ -1887,7 +1929,7 @@
       var v = b.visto, passi = [
         [b.via, 'Telefono o PC collegato a un T-Beam'], [hqOk || b.avvio === 'HQ', 'HQ vivo (battito ogni 10 s)'], [v.band, 'Messaggio della bandiera arrivato via radio'],
         [v.tag, 'La bandiera sente il tag'], [v.dentro, 'Tag DENTRO l\'area'], [v.conq, 'Conquista partita'], [v.owner, 'Area conquistata (luce fissa + bip lungo)'],
-        [v.riconq, 'Riconquista: tag cambiato di colore (tasto Tag ROSSO o pulsante del tag)'], [v.risposta, 'Comando via radio: la bandiera ha risposto'], [v.fuori, 'Tag FUORI dall\'area (soglia o distanza)'], [v.contesa, 'Contesa (serve un secondo tag dell\'altro colore)']];
+        [v.riconq, 'Riconquista: via i blu, dentro un rosso (o il contrario)'], [v.risposta, 'Comando via radio: la bandiera ha risposto'], [v.fuori, 'Tag FUORI dall\'area (soglia o distanza)'], [v.contesa, 'Contesa: un blu e un rosso insieme'], [v.colpo, 'Mortaio: la bandiera ha ricevuto il colpo']];
       lista.innerHTML = '<b>Controlli</b>' + passi.map(function (p) { return '<div class="' + (p[0] ? 'ok' : '') + '">' + (p[0] ? '✔' : '○') + ' ' + p[1] + '</div>'; }).join('');
       storia.innerHTML = '<b>Cosa è successo</b>' + (b.storia.length ? b.storia.slice().reverse().slice(0, 15).map(function (x) { var d = new Date(x.t); return '<div><span>' + ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2) + ':' + ('0' + d.getSeconds()).slice(-2) + '</span> ' + escB(x.testo) + '</div>'; }).join('') : '<div>niente ancora</div>');
       if (raw.open) { pre.textContent = b.righe.slice(-150).join('\n'); pre.scrollTop = pre.scrollHeight; }
@@ -1896,7 +1938,7 @@
     b.cb = function () { if (prossimo) return; prossimo = setTimeout(function () { prossimo = null; disegna(); }, 250); };
     var timer = setInterval(disegna, 1000);
     disegna();
-    var prima = chiusura; chiusura = function () { clearInterval(timer); b.cb = null; if (prima) prima(); };
+    var prima = chiusura; chiusura = function () { clearInterval(timer); b.cb = null; if (stopReg) stopReg(); if (prima) prima(); };
   }
   function cartaProvaTbeam() {
     var k = el('button', 'carta beta'); k.type = 'button';

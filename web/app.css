@@ -869,3 +869,5 @@ main > .btn.big { margin-bottom: 6px; }
 .copia-da { margin-bottom: 12px; } .copia-da .hint { display: block; margin-top: 4px; }
 
 .banco-patr { display: grid; grid-template-columns: auto 1fr 70px; gap: 6px; align-items: center; margin: 6px 0; } .banco-patr small { grid-column: 1 / -1; }
+
+.p3-mort { background: #6b2a14 !important; color: #fff !important; } .p3-sogl { display: flex; gap: 8px; align-items: center; width: 100%; } .p3-sogl b { flex: 1; text-align: center; }
