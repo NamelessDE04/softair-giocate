@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.64';
+  var VERSIONE = '0.65';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -176,8 +176,28 @@
   // ================= HOME
   // pagine di debug tolte dalla home: si aprono con l'indirizzo …/#banco o …/#prova
   var apriNascosta = { '#banco': 'banco', '#iniettore': 'banco', '#beacon': 'beaconProg', '#prova': 'provaTbeam' }[location.hash] || null;
+  // link condiviso di un evento: …/#ev=c-ID (conflict) o #ev=a-ID (allenamento). Resta in sospeso anche durante l'accesso.
+  var apriEvento = null;
+  (function () {
+    var m = /^#ev=([ca])-(.+)$/.exec(location.hash);
+    try { if (m) sessionStorage.setItem('apriEvento', m[1] + '-' + m[2]); apriEvento = sessionStorage.getItem('apriEvento'); } catch (e) { if (m) apriEvento = m[1] + '-' + m[2]; }
+    if (m) history.replaceState(null, '', location.pathname);
+  })();
+  function linkEvento(tipo, id) { return location.origin + location.pathname + '#ev=' + tipo + '-' + id; }
+  function condividiEvento(tipo, x) {
+    var msg = (x.titolo || (tipo === 'a' ? 'Allenamento' : 'Conflict')) + (x.inizio ? ' · ' + dataLunga(x.inizio) + ' ore ' + ora(x.inizio) : '') + '\nSegna la tua presenza: ' + linkEvento(tipo, x.id);
+    if (navigator.share) navigator.share({ text: msg }).catch(function () {}); else { navigator.clipboard && navigator.clipboard.writeText(msg); toast('Link copiato'); }
+  }
+  function finitoApriEvento() { apriEvento = null; try { sessionStorage.removeItem('apriEvento'); } catch (e) {} }
   function home() {
     if (apriNascosta) { var v = apriNascosta; apriNascosta = null; history.replaceState(null, '', location.pathname); setTimeout(function () { vai(v); }, 0); }
+    if (apriEvento && S.stato().me.callsign) {
+      var tipoE = apriEvento[0], idE = apriEvento.slice(2), lst = tipoE === 'a' ? D.allenamenti : D.conflitti;
+      if (lst.some(function (x) { return x.id === idE; })) { finitoApriEvento(); setTimeout(function () { vai(tipoE === 'a' ? 'allenamento' : 'conflitto', idE); }, 0); }
+      else if (!home.attesaEv) home.attesaEv = setTimeout(function () {   // i dati arrivano un attimo dopo: se dopo 8 s non c'e', non e' per il suo team
+        home.attesaEv = null; if (apriEvento) { finitoApriEvento(); toast('Evento non trovato: forse il tuo team non è invitato'); }
+      }, 8000);
+    }
     var st = S.stato(), me = st.me;
     if (!me.callsign) return sceltaCallsign();
     var lista = attivi(), inviti = [], promemoria = [];
@@ -376,6 +396,8 @@
         if (!confirm('Far ripartire la partita adesso? Aree, rifornimenti e mortai tornano come all\'inizio.')) return;
         var x = JSON.parse(JSON.stringify(c)); x.provaDa = Date.now(); S.salvaConflitto(x).then(function () { toast('Partita ripartita'); }, errore);
       }));
+      if (!c.prova) box.appendChild(bottone('🔗 Condividi il link per le presenze', 'accent', function () { condividiEvento('c', c); }));
+      adm.appendChild(bottone('⧉ Duplica', '', function () { vai('conflittoModifica', { copia: c.id }); }));
       box.appendChild(bottone('⚙ Gestisci', 'link', function () { adm.hidden = !adm.hidden; }));
       box.appendChild(adm);
       // solo chi organizza: due schede, la giocata e le presenze (chi ha risposto, team per team)
@@ -2668,7 +2690,13 @@
     var a = D.allenamenti.filter(function (x) { return x.id === id; })[0]; var dove = app;
     testata(a ? a.titolo || 'Allenamento' : 'Allenamento');
     if (!a) { app.appendChild(el('p', 'hint', 'Allenamento non trovato.')); return; }
-    if (P('allenamenti')) app.appendChild(bottone('⚙ Modifica', 'link', function () { vai('allenamentoModifica', a.id); }));
+    if (P('allenamenti')) {
+      var adA = el('div', 'riga2');
+      adA.appendChild(bottone('🔗 Condividi link presenze', 'accent', function () { condividiEvento('a', a); }));
+      adA.appendChild(bottone('⧉ Duplica', '', function () { vai('allenamentoModifica', { copia: a.id }); }));
+      app.appendChild(adA);
+      app.appendChild(bottone('⚙ Modifica', 'link', function () { vai('allenamentoModifica', a.id); }));
+    }
     var hero = el('div', 'conf-hero all-hero');
     hero.appendChild(el('div', 'conf-tipo verde', 'ALLENAMENTO · PORTE CHIUSE'));
     if (a.inizio) hero.appendChild(el('div', 'pm-data', dataLunga(a.inizio).toUpperCase()));
@@ -2729,12 +2757,36 @@
     });
     else mapBox.appendChild(el('p', 'hint centro', 'Cartina non ancora scelta.'));
   }
+  // copia di un evento passato: stesse ore, data spostata al prossimo giorno della stessa settimana (da domani in poi)
+  function copiaEvento(src) {
+    var x = JSON.parse(JSON.stringify(src)); delete x.id; delete x.vincitore; delete x.provaDa;
+    if (src.inizio && !src.prova) {
+      var d = new Date(src.inizio), o = new Date(), g = new Date(o.getFullYear(), o.getMonth(), o.getDate() + 1);
+      while (g.getDay() !== d.getDay()) g.setDate(g.getDate() + 1);
+      var ini = new Date(g.getFullYear(), g.getMonth(), g.getDate(), d.getHours(), d.getMinutes()).getTime(), sp = ini - src.inizio;
+      x.inizio = ini; if (src.ritrovo) x.ritrovo = src.ritrovo + sp; if (src.fine) x.fine = src.fine + sp;
+    }
+    return x;
+  }
+  // tendina in cima a un evento nuovo: "parti da uno gia' fatto"
+  function sceltaCopia(lista, pag) {
+    var el0 = lista.filter(function (x) { return !x.prova; }).sort(function (a, b) { return (b.inizio || 0) - (a.inizio || 0); }).slice(0, 25);
+    if (!el0.length) return null;
+    var s0 = select([['', '— parti da zero —']].concat(el0.map(function (x) { return [x.id, (x.inizio ? dataBreve(x.inizio) + ' · ' : '') + (x.titolo || 'Evento')]; })), '');
+    s0.onchange = function () { if (s0.value) sostituisci(pag, { copia: s0.value }); };
+    var k = el('div', 'carta copia-da'); k.appendChild(campoForm('⧉ Copia da un evento passato', s0));
+    k.appendChild(el('small', 'hint', 'Ricopia tutto (luogo, cartina, team, argomenti…): poi cambi solo la data.'));
+    return k;
+  }
   function pagAllenamentoModifica(id) {
+    var daCopiare = id && id.copia ? D.allenamenti.filter(function (x) { return x.id === id.copia; })[0] : null; if (id && id.copia) id = null;
     var vecchio = D.allenamenti.filter(function (x) { return x.id === id; })[0];
-    testata(vecchio ? 'Modifica allenamento' : 'Nuovo allenamento');
+    testata(vecchio ? 'Modifica allenamento' : daCopiare ? 'Nuovo allenamento (copia)' : 'Nuovo allenamento');
     if (!P('allenamenti')) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
+    if (!vecchio && !daCopiare) { var sc0 = sceltaCopia(D.allenamenti, 'allenamentoModifica'); if (sc0) app.appendChild(sc0); }
+    if (daCopiare) app.appendChild(el('p', 'hint avviso', 'Copia di «' + (daCopiare.titolo || 'Allenamento') + '» del ' + dataBreve(daCopiare.inizio) + '. Controlla la data e salva.'));
     var g7 = mezzanotte(Date.now() + 7 * GIORNO);
-    var a = vecchio ? JSON.parse(JSON.stringify(vecchio)) : { titolo: 'Allenamento', luogo: '', mapsUrl: '', ritrovo: g7 + 8.5 * 3600000, inizio: g7 + 9 * 3600000, fine: g7 + 12.5 * 3600000, parcheggio: { testo: '', mapsUrl: '' }, campo: D.campi.length === 1 ? D.campi[0].id : '', team: [], argomenti: [] };
+    var a = vecchio ? JSON.parse(JSON.stringify(vecchio)) : daCopiare ? copiaEvento(daCopiare) : { titolo: 'Allenamento', luogo: '', mapsUrl: '', ritrovo: g7 + 8.5 * 3600000, inizio: g7 + 9 * 3600000, fine: g7 + 12.5 * 3600000, parcheggio: { testo: '', mapsUrl: '' }, campo: D.campi.length === 1 ? D.campi[0].id : '', team: [], argomenti: [] };
     var f = el('div', 'modulo'); app.appendChild(f);
     var tit = el('input'); tit.value = a.titolo || ''; f.appendChild(campoForm('Titolo', tit));
     var dt = el('input'); dt.type = 'date'; dt.value = locale(a.inizio || Date.now()).slice(0, 10); f.appendChild(campoForm('Data', dt));
@@ -2853,9 +2905,12 @@
 
   var PRIMA = [[null, 'Subito'], [1, '1 giorno prima'], [2, '2 giorni prima'], [3, '3 giorni prima'], [5, '5 giorni prima'], [7, '7 giorni prima'], [0, 'Solo il giorno del conflict']];
   function pagConflittoModifica(cid) {
+    var daCopiare = cid && cid.copia ? D.conflitti.filter(function (x) { return x.id === cid.copia; })[0] : null; if (cid && cid.copia) cid = null;
     var vecchio = D.conflitti.filter(function (x) { return x.id === cid; })[0];
-    testata(vecchio ? 'Modifica conflict' : 'Nuovo conflict');
-    var c = vecchio ? JSON.parse(JSON.stringify(vecchio)) : {
+    testata(vecchio ? 'Modifica conflict' : daCopiare ? 'Nuovo conflict (copia)' : 'Nuovo conflict');
+    if (!vecchio && !daCopiare) { var sc0 = sceltaCopia(D.conflitti, 'conflittoModifica'); if (sc0) app.appendChild(sc0); }
+    if (daCopiare) app.appendChild(el('p', 'hint avviso', 'Copia di «' + (daCopiare.titolo || 'Conflict') + '» del ' + dataBreve(daCopiare.inizio) + '. Controlla la data e salva.'));
+    var c = vecchio ? JSON.parse(JSON.stringify(vecchio)) : daCopiare ? Object.assign(copiaEvento(daCopiare), { id: S.nuovoId() }) : {
       id: S.nuovoId(), titolo: '', luogo: '', mapsUrl: '', campo: D.campi.length === 1 ? D.campi[0].id : '',
       inizio: mezzanotte(Date.now() + 7 * GIORNO) + 9.5 * 3600000, fine: mezzanotte(Date.now() + 7 * GIORNO) + 13 * 3600000, ritrovo: mezzanotte(Date.now() + 7 * GIORNO) + 8.5 * 3600000,
       fazioni: [{ id: 'blu', nome: 'Blu', team: [] }, { id: 'rossa', nome: 'Rossa', team: [] }], comandanti: { blu: 'ia', rossa: 'ia' },
