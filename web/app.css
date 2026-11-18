@@ -887,3 +887,9 @@ main > .btn.big { margin-bottom: 6px; }
 .es-k h3 { margin: 0 0 6px; } .es-k p { margin: 6px 0; line-height: 1.45; }
 .es-righe { white-space: pre-wrap; font-size: 13px; background: #15180f; padding: 8px; border-radius: 8px; }
 .es-regia .btn { margin-top: 6px; } .es-home { width: 100%; margin-bottom: 10px; }
+.es-punti { margin-top: 6px; font-weight: 600; color: #e6d48a; }
+.es-costr { margin-bottom: 8px; }
+.es-costr-riga { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-top: 1px solid #2c3124; }
+.es-costr-riga b { font-size: 17px; }
+.es-regole { margin: 8px 0; } .es-regole summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.es-regole .tre { align-items: end; }

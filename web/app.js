@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.69';
+  var VERSIONE = '0.70';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -181,7 +181,8 @@
   var apriEvento = null, apriEs = null;
   (function () {
     // QR dell'esercitazione: #mortaio (display dell'HQ) e #rinascita (stampato all'HQ)
-    var q = { '#mortaio': 'm', '#rinascita': 'r' }[location.hash];
+    var q = { '#mortaio': 'm', '#rinascita': 'r' }[location.hash], mc = /^#costruisci-(\w+)$/.exec(location.hash);
+    if (mc) q = 'c:' + mc[1];
     try { if (q) sessionStorage.setItem('apriEs', q); apriEs = sessionStorage.getItem('apriEs'); } catch (e) { if (q) apriEs = q; }
     if (q) history.replaceState(null, '', location.pathname);
   })();
@@ -1143,6 +1144,7 @@
         else if (j.auto != null) { BANCO.avvio = 'INIETTORE'; BANCO.inj.auto = j.auto ? j : null; }
         else if (j.pattuglia) { BANCO.pat[j.pattuglia] = j; bancoPattuglia(j); }
         else if (j.risposta) { BANCO.visto.risposta = 1; if (/mortaio/i.test(j.testo || '')) BANCO.visto.colpo = 1; BANCO.storia.push({ t: Date.now(), testo: 'Risposta via radio da ' + j.risposta + ': ' + j.testo }); }
+        else if (j.hqtag) { BANCO.hqtag = BANCO.hqtag || {}; j.hqtag.forEach(function (t) { BANCO.hqtag[t.f + t.n] = { f: t.f, n: t.n, rssi: t.rssi, _t: j._t }; }); }
         else if (j.hq) { BANCO.hq = j; BANCO.avvio = 'HQ'; }
         else if (j.tag != null) { if (!BANCO.avvio) BANCO.avvio = 'TAG'; BANCO.tag = j; }
       } catch (e) { BANCO.righe.push(hh + ' !! JSON non valido: ' + e.message); }
@@ -2017,6 +2019,33 @@
   // · esercizi/{id}/eventi (mortaio, colpiti, rinascite, fazione scelta).
   var ES_SITO = 'https://softair-giocate.web.app/';
   var ES_R = { letale: 15, vicino: 40 };
+  // infrastrutture (fase 2): punti a tempo + bandiere, costruzioni via QR all'HQ o sulle bandiere
+  var ES_INF = { start: 50, base: 10, band: 10, hqSoglia: -75, hqSec: 5,
+    costi: { mortaio: { costo: 100, min: 2 }, ospedale: { costo: 80, min: 2 }, mura: { costo: 60, min: 1 } } };
+  var ES_COSE = { mortaio: { nome: 'Mortaio', sim: '✹', dove: 'hq+band', cosa: 'Si spara dall\'HQ: inquadra il QR sul display dell\'HQ.' },
+    ospedale: { nome: 'Ospedale da campo', sim: '✚', dove: 'band', cosa: 'I vostri colpiti tornano in gioco avvicinandosi a questa bandiera.' },
+    mura: { nome: 'Mura difensive', sim: '▦', dove: 'band', cosa: 'Il nemico ci mette il doppio a conquistarla. Un colpo di mortaio entro ' + 15 + ' m le distrugge.' } };
+  function esInf(e0) { var c = (e0 && e0.inf) || {}; return { start: c.start != null ? c.start : ES_INF.start, base: c.base != null ? c.base : ES_INF.base, band: c.band != null ? c.band : ES_INF.band,
+    hqSoglia: c.hqSoglia || ES_INF.hqSoglia, hqSec: c.hqSec || ES_INF.hqSec, costi: Object.assign({}, ES_INF.costi, c.costi || {}) }; }
+  // punti e infrastrutture dagli eventi della fase 2 (stesso calcolo su ogni telefono)
+  function esEconomia(eventi, e0, now) {
+    var cfg = esInf(e0), t0 = e0.f2inizio || 0, cassa = { blu: cfg.start, rossa: cfg.start }, inf = [], rifiutati = {};
+    (eventi || []).filter(function (e) { return e.t >= t0 && e.t <= now && (e.tipo === 'reddito' || e.tipo === 'costruisci' || e.tipo === 'distrutto'); })
+      .sort(function (a, b) { return a.t - b.t; }).forEach(function (e) {
+        if (e.tipo === 'reddito') { cassa.blu += +e.blu || 0; cassa.rossa += +e.rossa || 0; return; }
+        if (e.tipo === 'distrutto') { inf.forEach(function (x) { if (!x.fine && x.cosa === e.cosa && x.punto === e.punto && (!e.f || x.f === e.f)) { x.fine = e.t; x.perche = e.perche; } }); return; }
+        var k = cfg.costi[e.cosa], f = e.f;
+        if (!k || !cassa.hasOwnProperty(f)) return;
+        var gia = inf.some(function (x) { return !x.fine && x.cosa === e.cosa && x.punto === e.punto && x.f === f; });
+        if (gia || cassa[f] < k.costo) { rifiutati[e.id || e.t] = gia ? 'già costruito' : 'punti insufficienti'; return; }
+        cassa[f] -= k.costo;
+        inf.push({ id: e.id || String(e.t), cosa: e.cosa, punto: e.punto, f: f, uid: e.uid, t: e.t, pronto: e.t + k.min * 60000 });
+      });
+    var attive = inf.filter(function (x) { return !x.fine; });
+    attive.forEach(function (x) { x.ok = now >= x.pronto; });
+    return { cfg: cfg, cassa: cassa, inf: attive, tutte: inf, rifiutati: rifiutati };
+  }
+  function esHa(eco, cosa, punto, f, anchePronta) { return eco.inf.filter(function (x) { return x.cosa === cosa && x.punto === punto && (!f || x.f === f) && (!anchePronta || x.ok); })[0] || null; }
   function esAttivo(a) { var f = a && a.esercizio && a.esercizio.fase; return f === 'f1' || f === 'f1fine' || f === 'f2'; }
   function esercizioInCorso() { return D.allenamenti.filter(esAttivo).sort(function (x, y) { return (y.esercizio.inizio || 0) - (x.esercizio.inizio || 0); })[0] || null; }
   function esNomeFaz(f) { return f === 'blu' ? 'BLU' : f === 'rossa' ? 'ROSSI' : '—'; }
@@ -2047,12 +2076,22 @@
     // --- motore del mortaio (solo fase 2): mortaio all'HQ per entrambe le fazioni, gratis, colpi senza limite
     var cMort = { mortaio: 'realistico', regole: { mortaio: { iniziali: 1e6, max: 1e6, costo: 0, colpo: 0, costruzione: 0, periodo: 1e6, reddito: 0, cadenza: 10 } } };
     var PM = [];   // sempre lo stesso array: il pannello del mortaio lo tiene e lo vede aggiornato
-    function puntiM() { var h = live.hq; PM.length = 0; if (h && h.lat != null) PM.push({ id: 'hq-blu', tipo: 'mob', fazione: 'blu', nome: 'HQ', lat: h.lat, lon: h.lon, raggio: 25 }, { id: 'hq-rossa', tipo: 'mob', fazione: 'rossa', nome: 'HQ', lat: h.lat, lon: h.lon, raggio: 25 }); return PM; }
+    function eco() { return esEconomia(eventi, es(), Date.now()); }
+    function dovePunto(p) { if (p === 'hq') return live.hq && live.hq.lat != null ? { lat: live.hq.lat, lon: live.hq.lon, nome: 'HQ' } : null; var b = (live.bandiere || {})[p]; return b && b.lat != null ? { lat: b.lat, lon: b.lon, nome: b.nome || p } : null; }
+    function nomePunto(p) { if (p === 'hq') return 'HQ'; var b = (live.bandiere || {})[p]; return 'bandiera ' + (b && b.nome || p); }
+    // il mortaio di ogni fazione: quello costruito all'HQ, altrimenti quello su una sua bandiera
+    function mortaioDi(ec, f) { var m = esHa(ec, 'mortaio', 'hq', f, true); if (m && dovePunto('hq')) return m; return ec.inf.filter(function (x) { return x.cosa === 'mortaio' && x.f === f && x.ok && dovePunto(x.punto); })[0] || null; }
+    function puntiM() {
+      PM.length = 0; var ec = eco();
+      ['blu', 'rossa'].forEach(function (f) { var m = mortaioDi(ec, f); if (!m) return; var d = dovePunto(m.punto); PM.push({ id: 'm-' + f, tipo: 'mob', fazione: f, nome: 'Mortaio ' + d.nome, lat: d.lat, lon: d.lon, raggio: 25 }); });
+      return PM;
+    }
     function statoM() { var e0 = es(), t0 = e0.f2inizio || Date.now(); return window.AC_MORT.stato(cMort, puntiM(), eventi.filter(function (e) { return e.t >= t0; }), Date.now(), {}, t0); }
     function mioModo() { var e = eventi.filter(function (x) { return x.tipo === 'mortaio' && x.azione === 'costruisci' && x.uid === uid && x.t >= (es().f2inizio || 0); }).sort(function (x, y) { return y.t - x.t; })[0]; return e ? e.modo || 'realistico' : null; }
     // --- pagina
     var testa = el('div', 'es-testa'); app.appendChild(testa);
     var stato = el('div', 'es-stato'); app.appendChild(stato);
+    var costrBox = el('div', 'es-costr'); app.appendChild(costrBox);
     var mapBox = el('div', 'all-mappa es-mappa'); app.appendChild(mapBox);
     var mortBox = el('div', 'mort-pan'); app.appendChild(mortBox);
     var spieg = el('div', 'es-spieg'); app.appendChild(spieg);
@@ -2076,18 +2115,25 @@
         var b = live.bandiere[k]; if (b.lat == null) return;
         var vecchia = now - (b.t || 0) > 90000;
         out.push({ tipo: 'area', lat: b.lat, lon: b.lon, r: 15, colore: b.owner ? COLORI[b.owner] : '#9a9a8a', pct: b.conq && b.pct ? b.pct : 0, colConq: COLORI[b.conq] || '#fff', contesa: !!b.contesa,
-          sim: '⚑', nome: b.nome || k, sotto: vecchia ? 'nessun segnale' : (org && (b.blu || b.rossi) ? 'B' + (b.blu || 0) + ' · R' + (b.rossi || 0) : '') });   // quanti ce ne sono: solo a chi organizza (niente informazioni gratis al nemico)
+          sim: '⚑', nome: (b.nome || k) + infraSu(k), sotto: vecchia ? 'nessun segnale' : (org && (b.blu || b.rossi) ? 'B' + (b.blu || 0) + ' · R' + (b.rossi || 0) : '') });   // quanti ce ne sono: solo a chi organizza (niente informazioni gratis al nemico)
       });
-      if (live.hq && live.hq.lat != null) out.push({ tipo: 'area', lat: live.hq.lat, lon: live.hq.lon, r: 12, colore: '#c9a227', sim: 'HQ', nome: 'HQ' });
+      if (live.hq && live.hq.lat != null) out.push({ tipo: 'area', lat: live.hq.lat, lon: live.hq.lon, r: 12, colore: '#c9a227', sim: 'HQ', nome: 'HQ' + infraSu('hq') });
       // pattuglie: solo ai blu (e a chi organizza)
       if (fz === 'blu' || org) Object.keys(live.pattuglie || {}).forEach(function (k) { var p = live.pattuglie[k]; if (p.lat != null && now - (p.t || 0) < 300000) out.push({ tipo: 'pallino', lat: p.lat, lon: p.lon, colore: COLORI.blu, nome: p.nome || 'P' }); });
       if (e0.fase === 'f2' || e0.fase === 'fine') { var sm = statoM(); segniMortaio(sm, fz, puntiM(), now, org).forEach(function (q) { out.push(q); }); }
       return out;
     }
     function mmss(ms) { ms = Math.max(0, ms); var s = Math.floor(ms / 1000); return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2); }
+    // simboli delle costruzioni accanto al nome del punto: le proprie (in costruzione con ⏳), tutte a chi organizza
+    function infraSu(p) {
+      var e0 = es(); if (e0.fase !== 'f2' && e0.fase !== 'fine') return '';
+      var fz = miaFaz(), t = '';
+      eco().inf.forEach(function (x) { if (x.punto !== p || (!org && x.f !== fz)) return; t += ' ' + (org ? (x.f === 'blu' ? 'b' : 'r') : '') + ES_COSE[x.cosa].sim + (x.ok ? '' : '⏳'); });
+      return t;
+    }
     var ultimoUI = '';
     function aggiorna() {
-      var e0 = es(), now = Date.now(), fz = miaFaz(), morti = esMorti(eventi), ioMorto = !!morti[uid], firma = JSON.stringify([e0, fz, ioMorto, !!mioModo(), Math.floor(now / 1000)]);
+      var e0 = es(), now = Date.now(), fz = miaFaz(), morti = esMorti(eventi), ioMorto = !!morti[uid], ec = eco(), firma = JSON.stringify([e0, fz, ioMorto, !!mioModo(), Math.floor(now / 1000), azione, ec.cassa, ec.inf.length]);
       if (firma === ultimoUI) return; ultimoUI = firma;
       // testata: fase e tempo
       testa.innerHTML = '';
@@ -2110,22 +2156,31 @@
       } else if (ioMorto && (e0.fase === 'f2')) {
         stato.className = 'es-stato morto';
         stato.appendChild(el('b', null, 'SEI COLPITO'));
-        stato.appendChild(el('span', null, 'Non conti più per le bandiere. Vai all\'HQ e scansiona il QR di rinascita.'));
+        stato.appendChild(el('span', null, t ? 'Non conti più per le bandiere. Torna all\'HQ e resta ' + ec.cfg.hqSec + ' secondi vicino al LoRa dell\'HQ, oppure vai a una vostra bandiera con l\'ospedale ✚: col tag torni in gioco da solo.' : 'Non conti più per le bandiere. Vai all\'HQ e scansiona il QR di rinascita.'));
         stato.appendChild(bottone('📷 Scansiona il QR di rinascita', 'big', function () { apriScanner('QR di rinascita', function (txt) { if (!/#rinascita/.test(txt)) return { ok: false, titolo: 'Non è il QR di rinascita', testo: '' }; rinasci(); return { ok: true, titolo: 'Sei di nuovo in gioco' }; }); }));
       } else {
         stato.className = 'es-stato ' + fz;
         stato.appendChild(el('b', null, 'Sei ' + (fz === 'blu' ? 'BLU · attacco' : 'ROSSO · difesa')));
         stato.appendChild(el('span', null, t ? 'Il tuo tag: ' + (t.f === 'blu' ? 'B' : 'R') + t.n + ' · tienilo in alto, fuori dalla tasca' : 'Senza tag: per le bandiere non conti'));
       }
+      if (e0.fase === 'f2' && fz) {
+        var nb = Object.keys(live.bandiere || {}).filter(function (k) { return live.bandiere[k].owner === fz; }).length;
+        stato.appendChild(el('div', 'es-punti', 'Punti ' + esNomeFaz(fz) + ': ' + ec.cassa[fz] + ' · +' + (ec.cfg.base + ec.cfg.band * nb) + ' al minuto'));
+      }
+      costruisci(e0, fz, ec, now);
       // spiegazione: la fase 2 si vede solo a fase 1 finita
       spieg.innerHTML = '';
       var k1 = el('div', 'carta es-k'); k1.appendChild(el('h3', null, 'Fase 1 · Conquista delle bandiere'));
       k1.appendChild(el('p', null, 'Due bandiere a circa 100 m l\'una dall\'altra. All\'inizio sono dei ROSSI, che le difendono. I BLU attaccano: per conquistarne una devono restarle vicini col tag, senza rossi intorno, finché la barra non si riempie (sul display della bandiera e qui sulla mappa). Se ci sono blu e rossi insieme è CONTESA: tutto fermo.'));
       k1.appendChild(el('p', null, 'Allo scadere del tempo vince chi tiene TUTTE E DUE le bandiere; una a testa è pareggio. I blu vedono sulla mappa le loro due pattuglie.'));
       if (e0.fase === 'f1fine' || e0.fase === 'f2' || e0.fase === 'fine') {
-        var k2 = el('div', 'carta es-k'); k2.appendChild(el('h3', null, 'Fase 2 · Mortaio sulle bandiere'));
-        k2.appendChild(el('p', null, 'All\'HQ, sul display, c\'è un QR: inquadralo col telefono e scegli il mortaio facile o difficile. Poi tira sulle bandiere (le coordinate le leggi sulla carta o te le passano via radio).'));
-        k2.appendChild(el('p', null, 'Chi è vicino a una bandiera dice via radio se il colpo l\'ha preso. Entro ' + ES_R.letale + ' m dall\'impatto sei COLPITO: il telefono suona, la bandiera lampeggia e fischia. Chi è colpito non conta più per nessuna bandiera finché non torna all\'HQ e scansiona il QR di rinascita.'));
+        var k2 = el('div', 'carta es-k'); k2.appendChild(el('h3', null, 'Fase 2 · Costruzioni e mortaio'));
+        var cf = esInf(e0), cs = cf.costi;
+        k2.appendChild(el('p', null, 'Ogni fazione guadagna punti: ' + cf.base + ' al minuto, più ' + cf.band + ' al minuto per ogni bandiera che tiene (si parte con ' + cf.start + '). Con i punti chiunque costruisce: inquadra il QR COSTRUISCI attaccato all\'HQ o a una bandiera della tua fazione.'));
+        k2.appendChild(el('p', null, '✹ Mortaio (' + cs.mortaio.costo + ' punti, ' + cs.mortaio.min + ' min): all\'HQ o su una vostra bandiera. Si spara dall\'HQ: inquadra il QR sul display dell\'HQ e scegli facile o difficile. In campo chiunque può chiamare il fuoco toccando il bersaglio sulla mappa.'));
+        k2.appendChild(el('p', null, '✚ Ospedale da campo (' + cs.ospedale.costo + ' punti, ' + cs.ospedale.min + ' min): su una vostra bandiera. I colpiti col tag tornano in gioco avvicinandosi a quella bandiera.'));
+        k2.appendChild(el('p', null, '▦ Mura (' + cs.mura.costo + ' punti, ' + cs.mura.min + ' min): su una vostra bandiera. Il nemico ci mette il doppio a conquistarla; un colpo di mortaio entro ' + ES_R.letale + ' m le distrugge. Se la bandiera viene persa, tutto quello che c\'era sopra va perso.'));
+        k2.appendChild(el('p', null, 'Entro ' + ES_R.letale + ' m dall\'impatto sei COLPITO: non conti più per le bandiere. Si torna in gioco all\'HQ (col tag: ' + cf.hqSec + ' s vicino al LoRa; senza tag: QR di rinascita) o a una vostra bandiera con l\'ospedale.'));
         spieg.appendChild(k2);
       }
       spieg.appendChild(k1);
@@ -2133,9 +2188,55 @@
       if (e0.fase === 'f2') mortaio(); else { mortBox.innerHTML = ''; pan = null; }
       if (org) disegnaRegia();
     }
+    function costruisci(e0, fz, ec, now) {
+      costrBox.innerHTML = '';
+      if (e0.fase !== 'f2' || !fz) return;
+      var p = /^c:(\w+)$/.exec(azione); p = p && p[1];
+      if (!p) {
+        costrBox.appendChild(bottone('📷 Costruisci (QR all\'HQ o sulla bandiera)', '', function () {
+          apriScanner('QR COSTRUISCI', function (txt) { var m = /#costruisci-(\w+)/.exec(txt); if (!m) return { ok: false, titolo: 'Non è un QR COSTRUISCI', testo: '' }; azione = 'c:' + m[1]; ultimoUI = ''; aggiorna(); return { ok: true, titolo: 'Costruisci' }; });
+        }));
+        return;
+      }
+      var k = el('div', 'carta es-mort'); costrBox.appendChild(k);
+      k.appendChild(el('h3', null, '🔨 Costruisci · ' + nomePunto(p)));
+      var chiudi = function () { azione = ''; ultimoUI = ''; aggiorna(); };
+      var band = p !== 'hq' ? (live.bandiere || {})[p] : null;
+      if (p !== 'hq' && !band) { k.appendChild(el('p', 'hint', 'Questo QR non è di una bandiera di questa esercitazione.')); k.appendChild(bottone('Chiudi', 'link', chiudi)); return; }
+      if (band && band.owner !== fz) { k.appendChild(el('p', 'hint', 'Questa bandiera non è vostra: si costruisce solo sulle bandiere della tua fazione. Prima conquistala.')); k.appendChild(bottone('Chiudi', 'link', chiudi)); return; }
+      k.appendChild(el('p', 'hint', 'Punti ' + esNomeFaz(fz) + ': ' + ec.cassa[fz]));
+      ['mortaio', 'ospedale', 'mura'].forEach(function (cosa) {
+        var C = ES_COSE[cosa], cs = ec.cfg.costi[cosa];
+        if (p === 'hq' && C.dove.indexOf('hq') < 0) return;
+        var riga = el('div', 'es-costr-riga'); k.appendChild(riga);
+        var gia = esHa(ec, cosa, p, fz);
+        riga.appendChild(el('b', null, C.sim + ' ' + C.nome));
+        if (gia) { riga.appendChild(el('span', null, gia.ok ? '✓ costruito' : '⏳ pronto tra ' + mmss(gia.pronto - now))); return; }
+        var altro = cosa === 'mortaio' ? ec.inf.filter(function (x) { return x.cosa === 'mortaio' && x.f === fz; })[0] : null;
+        if (altro) { riga.appendChild(el('span', 'hint', 'avete già un mortaio (' + nomePunto(altro.punto) + ')')); return; }
+        riga.appendChild(el('small', 'hint', C.cosa));
+        var poco = ec.cassa[fz] < cs.costo;
+        var b = bottone(poco ? 'Servono ' + cs.costo + ' punti' : 'Costruisci · ' + cs.costo + ' punti · ' + cs.min + ' min', poco ? '' : 'accent', function () {
+          b.disabled = true;
+          scrivi({ tipo: 'costruisci', id: S.idBreve(), cosa: cosa, punto: p, f: fz }).then(function () { toast(C.nome + ': pronto tra ' + cs.min + ' min'); }, errore);
+        });
+        if (poco) b.disabled = true;
+        riga.appendChild(b);
+      });
+      k.appendChild(bottone('Chiudi', 'link', chiudi));
+    }
     function mortaio() {
       var modo = mioModo(), fz = miaFaz();
       if (!fz) { mortBox.innerHTML = ''; pan = null; return; }
+      var mio = mortaioDi(eco(), fz);
+      if (!mio) {
+        if (pan === 'nomort') return;
+        mortBox.innerHTML = ''; pan = 'nomort';
+        var k0 = el('div', 'carta es-mort'); k0.appendChild(el('b', null, '✹ Mortaio'));
+        k0.appendChild(el('p', 'hint', 'La tua fazione non ha un mortaio pronto. Si costruisce all\'HQ o su una vostra bandiera (QR COSTRUISCI).'));
+        mortBox.appendChild(k0); return;
+      }
+      if (pan === 'nomort') pan = null;
       if (!modo) {
         if (pan === 'scelta') return;
         mortBox.innerHTML = ''; pan = null;
@@ -2147,8 +2248,15 @@
           r.appendChild(bottone('DIFFICILE · deriva, alzo, carica', 'big', function () { compra('realistico'); }));
           k.appendChild(r); pan = 'scelta';
         } else {
-          k.appendChild(el('b', null, '✹ Mortaio'));
-          k.appendChild(el('p', 'hint', 'Per usarlo vai all\'HQ e inquadra il QR sul display.'));
+          k.appendChild(el('b', null, '✹ Mortaio pronto · ' + nomePunto(mio.punto)));
+          k.appendChild(el('p', 'hint', 'Si spara dall\'HQ: inquadra il QR sul display. Dal campo puoi chiamare il fuoco: tocca il bersaglio sulla mappa.'));
+          k.appendChild(bottone('📡 Chiama il fuoco', 'accent', function () {
+            scegliCb = function (pt) {
+              var nota = prompt('Cosa c\'è sul bersaglio? (facoltativo)', '') || '';
+              scrivi({ tipo: 'richiesta', id: S.idBreve(), team: fz, lat: pt.lat, lon: pt.lon, testo: nota.trim() }).then(function () { toast('Richiesta di fuoco mandata all\'HQ'); }, errore);
+            };
+            mapBox.classList.add('scegli'); mapBox.scrollIntoView({ behavior: 'smooth' }); toast('Tocca il bersaglio sulla mappa');
+          }));
           k.appendChild(bottone('📷 Scansiona il QR del mortaio', '', function () { apriScanner('QR del mortaio (display dell\'HQ)', function (txt) { if (!/#mortaio/.test(txt)) return { ok: false, titolo: 'Non è il QR del mortaio', testo: '' }; azione = 'm'; ultimoUI = ''; aggiorna(); return { ok: true, titolo: 'Mortaio' }; }); }));
         }
         mortBox.appendChild(k); return;
@@ -2165,7 +2273,7 @@
     }
     function compra(modo) {
       if (!live.hq || live.hq.lat == null) { toast('Posizione dell\'HQ non ancora nota: aspetta il GPS dell\'HQ'); }
-      var fz = miaFaz(); pan = null; scrivi({ tipo: 'mortaio', azione: 'costruisci', team: fz, pt: 'hq-' + fz, modo: modo }).then(function () { toast('Mortaio pronto all\'HQ'); });
+      var fz = miaFaz(); pan = null; scrivi({ tipo: 'mortaio', azione: 'costruisci', team: fz, pt: 'm-' + fz, modo: modo }).then(function () { toast('Mortaio pronto'); });
     }
     function rinasci() {
       if (!esMorti(eventi)[uid]) { toast('Non risulti colpito: sei già in gioco'); return; }
@@ -2180,16 +2288,61 @@
         if (visti[cp.id] || cp.arrivo > now) return; visti[cp.id] = true;
         if (cp.arrivo < aperto - 5000) return;
         if (!mia || esMorti(eventi)[uid]) return;
-        var hq = puntiM()[0]; if (hq && window.AC_MORT.misura(hq, cp).dist <= 25) return;   // HQ protetto
+        var hq = dovePunto('hq'); if (hq && window.AC_MORT.misura(hq, cp).dist <= 25) return;   // HQ protetto
         var d = window.AC_MORT.misura(mia, cp).dist;
         if (d <= ES_R.letale) { allarmeColpito(d, false); scrivi({ tipo: 'colpito', da: 'gps', colpo: cp.id, dist: Math.round(d) }); }
         else if (d <= ES_R.vicino) { toast('Colpi di mortaio vicini (' + Math.round(d) + ' m): al riparo!'); suonoImpatto(false); try { if (navigator.vibrate) navigator.vibrate([200, 80, 200]); } catch (e) {} }
       });
     }
     // --------------- REGIA (chi organizza): fasi, collegamento all'HQ, ponte HQ -> app, mortaio -> bandiere
-    var R = { durata: 30, tempo: 60, ultimoScritto: {}, pend: {}, vistiR: {}, inviati: '', ultimoMorti: 0, avviata: Date.now() };
-    try { var sv = JSON.parse(localStorage.getItem('es-regia') || '{}'); if (sv.durata) R.durata = sv.durata; if (sv.tempo) R.tempo = sv.tempo; } catch (e) {}
-    function salvaR() { try { localStorage.setItem('es-regia', JSON.stringify({ durata: R.durata, tempo: R.tempo })); } catch (e) {} }
+    var R = { durata: 30, tempo: 60, ultimoScritto: {}, pend: {}, vistiR: {}, inviati: '', ultimoMorti: 0, avviata: Date.now(), inf: esInf(null), distr: {}, tInv: {}, rin: {}, hqVisto: {}, redW: 0 };
+    try { var sv = JSON.parse(localStorage.getItem('es-regia') || '{}'); if (sv.durata) R.durata = sv.durata; if (sv.tempo) R.tempo = sv.tempo; if (sv.inf) R.inf = esInf({ inf: sv.inf }); } catch (e) {}
+    function salvaR() { try { localStorage.setItem('es-regia', JSON.stringify({ durata: R.durata, tempo: R.tempo, inf: R.inf })); } catch (e) {} }
+    function chiaveTag(f, n) { var r = reg.filter(function (q) { return q.f === f && +q.n === +n; })[0]; return r && r.uid ? r.uid : 'tag:' + f + n; }
+    function sigla(f, n) { return (f === 'blu' ? 'B' : 'R') + n; }
+    // costruzioni, punti e rinascite: li scrive solo la regia collegata all'HQ
+    function regiaInfra() {
+      var e0 = es(); if (e0.fase !== 'f2' || !BANCO.via) return;
+      var now = Date.now(), ec = eco(), cfg = ec.cfg, bands = live.bandiere || {};
+      // punti: ogni minuto, base + per ogni bandiera tenuta
+      var ultimo = e0.f2inizio || now; eventi.forEach(function (e) { if (e.tipo === 'reddito' && e.t > ultimo) ultimo = e.t; });
+      if (now - ultimo >= 60000 && now - R.redW > 20000) {
+        R.redW = now; var q = { blu: cfg.base, rossa: cfg.base };
+        Object.keys(bands).forEach(function (k) { var o = bands[k].owner; if (q.hasOwnProperty(o)) q[o] += cfg.band; });
+        scrivi({ tipo: 'reddito', uid: 'regia', blu: q.blu, rossa: q.rossa });
+      }
+      // bandiera persa: quello che c'era sopra va perso
+      ec.inf.forEach(function (x) {
+        if (x.punto === 'hq' || R.distr[x.id]) return; var b = bands[x.punto]; if (!b || b.owner === x.f) return;
+        R.distr[x.id] = now; scrivi({ tipo: 'distrutto', uid: 'regia', cosa: x.cosa, punto: x.punto, f: x.f, perche: 'persa' });
+      });
+      // mura: tempo di conquista doppio sulla bandiera
+      var base = e0.tempo || R.tempo;
+      Object.keys(BANCO.band).forEach(function (id) {
+        var j = BANCO.band[id], b = bands[id] || {}, vuole = esHa(ec, 'mura', id, b.owner, true) ? base * 2 : base;
+        if (j.tempo !== vuole && now - (R.tInv[id] || 0) > 25000) { R.tInv[id] = now; bancoInvia('cmd ' + id + ' tempo ' + vuole); }
+      });
+      var morti = esMorti(eventi);
+      function rinasci2(f, n, da, band) {
+        var key = chiaveTag(f, n); if (!morti[key] || now - (R.rin[key] || 0) < 20000) return;
+        R.rin[key] = now; scrivi({ tipo: 'rinascita', uid: key, da: da, band: band || null, f: f, n: n });
+        R.log = (R.log || []).concat(new Date().toTimeString().slice(0, 8) + ' ' + sigla(f, n) + ' torna in gioco (' + (da === 'hq' ? 'HQ' : 'ospedale ' + nomePunto(band)) + ')').slice(-6);
+        if (da === 'hq') bancoInvia('msg RIENTRA ' + sigla(f, n));
+        suonoImpatto(false);
+      }
+      // ospedale: i colpiti della stessa fazione vicini alla bandiera
+      Object.keys(BANCO.band).forEach(function (id) {
+        var j = BANCO.band[id]; if (now - j._t > 30000) return;
+        (j.tag || []).forEach(function (t) { if (t.m && t.rssi >= j.soglia && esHa(ec, 'ospedale', id, t.f, true)) rinasci2(t.f, t.n, 'ospedale', id); });
+      });
+      // HQ: il LoRa dell'HQ sente il tag del colpito per qualche secondo di fila
+      Object.keys(BANCO.hqtag || {}).forEach(function (k) {
+        var t = BANCO.hqtag[k], h = R.hqVisto[k];
+        if (now - t._t > 3000 || t.rssi < cfg.hqSoglia) { delete R.hqVisto[k]; return; }
+        if (!h || now - h.ult > 3000) h = R.hqVisto[k] = { da: t._t, ult: t._t }; else h.ult = t._t;
+        if (now - h.da >= cfg.hqSec * 1000) rinasci2(t.f, t.n, 'hq');
+      });
+    }
     function setFase(o) { var e0 = Object.assign({}, es(), o); return S.statoEsercizio(aid, e0); }
     function aBand(lista) { lista.forEach(function (c, i) { setTimeout(function () { bancoInvia(c); }, i * 2500); }); }
     function vincitoreOra() {
@@ -2201,7 +2354,8 @@
     var regDis = '';
     function disegnaRegia() {
       var b = BANCO, e0 = es(), bands = Object.keys(live.bandiere || {}).sort();
-      var firma = JSON.stringify([e0, b.via, b.hq && b.hq.lat, bands.map(function (k) { var x = live.bandiere[k]; return [k, x.owner, x.lat != null, Math.floor((Date.now() - x.t) / 30000)]; }), live.hq && live.hq.lat != null, Object.keys(live.pattuglie || {}).length, R.durata, R.tempo]);
+      var ecR = eco(), firma = JSON.stringify([e0, b.via, b.hq && b.hq.lat, bands.map(function (k) { var x = live.bandiere[k]; return [k, x.owner, x.lat != null, Math.floor((Date.now() - x.t) / 30000)]; }), live.hq && live.hq.lat != null, Object.keys(live.pattuglie || {}).length, R.durata, R.tempo,
+        e0.fase === 'f2' ? [ecR.cassa, ecR.inf.map(function (x) { return x.id + x.ok; }), R.log, Object.keys(BANCO.hqtag || {}).length, Math.floor(Date.now() / 10000)] : 0]);
       if (firma === regDis) return; regDis = firma;
       regia.innerHTML = '';
       var k = el('div', 'carta'); regia.appendChild(k);
@@ -2214,6 +2368,13 @@
       righe.push('HQ: ' + (live.hq && live.hq.lat != null ? 'posizione ok' : 'posizione sconosciuta'));
       righe.push('Pattuglie: ' + (Object.keys(live.pattuglie || {}).map(function (p) { return live.pattuglie[p].nome; }).join(', ') || 'nessuna'));
       if (bands.length >= 2) { var x1 = live.bandiere[bands[0]], x2 = live.bandiere[bands[1]]; if (x1.lat != null && x2.lat != null) { var d = Math.round(window.AC_MORT.misura(x1, x2).dist); righe.push('Distanza tra le bandiere: ' + d + ' m' + (d < 100 ? ' ⚠ troppo vicine' : '')); } }
+      if (e0.fase === 'f2') {
+        righe.push('Punti: BLU ' + ecR.cassa.blu + ' · ROSSI ' + ecR.cassa.rossa);
+        ecR.inf.forEach(function (x) { righe.push(ES_COSE[x.cosa].sim + ' ' + ES_COSE[x.cosa].nome + ' ' + esNomeFaz(x.f) + ' · ' + nomePunto(x.punto) + (x.ok ? '' : ' · pronto tra ' + mmss(x.pronto - Date.now()))); });
+        var vis = Object.keys(BANCO.hqtag || {}).filter(function (q) { return Date.now() - BANCO.hqtag[q]._t < 5000; }).map(function (q) { var t = BANCO.hqtag[q]; return sigla(t.f, t.n) + ' ' + t.rssi; });
+        righe.push('Tag vicini al LoRa HQ: ' + (vis.join(', ') || (BANCO.hqtag ? 'nessuno' : 'nessun dato (firmware HQ 1.3.0?)')));
+        (R.log || []).forEach(function (l) { righe.push(l); });
+      }
       k.appendChild(el('pre', 'es-righe', righe.join('\n')));
       k.appendChild(bottone('📍 HQ qui (GPS di questo telefono)', 'mini', function () {
         var p = v && v.miaPos(); if (!p) { toast('GPS del telefono non pronto'); return; }
@@ -2231,17 +2392,55 @@
         }));
         k.appendChild(bottone('🖨 Stampa il QR di rinascita', '', stampaRinascita));
       }
+      if (e0.fase !== 'f2' && e0.fase !== 'fine') regoleInfra(k);
+      if (e0.fase !== 'fine') k.appendChild(bottone('🖨 Stampa i QR COSTRUISCI (HQ e bandiere)', '', stampaCostruisci));
       if (e0.fase === 'f1') k.appendChild(bottone('■ Termina la fase 1 adesso', 'pericolo', function () { if (confirm('Chiudere la fase 1 adesso?')) chiudiF1(); }));
       if (e0.fase === 'f1fine') k.appendChild(bottone('▶ AVVIA FASE 2 · MORTAIO', 'accent big', function () {
-        setFase({ fase: 'f2', f2inizio: Date.now() }).then(function () { toast('Fase 2 avviata'); }, errore);
+        setFase({ fase: 'f2', f2inizio: Date.now(), inf: R.inf }).then(function () { toast('Fase 2 avviata'); }, errore);
         if (BANCO.via) aBand(['qr ' + ES_SITO + '#mortaio', 'cmd tutte morti -', 'cmd tutte ogni 10']); else toast('HQ non collegato: il QR non compare sul display');
       }));
       if (e0.fase === 'f2') {
         k.appendChild(bottone('Fai rinascere tutti', '', function () { scrivi({ tipo: 'rinascitaTutti', uid: 'tutti' }); }));
         k.appendChild(bottone('Rimetti il QR sul display dell\'HQ', 'mini', function () { bancoInvia('qr ' + ES_SITO + '#mortaio'); }));
-        k.appendChild(bottone('■ Termina l\'esercitazione', 'pericolo', function () { if (!confirm('Finire l\'esercitazione?')) return; setFase({ fase: 'fine' }); if (BANCO.via) aBand(['qr -', 'cmd tutte morti -', 'cmd tutte ogni 20']); }));
+        k.appendChild(bottone('■ Termina l\'esercitazione', 'pericolo', function () { if (!confirm('Finire l\'esercitazione?')) return; setFase({ fase: 'fine' }); if (BANCO.via) aBand(['qr -', 'cmd tutte morti -', 'cmd tutte tempo ' + (e0.tempo || R.tempo), 'cmd tutte ogni 20']); }));
       }
       if (e0.fase && e0.fase !== 'prep') k.appendChild(bottone('Azzera (torna in preparazione)', 'link', function () { if (confirm('Azzerare l\'esercitazione? Le fasi ricominciano da capo.')) setFase({ fase: 'prep', inizio: null, vincitore: null, f2inizio: null }); }));
+    }
+    function regoleInfra(k) {
+      var d = el('details', 'es-regole'); d.appendChild(el('summary', null, 'Fase 2 · punti e costruzioni')); d.open = !!R.regoleAperte; d.ontoggle = function () { R.regoleAperte = d.open; };
+      function num(et, val, set) { var i = el('input'); i.type = 'number'; i.inputMode = 'numeric'; i.value = val; i.onchange = function () { var v = Math.max(0, Math.round(+i.value || 0)); set(v); salvaR(); }; return campoForm(et, i); }
+      var g = el('div', 'tre');
+      g.appendChild(num('Punti iniziali', R.inf.start, function (v) { R.inf.start = v; }));
+      g.appendChild(num('Punti al minuto', R.inf.base, function (v) { R.inf.base = v; }));
+      g.appendChild(num('+ per bandiera/min', R.inf.band, function (v) { R.inf.band = v; }));
+      d.appendChild(g);
+      ['mortaio', 'ospedale', 'mura'].forEach(function (c) {
+        var g2 = el('div', 'tre'); g2.appendChild(el('b', null, ES_COSE[c].sim + ' ' + ES_COSE[c].nome));
+        g2.appendChild(num('Punti', R.inf.costi[c].costo, function (v) { R.inf.costi[c] = Object.assign({}, R.inf.costi[c], { costo: v }); }));
+        g2.appendChild(num('Minuti', R.inf.costi[c].min, function (v) { R.inf.costi[c] = Object.assign({}, R.inf.costi[c], { min: v }); }));
+        d.appendChild(g2);
+      });
+      var g3 = el('div', 'tre');
+      g3.appendChild(num('Rientro HQ: secondi', R.inf.hqSec, function (v) { R.inf.hqSec = Math.max(1, v); }));
+      g3.appendChild(num('Rientro HQ: segnale (dBm)', R.inf.hqSoglia, function (v) { R.inf.hqSoglia = -Math.abs(v || 75); }));
+      d.appendChild(g3);
+      d.appendChild(el('small', 'hint', 'Valgono dall\'avvio della fase 2. Segnale: più vicino a 0 = bisogna stare più vicini al LoRa dell\'HQ (-75 ≈ 3-5 m).'));
+      k.appendChild(d);
+    }
+    function qrSvg(testo) {
+      var m = window.QR.encode(testo, 'M'), n = m.size, s = '';
+      for (var y = 0; y < n; y++) for (var x = 0; x < n; x++) if (m.get(x, y)) s += 'M' + x + ' ' + y + 'h1v1h-1z';
+      return '<svg viewBox="-4 -4 ' + (n + 8) + ' ' + (n + 8) + '"><rect x="-4" y="-4" width="' + (n + 8) + '" height="' + (n + 8) + '" fill="#fff"/><path d="' + s + '" fill="#000"/></svg>';
+    }
+    function stampaCostruisci() {
+      var ids = Object.keys(live.bandiere || {}).sort();
+      if (!ids.length && !confirm('Nessuna bandiera collegata: stampo solo il QR dell\'HQ? (I QR delle bandiere servono le bandiere accese e collegate.)')) return;
+      var w = window.open('', '_blank'); if (!w) { toast('Consenti le finestre per stampare'); return; }
+      var pag = [['hq', 'HQ', 'Mortaio']].concat(ids.map(function (id) { return [id, 'BANDIERA ' + escB((live.bandiere[id] || {}).nome || id), 'Mortaio · Ospedale da campo · Mura']; }));
+      w.document.write('<!doctype html><meta charset="utf-8"><title>QR costruisci</title><style>body{font-family:sans-serif;text-align:center;margin:0}section{page-break-after:always;padding:30px}svg{width:11cm;height:11cm}h1{font-size:44px;margin:6px}h2{font-size:30px;margin:4px}p{font-size:20px;margin:6px}</style>' +
+        pag.map(function (p) { return '<section><h1>COSTRUISCI</h1><h2>' + p[1] + '</h2><p>' + p[2] + '</p>' + qrSvg(ES_SITO + '#costruisci-' + p[0]) + '<p>Inquadra col telefono: costruisci per la tua fazione' + (p[0] === 'hq' ? '' : ' (solo se la bandiera è vostra)') + '.</p><p style="font-size:14px">Airsoft Conflict · ' + escB(a0.titolo || 'Allenamento') + ' · ' + p[0] + '</p></section>'; }).join('') +
+        '<script>setTimeout(function(){print()},400)<\/script>');
+      w.document.close();
     }
     function chiudiF1() { return setFase({ fase: 'f1fine', vincitore: vincitoreOra(), chiusa: Date.now() }); }
     function stampaRinascita() {
@@ -2284,7 +2483,10 @@
           var x = live.bandiere[id]; if (x.lat == null) return;
           var d = Math.round(window.AC_MORT.misura(x, cp).dist); if (d > ES_R.vicino) return;
           bancoInvia('cmd ' + id + ' colpo ' + d + ' ' + ES_R.letale + ' ' + ES_R.vicino);
-          if (d <= ES_R.letale) R.pend[id] = { t: now, colpo: cp.id };
+          if (d <= ES_R.letale) {
+            R.pend[id] = { t: now, colpo: cp.id };
+            eco().inf.forEach(function (q) { if (q.cosa === 'mura' && q.punto === id && !R.distr[q.id]) { R.distr[q.id] = now; scrivi({ tipo: 'distrutto', uid: 'regia', cosa: 'mura', punto: id, f: q.f, perche: 'mortaio' }); } });
+          }
         });
       });
       // colpita: chi risulta dentro nel primo stato dopo il colpo (la bandiera lo manda subito) o, dopo 12 s, nell'ultimo
@@ -2310,7 +2512,7 @@
       aggiorna(); controllaColpi();
       if (v) v.ridisegna();
       if (org) {
-        ponte(); regiaMortaio();
+        ponte(); regiaMortaio(); regiaInfra();
         var e0 = es(); if (e0.fase === 'f1' && e0.inizio && Date.now() > e0.inizio + (e0.durata || 30) * 60000 && !R.chiudendo) { R.chiudendo = true; chiudiF1().then(function () { R.chiudendo = false; }, function () { R.chiudendo = false; }); }
       }
     }, 1000);

@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.2.0"
+#define VERSIONE "1.3.0"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -737,9 +737,59 @@ void esci(const String &s) {
 }
 void registro(const String &s) { String e = s; e.replace("\\", "/"); e.replace("\"", "'"); esci("{\"log\":\"" + e + "\"}"); }
 
+// tag dei giocatori vicini all'HQ (rientro dei colpiti): l'HQ li ascolta e li passa all'app, che decide chi torna in gioco
+struct TagHq { uint16_t n; uint8_t f; float rssi; uint32_t visto; };
+#define MAX_TAG_HQ 48
+TagHq tagHq[MAX_TAG_HQ];
+int nTagHq = 0;
+portMUX_TYPE muxHq = portMUX_INITIALIZER_UNLOCKED;
+uint8_t uuidHq[16];
+class AscoltoHq : public NimBLEAdvertisedDeviceCallbacks {
+  void onResult(NimBLEAdvertisedDevice *d) override {
+    if (!d->haveManufacturerData()) return;
+    std::string m = d->getManufacturerData();
+    if (m.length() < 25) return;
+    const uint8_t *b = (const uint8_t *)m.data();
+    if (b[0] != 0x4C || b[1] != 0x00 || b[2] != 0x02 || b[3] != 0x15 || memcmp(b + 4, uuidHq, 16) != 0) return;
+    uint16_t major = (b[20] << 8) | b[21], minor = (b[22] << 8) | b[23];
+    if (major != 1 && major != 2) return;
+    int rssi = d->getRSSI(); uint32_t ora = millis();
+    portENTER_CRITICAL(&muxHq);
+    int i = 0; for (; i < nTagHq; i++) if (tagHq[i].n == minor && tagHq[i].f == major) break;
+    if (i == nTagHq) { if (nTagHq < MAX_TAG_HQ) { tagHq[nTagHq] = { minor, (uint8_t)major, (float)rssi, ora }; nTagHq++; } }
+    else { tagHq[i].rssi = (ora - tagHq[i].visto > 4000) ? rssi : tagHq[i].rssi * 0.6f + rssi * 0.4f; tagHq[i].visto = ora; }
+    portEXIT_CRITICAL(&muxHq);
+  }
+};
+// ogni secondo: {"hqtag":[{"n":3,"f":"blu","rssi":-62},...]} con i tag sentiti negli ultimi 2,5 s
+void mandaTagHq() {
+  static TagHq copia[MAX_TAG_HQ]; int nc = 0; uint32_t ora = millis();
+  portENTER_CRITICAL(&muxHq);   // dentro la sezione critica solo copie, niente String (allocano memoria)
+  for (int i = 0; i < nTagHq; i++) {
+    if (ora - tagHq[i].visto > 60000) { tagHq[i] = tagHq[nTagHq - 1]; nTagHq--; i--; continue; }
+    if (ora - tagHq[i].visto <= 2500) copia[nc++] = tagHq[i];
+  }
+  portEXIT_CRITICAL(&muxHq);
+  if (!nc) return;
+  String out = "{\"hqtag\":[";
+  for (int k = 0; k < nc; k++) {
+    char h[48]; snprintf(h, sizeof(h), "%s{\"n\":%u,\"f\":\"%s\",\"rssi\":%d}", k ? "," : "", copia[k].n, copia[k].f == 1 ? "blu" : "rossa", (int)copia[k].rssi); out += h;
+  }
+  esci(out + "]}");
+}
+String msgTesto = ""; uint32_t msgFino = 0;   // scritta grande per qualche secondo (es. "RIENTRA B3"), comando "msg <testo>"
+
 void mostra() {
   if (!haOled) return;
   oled.clearDisplay(); oled.setTextColor(SSD1306_WHITE); oled.setTextSize(1);
+  if (msgTesto.length() && millis() < msgFino) {
+    oled.fillRect(0, 0, 128, 64, (millis() / 400) % 2 ? SSD1306_WHITE : SSD1306_BLACK);
+    oled.setTextColor((millis() / 400) % 2 ? SSD1306_BLACK : SSD1306_WHITE);
+    int sp = msgTesto.indexOf(' '); String a = sp > 0 ? msgTesto.substring(0, sp) : msgTesto, b = sp > 0 ? msgTesto.substring(sp + 1) : "";
+    oled.setTextSize(2); oled.setCursor(max(0, (128 - (int)a.length() * 12) / 2), 10); oled.print(a);
+    if (b.length()) { oled.setTextSize(3); oled.setCursor(max(0, (128 - (int)b.length() * 18) / 2), 34); oled.print(b); }
+    oled.display(); return;
+  }
   if (qrTesto.length()) {
     // QR a sinistra (fondo chiaro, quadretti scuri, 2 pixel per quadretto), testo a destra
     static QRCode q; static uint8_t buf[300]; static String fatto;
@@ -787,9 +837,10 @@ void comando(String c) {
     for (int i = 0; i < nBand; i++) registro(" " + idTesto(band[i].id) + " B" + String(band[i].blu) + " R" + String(band[i].rossi) + " " + String((millis() - band[i].visto) / 1000) + " s fa, " + String((int)band[i].rssi) + " dBm");
     return;
   }
+  if (low.startsWith("msg")) { msgTesto = c.substring(3); msgTesto.trim(); msgFino = millis() + 6000; mostra(); return; }
   if (low.startsWith("qr")) { String t = c.substring(2); t.trim(); qrTesto = (t == "-" ? "" : t); registro(qrTesto.length() ? "QR sul display: " + qrTesto : "QR tolto"); mostra(); return; }
   if (low == "riavvia") { delay(200); ESP.restart(); }
-  registro("comandi: info · qr <testo>|- · cmd <id|tutte> <comando> (es. cmd tutte soglia -75, cmd A1B2 test) · riavvia");
+  registro("comandi: info · qr <testo>|- · msg <testo> · cmd <id|tutte> <comando> (es. cmd tutte soglia -75, cmd A1B2 test) · riavvia");
 }
 
 void setup() {
@@ -805,6 +856,12 @@ void setup() {
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
   adv->addServiceUUID(NUS_SERV); adv->setScanResponse(true);
   adv->start();
+  // ascolto dei tag (rientro all'HQ): finestra a metà, così resta tempo per il Bluetooth verso l'app
+  if (!leggiUuid(TAG_UUID, uuidHq)) Serial.println("TAG_UUID scritto male in config.h");
+  NimBLEScan *sc = NimBLEDevice::getScan();
+  sc->setAdvertisedDeviceCallbacks(new AscoltoHq(), true);
+  sc->setActiveScan(false); sc->setInterval(100); sc->setWindow(60); sc->setMaxResults(0);
+  sc->start(0, nullptr, false);
   Serial1.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
   if (!accendiLoRa()) { scrivi("HQ", "ERRORE", "LoRa non partita"); return; }
   radio.startReceive();
@@ -814,7 +871,13 @@ void setup() {
 
 void loop() {
   static uint32_t ultimoDisplay = 0;
-  if (millis() - ultimoDisplay > 1000) { ultimoDisplay = millis(); mostra(); }
+  if (millis() - ultimoDisplay > (millis() < msgFino ? 200 : 1000)) { ultimoDisplay = millis(); mostra(); }
+  // tag vicini: ogni secondo all'app, e si riparte con l'ascolto (la radio scarta i pacchetti identici già sentiti)
+  static uint32_t ultimoTag = 0;
+  if (millis() - ultimoTag >= 1000) {
+    ultimoTag = millis(); mandaTagHq();
+    NimBLEScan *sc = NimBLEDevice::getScan(); if (sc->isScanning()) sc->stop(); sc->start(0, nullptr, false);
+  }
   while (Serial1.available()) gps.encode(Serial1.read());
   String riga; if (leggiRiga(riga)) comando(riga);
   String bl; portENTER_CRITICAL(&muxBle); bl = daBle; daBle = ""; portEXIT_CRITICAL(&muxBle);

@@ -21,7 +21,7 @@ Dopo il caricamento, nella stessa finestra c'è "Logs &amp; Console" per vedere 
 
 <div class="r"><b>Bandiera</b> — conta i tag, fa la conquista e manda tutto via LoRa all'HQ. Luci: striscia WS2812B sul pin 13 oppure due LED semplici (rosso sul pin 25, blu/verde sul pin 4); cicalino sul pin 14.<br>
 <esp-web-install-button manifest="bin/bandiera.json"></esp-web-install-button></div>
-<div class="r"><b>HQ</b> — riceve le bandiere via LoRa; l'app si collega all'HQ via Bluetooth (Android) o USB (computer) dalla pagina <i>Iniettore</i>.<br>
+<div class="r"><b>HQ</b> — riceve le bandiere via LoRa; l'app si collega all'HQ via Bluetooth (Android) o USB (computer) dalla pagina <i>Iniettore</i>. Dalla 1.3.0 ascolta anche i tag vicini: i colpiti che restano qualche secondo vicino all'HQ tornano in gioco.<br>
 <esp-web-install-button manifest="bin/hq.json"></esp-web-install-button></div>
 <div class="r"><b>Tag finto</b> — un T-Beam che fa finta di essere il tag di un giocatore. Pulsante centrale: corto = cambia fazione (blu/rossa), lungo = numero +1.<br>
 <esp-web-install-button manifest="bin/tag.json"></esp-web-install-button></div>
