@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.72';
+  var VERSIONE = '0.73';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -2006,6 +2006,7 @@
     var v = null, tocca = null, colpi = [];
     function posDi(id) { var j = b.band[id]; if (j && j.gpsFisso && j.lat) return { lat: j.lat, lon: j.lon, gps: true }; var p = LS.pos[cid + '/' + id]; return p ? { lat: p.lat, lon: p.lon, gps: false } : null; }
     function scegli(msg, cb) { tocca = cb; mapBox.classList.add('scegli'); mapBox.scrollIntoView({ behavior: 'smooth' }); toast(msg); }
+    azioni.appendChild(bottone('🔇 Silenzia tutte', '', function () { LS.muto = LS.muto || {}; Object.keys(b.band).forEach(function (id) { LS.muto[id] = true; }); salva(); bancoInvia('cmd tutte muto 1'); toast('Cicalini spenti su tutte le bandiere'); disegnaLista(); }));
     azioni.appendChild(bottone('✹ Simula un colpo di mortaio', 'accent', function () {
       scegli('Tocca dove cade il colpo', function (pt) {
         colpi.push({ lat: pt.lat, lon: pt.lon, t: Date.now() }); suonoImpatto(false);
@@ -2034,6 +2035,11 @@
         r2.appendChild(bottone('📍 Mettila qui', 'piccolo', function () { scegli('Tocca dove si trova la bandiera ' + id, function (pt) { LS.pos[cid + '/' + id] = { lat: pt.lat, lon: pt.lon }; salva(); if (v) v.ridisegna(); disegnaLista(); }); }));
         r2.appendChild(bottone('🔊 Prova', 'piccolo', function () { bancoInvia('cmd ' + id + ' test'); toast('Comando mandato: la bandiera lampeggia e suona'); }));
         r2.appendChild(bottone('Coordinate 20 min', 'piccolo', function () { bancoInvia('cmd ' + id + ' posizione 20'); toast('Sul display della bandiera per 20 minuti'); }));
+        LS.muto = LS.muto || {};
+        r2.appendChild(bottone(LS.muto[id] ? '🔔 Riattiva suono' : '🔇 Silenzia', 'piccolo' + (LS.muto[id] ? ' accent' : ''), function () {
+          var m = !LS.muto[id]; LS.muto[id] = m; salva(); bancoInvia('cmd ' + id + ' muto ' + (m ? 1 : 0));
+          toast(m ? 'Cicalino spento (resta spento anche dopo il riavvio; sul display c\'è MUTO)' : 'Cicalino riattivato'); disegnaLista();
+        }));
         r.appendChild(r2); lista.appendChild(r);
       });
       if (!ids.length) lista.appendChild(el('p', 'hint', b.via ? 'Ancora nessuna bandiera: arriva entro 20 secondi dall\'accensione.' : ''));
