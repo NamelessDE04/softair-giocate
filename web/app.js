@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.71';
+  var VERSIONE = '0.72';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -1997,9 +1997,9 @@
     var cs = select(campi.map(function (c) { return [c.id, c.nome]; }), cid);
     cs.onchange = function () { LS.campo = cs.value; salva(); sostituisci('lab', cs.value); };
     k.appendChild(campoForm('Cartina', cs));
-    var bt = el('div', 'riga2'); bt.appendChild(bottone('Bluetooth (HQ)', '', bancoBle)); bt.appendChild(bottone('USB', '', bancoUsb)); k.appendChild(bt);
+    var bt = el('div', 'riga2'); bt.appendChild(bottone('USB (cavo)', 'accent', bancoUsb)); bt.appendChild(bottone('Bluetooth', '', bancoBle)); k.appendChild(bt);
     var stato = el('div', 'banco-stato'); k.appendChild(stato);
-    k.appendChild(el('p', 'hint', 'Collega l\'HQ (o una bandiera col cavo USB). La bandiera compare dove dice il suo GPS; se in casa il GPS non prende, scegli «Mettila qui» e tocca la cartina.'));
+    k.appendChild(el('p', 'hint', 'Collega l\'HQ col cavo USB al PC e premi «USB (cavo)», oppure dal telefono col Bluetooth. Va bene anche una bandiera col cavo, senza HQ. La bandiera compare dove dice il suo GPS; se in casa il GPS non prende, scegli «Mettila qui» e tocca la cartina.'));
     var mapBox = el('div', 'all-mappa lab-mappa'); app.appendChild(mapBox);
     var azioni = el('div', 'riga2'); app.appendChild(azioni);
     var lista = el('div', 'lab-lista'); app.appendChild(lista);
