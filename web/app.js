@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.70';
+  var VERSIONE = '0.71';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -97,7 +97,7 @@
     app.innerHTML = ''; window.scrollTo(0, 0);
     $('pieno').hidden = true; $('pieno').innerHTML = '';
     document.body.classList.remove('a-pieno');
-    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva, dmz: pagDmz, dmzModifica: pagDmzModifica, dmzLive: pagDmzLive, mortaioProva: pagMortaioProva, banco: pagBanco, beaconProg: pagBeaconProg, provaTbeam: pagProvaTbeam, esercizio: pagEsercizio }[c.v];
+    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva, dmz: pagDmz, dmzModifica: pagDmzModifica, dmzLive: pagDmzLive, mortaioProva: pagMortaioProva, banco: pagBanco, beaconProg: pagBeaconProg, provaTbeam: pagProvaTbeam, esercizio: pagEsercizio, lab: pagLab }[c.v];
     (r || home)(c.p);
   }
   function aPieno() { document.body.classList.add('a-pieno'); var p = $('pieno'); p.hidden = false; p.innerHTML = ''; return p; }
@@ -132,6 +132,7 @@
     organizza: '<path d="M4 6h16M4 12h10M4 18h13"/><circle cx="18" cy="12" r="2.2"/>',
     esci: '<path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/>',
     iniettore: '<path d="M18 3l3 3M16.5 4.5l3 3M19 6l-9 9-3-3 9-9M7 12l-4 4M4 15l2 2M10 15l-1 1"/>',
+    prova: '<path d="M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3"/><path d="M7 15h10"/>',
     beacon: '<circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/>'
   };
   function chiudiMenu() {
@@ -156,9 +157,7 @@
     if (me.team) voci.push(['team', 'Il mio team', function () { vai('team', me.team); }]);
     voci.push(['profilo', 'Profilo', function () { vai('profilo'); }]);
     if (organizza()) voci.push(['organizza', 'Organizza', function () { vai('organizza'); }]);
-    if (st.dev || P('conflitti')) voci.push(['beacon', 'Beacon prog', function () { vai('beaconProg'); }]);
-    if (st.dev) voci.push(['beacon', 'Prova bandiera', function () { vai('provaTbeam'); }]);
-    if (st.dev) voci.push(['iniettore', 'Iniettore', function () { vai('banco'); }]);
+    if (st.dev || P('conflitti')) voci.push(['prova', 'Prova e test', function () { vai('lab'); }]);
     voci.push(['esci', 'Esci', function () { S.logout(); }, 'menu-esci']);
     voci.forEach(function (v) {
       var b = el('button', 'menu-voce' + (v[3] ? ' ' + v[3] : '')); b.type = 'button';
@@ -223,7 +222,7 @@
     });
     var all = allenamentiAttivi().filter(function (a) { var r = miaAdesione('a:' + a.id); return P('allenamenti') || !r || r.si || r.dopo; });
     var dz = D.dmz.filter(function (x) { return x.fine > Date.now() - 6 * 3600000 && (x.giocatori || []).indexOf(st.user.uid) >= 0; });
-    if (!inviti.length && !promemoria.length && !all.length && !dz.length) { schermataInvito(); if (P('conflitti')) app.appendChild(cartaBeta()); return; }
+    if (!inviti.length && !promemoria.length && !all.length && !dz.length) { schermataInvito(); return; }
     var esH = esercizioInCorso();
     if (esH) { var kE = bottone('⚑ ESERCITAZIONE IN CORSO · apri', 'accent big es-home', function () { vai('esercizio', esH.id); }); app.appendChild(kE); }
     inviti.forEach(function (c) { app.appendChild(cartaInvito(c)); });
@@ -231,7 +230,6 @@
     promemoria.map(function (c) { return { t: c.inizio, el: cartaPromemoria(c) }; }).concat(all.map(function (a) { return { t: a.inizio || 0, el: cartaAllenamento(a) }; }))
       .concat(dz.map(function (x) { return { t: x.inizio, el: cartaDmz(x) }; }))
       .sort(function (x, y) { var cx = x.el.classList.contains('concluso'), cy = y.el.classList.contains('concluso'); return cx !== cy ? (cx ? 1 : -1) : cx ? y.t - x.t : x.t - y.t; }).forEach(function (x) { app.appendChild(x.el); });   // i conclusi in fondo
-    if (P('conflitti')) app.appendChild(cartaBeta());
   }
 
   // funzioni in prova, aperte a tutti: per ora il mortaio
@@ -1972,6 +1970,99 @@
     k.onclick = function () { vai('banco'); };
     return k;
   }
+  // ================= PROVA E TEST (fuori da ogni evento): bandiere LoRa sulla cartina vera, mortaio simulato, strumenti
+  function pagLab(arg) {
+    testata('Prova e test');
+    var st = S.stato();
+    if (!st.dev && !P('conflitti')) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
+    var campi = D.campi.filter(function (c) { return c.geo; }), b = BANCO;
+    var LS = {}; try { LS = JSON.parse(localStorage.getItem('lab') || '{}'); } catch (e) {}
+    function salva() { try { localStorage.setItem('lab', JSON.stringify(LS)); } catch (e) {} }
+    var cid = arg || LS.campo || (campi[0] && campi[0].id);
+    LS.pos = LS.pos || {};
+    // strumenti
+    var tiles = el('div', 'tiles lab-tiles');
+    [['✹', 'Mortaio', 'simulazione, niente arriva in campo', function () { vai('mortaioProva', cid || ''); }, P('conflitti')],
+     ['⚑', 'Prova 3 T-Beam', 'schema con tag, conquista e controlli', function () { vai('provaTbeam'); }, st.dev],
+     ['⌁', 'Iniettore', 'bandiere, tag, comandi, firmware', function () { vai('banco'); }, st.dev],
+     ['◉', 'Beacon prog', 'programma i tag', function () { vai('beaconProg'); }, true]].forEach(function (x) {
+      if (!x[4]) return;
+      var t = el('button', 'tile'); t.type = 'button'; t.appendChild(el('span', 'tile-ic', x[0])); t.appendChild(el('b', null, x[1])); t.appendChild(el('small', null, x[2])); t.onclick = x[3]; tiles.appendChild(t);
+    });
+    app.appendChild(tiles);
+    // bandiere sulla cartina
+    var k = el('div', 'carta lab-band'); app.appendChild(k);
+    k.appendChild(el('h3', null, '⚑ Bandiere sulla cartina'));
+    if (!campi.length) { k.appendChild(el('p', 'hint', 'Serve una cartina georeferenziata (Organizza → Cartine).')); return; }
+    var cs = select(campi.map(function (c) { return [c.id, c.nome]; }), cid);
+    cs.onchange = function () { LS.campo = cs.value; salva(); sostituisci('lab', cs.value); };
+    k.appendChild(campoForm('Cartina', cs));
+    var bt = el('div', 'riga2'); bt.appendChild(bottone('Bluetooth (HQ)', '', bancoBle)); bt.appendChild(bottone('USB', '', bancoUsb)); k.appendChild(bt);
+    var stato = el('div', 'banco-stato'); k.appendChild(stato);
+    k.appendChild(el('p', 'hint', 'Collega l\'HQ (o una bandiera col cavo USB). La bandiera compare dove dice il suo GPS; se in casa il GPS non prende, scegli «Mettila qui» e tocca la cartina.'));
+    var mapBox = el('div', 'all-mappa lab-mappa'); app.appendChild(mapBox);
+    var azioni = el('div', 'riga2'); app.appendChild(azioni);
+    var lista = el('div', 'lab-lista'); app.appendChild(lista);
+    var v = null, tocca = null, colpi = [];
+    function posDi(id) { var j = b.band[id]; if (j && j.gpsFisso && j.lat) return { lat: j.lat, lon: j.lon, gps: true }; var p = LS.pos[cid + '/' + id]; return p ? { lat: p.lat, lon: p.lon, gps: false } : null; }
+    function scegli(msg, cb) { tocca = cb; mapBox.classList.add('scegli'); mapBox.scrollIntoView({ behavior: 'smooth' }); toast(msg); }
+    azioni.appendChild(bottone('✹ Simula un colpo di mortaio', 'accent', function () {
+      scegli('Tocca dove cade il colpo', function (pt) {
+        colpi.push({ lat: pt.lat, lon: pt.lon, t: Date.now() }); suonoImpatto(false);
+        var detto = [];
+        Object.keys(b.band).forEach(function (id) {
+          var p = posDi(id); if (!p) return; var d = Math.round(window.AC_MORT.misura(p, pt).dist);
+          if (d <= ES_R.vicino && b.via) bancoInvia('cmd ' + id + ' colpo ' + d + ' ' + ES_R.letale + ' ' + ES_R.vicino);
+          detto.push(id + ': ' + d + ' m' + (d <= ES_R.letale ? ' COLPITA' : d <= ES_R.vicino ? ' vicino' : ''));
+        });
+        toast(detto.length ? detto.join(' · ') : 'Nessuna bandiera con posizione');
+        if (v) v.ridisegna();
+      });
+    }));
+    function disegnaLista() {
+      var ids = Object.keys(b.band).sort(), now = Date.now();
+      stato.textContent = b.via ? 'Collegato via ' + b.via + (b.avvio ? ' · ' + b.avvio : '') + ' · bandiere: ' + ids.length + (b.hq && b.hq.lat ? ' · HQ col GPS' : '') : 'Non collegato';
+      stato.className = 'banco-stato' + (b.via ? ' ok' : '');
+      lista.innerHTML = '';
+      ids.forEach(function (id) {
+        var j = b.band[id], p = posDi(id), r = el('div', 'carta lab-riga');
+        var col = j.owner === 'blu' ? 'BLU' : j.owner === 'rossa' ? 'ROSSI' : 'NEUTRA';
+        r.appendChild(el('b', null, '⚑ ' + id + ' · ' + col + (j.contesa ? ' · CONTESA' : j.conq ? ' · ' + (j.conq === 'blu' ? 'blu' : 'rossi') + ' ' + j.pct + '%' : '')));
+        r.appendChild(el('small', null, 'B' + (j.blu || 0) + ' R' + (j.rossi || 0) + ' · tag sentiti ' + (j.tag || []).length + ' · soglia ' + j.soglia + ' · conquista ' + j.tempo + ' s · batteria ' + (j.batt === 255 ? 'USB' : j.batt + '%') + ' · ' + Math.round((now - j._t) / 1000) + ' s fa'));
+        r.appendChild(el('small', null, p ? (p.gps ? 'GPS: ' : 'Messa a mano: ') + p.lat.toFixed(5) + ', ' + p.lon.toFixed(5) + (p.gps ? '' : ' (il GPS non ha il fix)') : 'Posizione sconosciuta: GPS senza fix'));
+        var r2 = el('div', 'riga2');
+        r2.appendChild(bottone('📍 Mettila qui', 'piccolo', function () { scegli('Tocca dove si trova la bandiera ' + id, function (pt) { LS.pos[cid + '/' + id] = { lat: pt.lat, lon: pt.lon }; salva(); if (v) v.ridisegna(); disegnaLista(); }); }));
+        r2.appendChild(bottone('🔊 Prova', 'piccolo', function () { bancoInvia('cmd ' + id + ' test'); toast('Comando mandato: la bandiera lampeggia e suona'); }));
+        r2.appendChild(bottone('Coordinate 20 min', 'piccolo', function () { bancoInvia('cmd ' + id + ' posizione 20'); toast('Sul display della bandiera per 20 minuti'); }));
+        r.appendChild(r2); lista.appendChild(r);
+      });
+      if (!ids.length) lista.appendChild(el('p', 'hint', b.via ? 'Ancora nessuna bandiera: arriva entro 20 secondi dall\'accensione.' : ''));
+    }
+    function segni() {
+      var out = [], now = Date.now();
+      Object.keys(b.band).sort().forEach(function (id) {
+        var j = b.band[id], p = posDi(id); if (!p) return;
+        out.push({ tipo: 'area', lat: p.lat, lon: p.lon, r: ES_R.letale, colore: j.owner ? COLORI[j.owner] : '#9a9a8a', pct: j.conq && j.pct ? j.pct : 0, colConq: COLORI[j.conq] || '#fff', contesa: !!j.contesa,
+          sim: '⚑', nome: id + (p.gps ? '' : ' (a mano)'), sotto: now - j._t > 60000 ? 'nessun segnale' : 'B' + (j.blu || 0) + ' · R' + (j.rossi || 0) });
+      });
+      if (b.hq && b.hq.lat) out.push({ tipo: 'area', lat: b.hq.lat, lon: b.hq.lon, r: 12, colore: '#c9a227', sim: 'HQ', nome: 'HQ' });
+      Object.keys(b.pat || {}).forEach(function (id, i) { var p = b.pat[id]; if (p.fix && p.lat) out.push({ tipo: 'pallino', lat: p.lat, lon: p.lon, colore: COLORI.blu, nome: 'P' + (i + 1) }); });
+      colpi.filter(function (c) { return now - c.t < 120000; }).forEach(function (c) { out.push({ tipo: 'area', lat: c.lat, lon: c.lon, r: ES_R.letale, colore: '#ff5a1f', sim: '✹', nome: 'colpo' }); });
+      return out;
+    }
+    conCampo(cid, mapBox, function (cm0) {
+      var cm = Object.assign({}, cm0, { punti: [] });
+      var g0 = { inizio: Date.now() + 864e5, durata: 60, fazioni: [{ team: 'blu', mob: null, partenza: [] }, { team: 'rossa', mob: null, partenza: [] }] };
+      v = F.vista(mapBox, { g: g0, campo: cm, team: null, colori: COLORI, nomi: {}, ora: Date.now, anteprima: true, mobile: true, allenamento: true, gps: true, segni: segni,
+        inquadra: function () { var o = []; Object.keys(b.band).forEach(function (id) { var p = posDi(id); if (p) o.push(p); }); if (b.hq && b.hq.lat) o.push(b.hq); return o; },
+        onTocco: function (lat, lon) { if (tocca) { var f0 = tocca; tocca = null; mapBox.classList.remove('scegli'); f0({ lat: lat, lon: lon }); } } });
+    });
+    var prima = b.cb, prossimo = null;
+    b.cb = function () { if (prima) prima(); if (prossimo) return; prossimo = setTimeout(function () { prossimo = null; disegnaLista(); if (v) v.ridisegna(); }, 400); };
+    var tk = setInterval(function () { disegnaLista(); if (v) v.ridisegna(); }, 3000);
+    disegnaLista();
+    var ch = chiusura; chiusura = function () { clearInterval(tk); b.cb = prima; if (ch) ch(); };
+  }
   function pagMortaioProva(id) {
     testata('Mortaio · BETA');
     if (!P('conflitti')) { app.appendChild(el('p', 'hint', 'Non disponibile.')); return; }
@@ -3289,6 +3380,12 @@
       adA.appendChild(bottone('🔗 Condividi link presenze', 'accent', function () { condividiEvento('a', a); }));
       adA.appendChild(bottone('⧉ Duplica', '', function () { vai('allenamentoModifica', { copia: a.id }); }));
       app.appendChild(adA);
+      app.appendChild(a.annullato ? bottone('↺ Ripristina l\'evento (non più annullato)', '', function () {
+        var d = Object.assign({}, a); delete d.annullato; delete d.motivo; S.salvaAllenamento(d).then(function () { toast('Evento ripristinato'); mostra(); }, errore);
+      }) : bottone('✖ Annulla l\'evento', 'pericolo', function () {
+        var m = prompt('Motivo (si legge sotto il timbro, es. "Pioggia"). Lascia vuoto per nessun motivo.', 'Maltempo'); if (m === null) return;
+        S.salvaAllenamento(Object.assign({}, a, { annullato: true, motivo: m.trim().slice(0, 60) })).then(function () { toast('Evento annullato'); mostra(); }, errore);
+      }));
       app.appendChild(bottone('⚙ Modifica', 'link', function () { vai('allenamentoModifica', a.id); }));
     }
     var hero = el('div', 'conf-hero all-hero');
@@ -3301,10 +3398,11 @@
     if (a.luogo || a.mapsUrl) lg.appendChild(link('Apri in Maps', mapsLink(a), 'btn piccolo'));
     hero.appendChild(lg);
     if (faseAll(a) === 'finito') hero.appendChild(el('div', 'conf-fine', 'ALLENAMENTO CONCLUSO'));
+    if (a.annullato) { hero.classList.add('annullato'); hero.appendChild(timbroAnnullato(a)); }
     app.appendChild(hero);
     if (esAttivo(a)) app.appendChild(bottone('⚑ ESERCITAZIONE IN CORSO · apri', 'accent big es-home', function () { vai('esercizio', a.id); }));
     else if (P('allenamenti') && a.campo) app.appendChild(bottone('⚑ Esercitazione bandiere (regia)', '', function () { vai('esercizio', a.id); }));
-    if (S.stato().me.team && (a.team || []).indexOf(S.stato().me.team) >= 0 && faseAll(a) !== 'finito') {
+    if (S.stato().me.team && (a.team || []).indexOf(S.stato().me.team) >= 0 && faseAll(a) !== 'finito' && !a.annullato) {
       var mia = miaAdesione('a:' + a.id);
       if (!mia || mia.dopo) { var rk = el('div', 'carta'); rk.appendChild(el('b', null, 'Ci sarai?')); rk.appendChild(treRisposte(a.id, 'allenamenti', function () { mostra(); })); app.appendChild(rk); }
       else {
@@ -3459,8 +3557,15 @@
     k.appendChild(el('div', 'pm-luogo', '⌖ ' + (a.luogo || 'Luogo da definire')));
     if (window.AC_METEO && fa !== 'finito') k.appendChild(AC_METEO.riquadro(a));
     k.appendChild(el('span', 'pm-apri', 'Tocca per mappa e argomenti ›'));
+    if (a.annullato) { k.classList.add('annullato'); k.appendChild(timbroAnnullato(a)); }
     k.onclick = function () { vai('allenamento', a.id); };
     return k;
+  }
+  // timbro rosso "EVENTO ANNULLATO" sopra la carta (con il motivo, se c'è)
+  function timbroAnnullato(a) {
+    var t = el('div', 'timbro'); t.appendChild(el('span', null, 'EVENTO')); t.appendChild(el('span', null, 'ANNULLATO'));
+    if (a.motivo) t.appendChild(el('small', null, a.motivo));
+    return t;
   }
 
 
@@ -4443,7 +4548,7 @@
     if (richiestaFatta || corrente().v !== 'home' || !$('foglio').hidden) return;
     var st = S.stato(); if (!st.me || !st.me.team) return;
     var voci = attivi().filter(function (c) { return (c.team || []).indexOf(st.me.team) >= 0 && fase(c) !== 'finito'; }).map(function (c) { return { k: c.id, id: c.id, coll: 'conflitti', x: c }; })
-      .concat(allenamentiAttivi().filter(function (a) { return (a.inizio || 0) > Date.now() && (a.team || []).indexOf(st.me.team) >= 0; }).map(function (a) { return { k: 'a:' + a.id, id: a.id, coll: 'allenamenti', x: a }; }));
+      .concat(allenamentiAttivi().filter(function (a) { return (a.inizio || 0) > Date.now() && !a.annullato && (a.team || []).indexOf(st.me.team) >= 0; }).map(function (a) { return { k: 'a:' + a.id, id: a.id, coll: 'allenamenti', x: a }; }));
     if (voci.some(function (v) { return !D.adesioni[v.k]; })) return;   // aspetta che arrivino tutte le risposte
     var da = voci.filter(function (v) { var r = miaAdesione(v.k); return !r || r.dopo; });
     richiestaFatta = true;
