@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.3.0"
+#define VERSIONE "1.4.0"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -242,6 +242,74 @@ int trasmetti(const uint8_t *p, size_t n) {
   arrivato = false;
   radio.startReceive();
   return st;
+}
+
+// ---------------------------------------------------------------- chat LoRa
+// I team leader scrivono dall'app (telefono -> Bluetooth -> il loro T-Beam pattuglia); HQ e bandiere ripetono i messaggi
+// (al massimo 2 volte), così arrivano anche fuori portata diretta.
+// T_MSG: 3-4 mittente · 5 progressivo · 6 ripetizioni rimaste · 7 tipo (0 globale, 1 fazione, 2 diretto, 3 conferma)
+//        8 fazione del mittente (1 blu, 2 rossi, 0 nessuna) · 9-10 destinatario (diretto/conferma) · 11 progressivo confermato · 12.. "nome<TAB>testo"
+// T_ANN: 3-4 id · 5 progressivo · 6 ripetizioni rimaste · 7 fazione · 8 batteria · 9.. nome   (ogni LoRa "chat" si annuncia ogni minuto)
+#define T_MSG 4
+#define T_ANN 5
+#define CHAT_TTL 2
+#define CHAT_MAX 160   // byte di nome + testo in un pacchetto
+struct ChatVisto { uint16_t da; uint8_t tipo, seq; };
+ChatVisto chatVisti[48]; int chatVi = 0;
+bool chatGiaVisto(uint16_t da, uint8_t tipo, uint8_t seq) {
+  for (auto &v : chatVisti) if (v.da == da && v.tipo == tipo && v.seq == seq) return true;
+  chatVisti[chatVi] = { da, tipo, seq }; chatVi = (chatVi + 1) % 48; return false;
+}
+uint8_t chatRip[16 + CHAT_MAX]; size_t chatRipN = 0; uint32_t chatRipAlle = 0;
+void (*chatCb)(const uint8_t *p, size_t n, float rssi) = nullptr;   // cosa fa questo ruolo con un messaggio (pattuglia, HQ)
+bool chatRipete = false;                                             // bandiere e HQ ripetono
+bool chatGiaVistoUltimo = false;
+// un pacchetto chat/annuncio: true se era della chat (e quindi è già gestito)
+bool chatRicevi(uint8_t *p, size_t n, float rssi) {
+  if (n < 9 || p[0] != 'A' || p[1] != 'C' || (p[2] != T_MSG && p[2] != T_ANN)) return false;
+  uint16_t da = (p[3] << 8) | p[4];
+  if (da == mioId) return true;
+  uint8_t tipo = p[2] == T_ANN ? 9 : (n > 7 ? p[7] : 0);
+  bool giaVisto = chatGiaVisto(da, tipo, p[5]);
+  if (!giaVisto && chatRipete && p[6] > 0 && !chatRipN && n <= sizeof(chatRip)) { memcpy(chatRip, p, n); chatRip[6]--; chatRipN = n; chatRipAlle = millis() + random(200, 1400); }
+  chatGiaVistoUltimo = giaVisto;
+  if (chatCb && (!giaVisto || (p[2] == T_MSG && tipo == 2))) chatCb(p, n, rssi);   // un diretto ripetuto va riconfermato (ma mostrato una volta sola)
+  return true;
+}
+void chatLoop() { if (chatRipN && millis() >= chatRipAlle) { trasmetti(chatRip, chatRipN); chatRipN = 0; } }
+uint8_t chatSeq = 0;
+String chatPulito(String t) { t.replace("\\", "/"); t.replace("\"", "'"); t.replace("\t", " "); t.replace("\r", " "); t.replace("\n", " "); return t; }
+// costruisce e manda un messaggio; restituisce il progressivo (per la conferma dei diretti)
+uint8_t chatInvia(uint8_t tipo, uint8_t faz, uint16_t a, uint8_t seqConf, const String &nome, const String &testo, uint8_t *copia = nullptr, size_t *copiaN = nullptr) {
+  String corpo = nome + "\t" + testo; int n = min((int)corpo.length(), CHAT_MAX);
+  while (n > 0 && n < (int)corpo.length() && ((uint8_t)corpo[n] & 0xC0) == 0x80) n--;   // non spezzare una lettera accentata
+  uint8_t p[12 + CHAT_MAX]; chatSeq++;
+  p[0] = 'A'; p[1] = 'C'; p[2] = T_MSG; p[3] = mioId >> 8; p[4] = mioId & 0xFF; p[5] = chatSeq; p[6] = CHAT_TTL; p[7] = tipo; p[8] = faz;
+  p[9] = a >> 8; p[10] = a & 0xFF; p[11] = seqConf; memcpy(p + 12, corpo.c_str(), n);
+  chatGiaVisto(mioId, tipo, chatSeq);
+  trasmetti(p, 12 + n);
+  if (copia) { memcpy(copia, p, 12 + n); *copiaN = 12 + n; }
+  return chatSeq;
+}
+void chatAnnuncia(uint8_t faz, uint8_t batt, const String &nome) {
+  uint8_t p[9 + 32]; int n = min((int)nome.length(), 32); static uint8_t sq = 0; sq++;
+  p[0] = 'A'; p[1] = 'C'; p[2] = T_ANN; p[3] = mioId >> 8; p[4] = mioId & 0xFF; p[5] = sq; p[6] = CHAT_TTL; p[7] = faz; p[8] = batt; memcpy(p + 9, nome.c_str(), n);
+  chatGiaVisto(mioId, 9, sq);
+  trasmetti(p, 9 + n);
+}
+const char *chatTipo(uint8_t t) { return t == 0 ? "globale" : t == 1 ? "fazione" : t == 2 ? "diretto" : "conferma"; }
+// riga JSON per l'app con un messaggio o un annuncio ricevuto
+String chatJson(const uint8_t *p, size_t n, float rssi) {
+  uint16_t da = (p[3] << 8) | p[4];
+  if (p[2] == T_ANN) {
+    String nome = chatPulito(String((const char *)p + 9).substring(0, n - 9));
+    return "{\"lora\":{\"id\":\"" + idTesto(da) + "\",\"nome\":\"" + nome + "\",\"f\":\"" + nomeFaz(p[7]) + "\",\"batt\":" + String(p[8]) + ",\"rssi\":" + String((int)rssi) + ",\"hop\":" + String(CHAT_TTL - p[6]) + "}}";
+  }
+  char buf[CHAT_MAX + 1]; int m = min((int)n - 12, CHAT_MAX); if (m < 0) m = 0; memcpy(buf, p + 12, m); buf[m] = 0;
+  String corpo = buf; int tab = corpo.indexOf('\t');
+  String nome = chatPulito(tab >= 0 ? corpo.substring(0, tab) : String("?")), testo = chatPulito(tab >= 0 ? corpo.substring(tab + 1) : corpo);
+  return "{\"chat\":{\"da\":\"" + idTesto(da) + "\",\"seq\":" + String(p[5]) + ",\"nome\":\"" + nome + "\",\"f\":\"" + nomeFaz(p[8]) + "\",\"tipo\":\"" + chatTipo(p[7]) + "\",\"a\":\"" + idTesto((p[9] << 8) | p[10]) +
+         "\",\"testo\":\"" + testo + "\",\"rssi\":" + String((int)rssi) + ",\"hop\":" + String(CHAT_TTL - p[6]) + "}}";
 }
 
 // Messaggi via LoRa (tutto in byte, per stare poco in aria). Iniziano tutti con 'A''C' e un tipo:
@@ -612,11 +680,14 @@ String comando(String c) {
 }
 
 void ascoltaRadio() {
+  chatLoop();
   if (!arrivato) return;
   arrivato = false;
-  uint8_t p[120]; size_t len = radio.getPacketLength();
+  uint8_t p[16 + CHAT_MAX]; size_t len = radio.getPacketLength();
   int st = radio.readData(p, min(len, sizeof(p) - 1));
+  float rsC = radio.getRSSI();
   radio.startReceive();
+  if (st == RADIOLIB_ERR_NONE && chatRicevi(p, min(len, sizeof(p) - 1), rsC)) return;   // chat: la bandiera la ripete e basta
   if (st == RADIOLIB_ERR_NONE && len >= TESTA && p[0] == 'A' && p[1] == 'C' && p[2] == T_STATO) {
     // stato di un'altra bandiera: ci interessa solo la sua posizione
     uint16_t o = (p[3] << 8) | p[4]; int32_t la, lo; memcpy(&la, p + 10, 4); memcpy(&lo, p + 14, 4);
@@ -646,6 +717,7 @@ void setup() {
   validoMs = pref.getUInt("valido", 8000);
   soglia = pref.getInt("soglia", SOGLIA_RSSI); tempoConq = pref.getInt("tempo", CONQUISTA_S); luce = pref.getInt("luce", LUCE);
   muto = pref.getBool("muto", false); buzBasso = pref.getBool("buzBasso", BUZZER_BASSO);
+  chatRipete = true;   // le bandiere fanno da ripetitori per la chat dei team leader
   pinMode(PIN_BUZZER, OUTPUT); digitalWrite(PIN_BUZZER, buzBasso ? HIGH : LOW);
   led.begin(); led.clear(); led.show();
   pinMode(PIN_LED_ROSSO, OUTPUT); pinMode(PIN_LED_BLU, OUTPUT);
@@ -695,19 +767,11 @@ void loop() {
 }
 #endif
 
-#ifdef RUOLO_HQ
-// ================================================================ HQ
-#include "qrgen.h"
-TinyGPSPlus gps;
-String qrTesto = "";   // se c'è, il display mostra il QR (es. per il mortaio); comando "qr <testo>" / "qr -" 
+#if defined(RUOLO_HQ) || defined(RUOLO_PATTUGLIA)
 // Bluetooth: servizio "UART" Nordic (lo stesso di tante app): l'app riceve righe JSON, manda comandi di testo.
 #define NUS_SERV "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 #define NUS_RX   "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 #define NUS_TX   "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
-struct Band { uint16_t id; uint8_t blu, rossi, owner, batt; float rssi; uint32_t visto; };
-#define MAX_BAND 8
-Band band[MAX_BAND];
-int nBand = 0, nPacchetti = 0, nScartati = 0, nPat = 0;
 NimBLECharacteristic *bleTx = nullptr;
 volatile bool bleConnesso = false;
 String daBle = "";
@@ -735,6 +799,76 @@ void esci(const String &s) {
     delay(4);
   }
 }
+// Bluetooth acceso col nome dato (l'app cerca i nomi che iniziano con AC-)
+void avviaBle(const String &nome) {
+  NimBLEDevice::init(nome.c_str());
+  NimBLEServer *srv = NimBLEDevice::createServer();
+  srv->setCallbacks(new ServerCb());
+  NimBLEService *s = srv->createService(NUS_SERV);
+  bleTx = s->createCharacteristic(NUS_TX, NIMBLE_PROPERTY::NOTIFY);
+  NimBLECharacteristic *rx = s->createCharacteristic(NUS_RX, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
+  rx->setCallbacks(new RxCb());
+  s->start();
+  NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
+  adv->addServiceUUID(NUS_SERV); adv->setScanResponse(true);
+  adv->start();
+}
+// righe arrivate dall'app via Bluetooth
+void righeBle(void (*fai)(const String &)) {
+  String bl; portENTER_CRITICAL(&muxBle); bl = daBle; daBle = ""; portEXIT_CRITICAL(&muxBle);
+  static String buf; buf += bl;
+  int nl; while ((nl = buf.indexOf('\n')) >= 0) { fai(buf.substring(0, nl)); buf = buf.substring(nl + 1); }
+  if (buf.length() && bl.length() == 0) { fai(buf); buf = ""; }   // comando senza "a capo"
+}
+// messaggio diretto in attesa di conferma: si riprova 2 volte
+struct ChatAttesa { bool on; uint8_t p[16 + CHAT_MAX]; size_t n; uint8_t seq; uint16_t a; int tent; uint32_t prox; } chatAtt = { false };
+void chatRiprova() {
+  if (!chatAtt.on || millis() < chatAtt.prox) return;
+  if (chatAtt.tent >= 3) { chatAtt.on = false; esci("{\"fallito\":{\"seq\":" + String(chatAtt.seq) + ",\"a\":\"" + idTesto(chatAtt.a) + "\"}}"); return; }
+  chatAtt.tent++; chatAtt.prox = millis() + 7000 + random(0, 2000); trasmetti(chatAtt.p, chatAtt.n);
+}
+// "chat g|f|d <id destinatario o -> <testo>" dall'app: manda e risponde {"inviato":...}
+void chatDaApp(const String &c, uint8_t faz, const String &nome) {
+  String r = c.substring(4); r.trim();
+  int sp = r.indexOf(' '); if (sp < 0) return; String tt = r.substring(0, sp); r = r.substring(sp + 1);
+  sp = r.indexOf(' '); if (sp < 0) return; String dest = r.substring(0, sp), testo = r.substring(sp + 1); testo.trim();
+  if (!testo.length()) return;
+  uint8_t tipo = tt == "f" ? 1 : tt == "d" ? 2 : 0;
+  if (tipo == 1 && !faz) { esci("{\"log\":\"Per il canale di fazione collega il telefono: serve sapere la tua fazione\"}"); return; }
+  uint16_t a = tipo == 2 ? (uint16_t)strtoul(dest.c_str(), nullptr, 16) : 0;
+  uint8_t sq = chatInvia(tipo, faz, a, 0, nome, testo, chatAtt.p, &chatAtt.n);
+  if (tipo == 2) { chatAtt.on = true; chatAtt.seq = sq; chatAtt.a = a; chatAtt.tent = 1; chatAtt.prox = millis() + 7000 + random(0, 2000); }
+  esci("{\"inviato\":{\"seq\":" + String(sq) + ",\"tipo\":\"" + chatTipo(tipo) + "\",\"a\":\"" + idTesto(a) + "\",\"da\":\"" + idTesto(mioId) + "\",\"testo\":\"" + chatPulito(testo) + "\"}}");
+}
+// un messaggio arrivato: è per me? (miaFaz 0 = HQ: solo globale e diretti)
+bool chatPerMe(const uint8_t *p, uint8_t miaFaz) {
+  if (p[2] == T_ANN) return true;
+  uint8_t tipo = p[7]; uint16_t a = (p[9] << 8) | p[10];
+  return tipo == 0 || (tipo == 1 && miaFaz && p[8] == miaFaz) || ((tipo == 2 || tipo == 3) && a == mioId);
+}
+// conferma di un diretto ricevuto, e "ok" all'app quando arriva la conferma di un mio diretto
+bool chatConferme(const uint8_t *p, uint8_t faz, const String &nome) {
+  if (p[2] != T_MSG) return false;
+  uint16_t da = (p[3] << 8) | p[4], a = (p[9] << 8) | p[10];
+  if (p[7] == 3 && a == mioId) {
+    if (chatAtt.on && chatAtt.a == da && chatAtt.seq == p[11]) chatAtt.on = false;
+    esci("{\"ok\":{\"seq\":" + String(p[11]) + ",\"da\":\"" + idTesto(da) + "\"}}");
+    return true;
+  }
+  if (p[7] == 2 && a == mioId) { delay(random(30, 250)); chatInvia(3, faz, da, p[5], nome, ""); }
+  return false;
+}
+#endif
+
+#ifdef RUOLO_HQ
+// ================================================================ HQ
+#include "qrgen.h"
+TinyGPSPlus gps;
+String qrTesto = "";   // se c'è, il display mostra il QR (es. per il mortaio); comando "qr <testo>" / "qr -" 
+struct Band { uint16_t id; uint8_t blu, rossi, owner, batt; float rssi; uint32_t visto; };
+#define MAX_BAND 8
+Band band[MAX_BAND];
+int nBand = 0, nPacchetti = 0, nScartati = 0, nPat = 0;
 void registro(const String &s) { String e = s; e.replace("\\", "/"); e.replace("\"", "'"); esci("{\"log\":\"" + e + "\"}"); }
 
 // tag dei giocatori vicini all'HQ (rientro dei colpiti): l'HQ li ascolta e li passa all'app, che decide chi torna in gioco
@@ -837,25 +971,22 @@ void comando(String c) {
     for (int i = 0; i < nBand; i++) registro(" " + idTesto(band[i].id) + " B" + String(band[i].blu) + " R" + String(band[i].rossi) + " " + String((millis() - band[i].visto) / 1000) + " s fa, " + String((int)band[i].rssi) + " dBm");
     return;
   }
+  if (low.startsWith("chat ")) { chatDaApp(c, 0, "HQ"); return; }
   if (low.startsWith("msg")) { msgTesto = c.substring(3); msgTesto.trim(); msgFino = millis() + 6000; mostra(); return; }
   if (low.startsWith("qr")) { String t = c.substring(2); t.trim(); qrTesto = (t == "-" ? "" : t); registro(qrTesto.length() ? "QR sul display: " + qrTesto : "QR tolto"); mostra(); return; }
   if (low == "riavvia") { delay(200); ESP.restart(); }
-  registro("comandi: info · qr <testo>|- · msg <testo> · cmd <id|tutte> <comando> (es. cmd tutte soglia -75, cmd A1B2 test) · riavvia");
+  registro("comandi: info · qr <testo>|- · msg <testo> · chat g|d <id|-> <testo> · cmd <id|tutte> <comando> (es. cmd tutte soglia -75, cmd A1B2 test) · riavvia");
 }
 
 void setup() {
   avvioComune("HQ");
-  NimBLEDevice::init(("AC-HQ-" + idTesto(mioId)).c_str());
-  NimBLEServer *srv = NimBLEDevice::createServer();
-  srv->setCallbacks(new ServerCb());
-  NimBLEService *s = srv->createService(NUS_SERV);
-  bleTx = s->createCharacteristic(NUS_TX, NIMBLE_PROPERTY::NOTIFY);
-  NimBLECharacteristic *rx = s->createCharacteristic(NUS_RX, NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
-  rx->setCallbacks(new RxCb());
-  s->start();
-  NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
-  adv->addServiceUUID(NUS_SERV); adv->setScanResponse(true);
-  adv->start();
+  avviaBle("AC-HQ-" + idTesto(mioId));
+  chatRipete = true;
+  chatCb = [](const uint8_t *p, size_t n, float rssi) {
+    if (!chatPerMe(p, 0)) return;   // la regia legge solo il globale e i messaggi diretti all'HQ
+    if (chatConferme(p, 0, "HQ") || chatGiaVistoUltimo) return;
+    esci(chatJson(p, n, rssi));
+  };
   // ascolto dei tag (rientro all'HQ): finestra a metà, così resta tempo per il Bluetooth verso l'app
   if (!leggiUuid(TAG_UUID, uuidHq)) Serial.println("TAG_UUID scritto male in config.h");
   NimBLEScan *sc = NimBLEDevice::getScan();
@@ -880,21 +1011,22 @@ void loop() {
   }
   while (Serial1.available()) gps.encode(Serial1.read());
   String riga; if (leggiRiga(riga)) comando(riga);
-  String bl; portENTER_CRITICAL(&muxBle); bl = daBle; daBle = ""; portEXIT_CRITICAL(&muxBle);
-  static String bufBle; bufBle += bl;
-  int nl; while ((nl = bufBle.indexOf('\n')) >= 0) { comando(bufBle.substring(0, nl)); bufBle = bufBle.substring(nl + 1); }
-  if (bufBle.length() && bl.length() == 0) { comando(bufBle); bufBle = ""; }   // comando senza "a capo"
+  righeBle([](const String &x) { comando(x); });
+  chatLoop(); chatRiprova();
+  static uint32_t annuncio = 0;
+  if (statoLoRa == 0 && millis() - annuncio > 60000) { annuncio = millis() - random(0, 5000); chatAnnuncia(0, batteria(), "HQ"); }
   // battito ogni 10 s: l'app capisce che l'HQ è vivo anche senza bandiere
   static uint32_t battito = 0;
   if (millis() - battito > 10000) { battito = millis(); esci("{\"hq\":\"" + idTesto(mioId) + "\",\"pacchetti\":" + String(nPacchetti) + ",\"scartati\":" + String(nScartati) + ",\"irq\":" + String(nIrq) + ",\"lora\":" + String(statoLoRa) + ",\"pmu\":\"" + pmuNome + "\",\"radio\":\"" + chipRadio + "\",\"diag\":\"" + diagnosi + "\",\"batt\":" + String(batteria()) +
                      (gps.location.isValid() && gps.location.age() < 10000 && gps.hdop.hdop() < 3 ? ",\"lat\":" + String(gps.location.lat(), 6) + ",\"lon\":" + String(gps.location.lng(), 6) : String("")) + ",\"sat\":" + String(gps.satellites.value()) + "}"); }
   if (!arrivato) { delay(5); return; }
   arrivato = false;
-  uint8_t p[TESTA + 4 * MAX_TAG_PACCHETTO + 8];
+  uint8_t p[TESTA + 4 * MAX_TAG_PACCHETTO + 8 > 16 + CHAT_MAX ? TESTA + 4 * MAX_TAG_PACCHETTO + 8 : 16 + CHAT_MAX];
   size_t len = radio.getPacketLength();
   int st = radio.readData(p, min(len, sizeof(p)));
   float rs = radio.getRSSI(), sn = radio.getSNR();
   radio.startReceive();
+  if (st == RADIOLIB_ERR_NONE && chatRicevi(p, min(len, sizeof(p)), rs)) { nPacchetti++; return; }
   if (st != RADIOLIB_ERR_NONE || len < 5 || p[0] != 'A' || p[1] != 'C') { nScartati++; registro("pacchetto scartato (err " + String(st) + ", " + String(len) + " byte, " + String((int)rs) + " dBm)"); return; }
   nPacchetti++;
   uint16_t id = (p[3] << 8) | p[4];
@@ -934,11 +1066,19 @@ void loop() {
 #endif
 
 #ifdef RUOLO_PATTUGLIA
-// ================================================================ PATTUGLIA
+// ================================================================ PATTUGLIA (LoRa del team leader)
+// Manda la posizione all'HQ e fa da ponte per la chat: telefono del team leader -> Bluetooth -> LoRa -> gli altri.
 TinyGPSPlus gps;
 uint8_t seq = 0;
 uint32_t ultimo = 0, inviatoFino = 0;
 int ultimoEsito = 1;
+uint8_t miaFaz = 0; String mioNome = "";   // li manda il telefono quando si collega ("chi blu TAURI·WHIPLASH")
+// ultimo messaggio da mostrare sul display
+String msgNome = "", msgTesto = "", msgTipo = ""; uint32_t msgDa = 0; bool msgNuovo = false;
+// gli ultimi messaggi, da ridare al telefono quando si ricollega
+#define STORIA 12
+String storia[STORIA]; int nStoria = 0;
+void ricorda(const String &j) { if (nStoria < STORIA) storia[nStoria++] = j; else { for (int i = 1; i < STORIA; i++) storia[i - 1] = storia[i]; storia[STORIA - 1] = j; } }
 void inviaPos() {
   bool ok = gps.location.isValid() && gps.location.age() < 10000;
   int32_t la = ok ? (int32_t)(gps.location.lat() * 1e6) : 0, lo = ok ? (int32_t)(gps.location.lng() * 1e6) : 0;
@@ -952,32 +1092,94 @@ void inviaPos() {
   inviatoFino = millis() + 1200;
   Serial.printf("[%s] posizione #%u %s -> %s\n", idTesto(mioId).c_str(), seq, ok ? (String(la / 1e6, 6) + "," + String(lo / 1e6, 6)).c_str() : "senza GPS", ultimoEsito == RADIOLIB_ERR_NONE ? "inviata" : "ERRORE LoRa");
 }
+String nomeVisto() { return mioNome.length() ? mioNome : "LoRa " + idTesto(mioId); }
+void stato() {   // per l'app: chi sono e come sto
+  esci("{\"pat\":\"" + idTesto(mioId) + "\",\"nome\":\"" + chatPulito(mioNome) + "\",\"f\":\"" + nomeFaz(miaFaz) + "\",\"batt\":" + String(batteria()) + ",\"fix\":" + (gps.location.isValid() && gps.location.age() < 10000 ? "true" : "false") + ",\"lora\":" + String(statoLoRa) + "}");
+}
+void comandoPat(const String &c0) {
+  String c = c0; c.trim(); String low = c; low.toLowerCase();
+  if (low.startsWith("chi ")) {   // chi blu|rossa|- <nome>
+    String r = c.substring(4); r.trim(); int sp = r.indexOf(' ');
+    String f = sp > 0 ? r.substring(0, sp) : r; String n = sp > 0 ? r.substring(sp + 1) : "";
+    miaFaz = f == "blu" ? 1 : f == "rossa" ? 2 : 0; n.trim(); mioNome = n.substring(0, 28);
+    pref.putUChar("faz", miaFaz); pref.putString("nome", mioNome);
+    stato(); if (statoLoRa == 0) chatAnnuncia(miaFaz, batteria(), nomeVisto());
+    return;
+  }
+  if (low.startsWith("chat ")) { chatDaApp(c, miaFaz, nomeVisto()); return; }
+  if (low == "storia") { for (int i = 0; i < nStoria; i++) esci(storia[i]); stato(); return; }
+  if (low == "invia") { ultimo = millis(); inviaPos(); return; }
+  if (low == "stato" || low == "info") { stato(); return; }
+  if (low == "riavvia") { delay(200); ESP.restart(); }
+  Serial.println("comandi: chi blu|rossa|- <nome>, chat g|f|d <id|-> <testo>, storia, invia, stato, riavvia");
+}
 void setup() {
   avvioComune("PATTUGLIA");
+  pref.begin("ac", false);
+  miaFaz = pref.getUChar("faz", 0); mioNome = pref.getString("nome", "");
+  avviaBle("AC-LORA-" + idTesto(mioId));
+  chatCb = [](const uint8_t *p, size_t n, float rssi) {
+    if (!chatPerMe(p, miaFaz)) return;
+    if (chatConferme(p, miaFaz, nomeVisto()) || chatGiaVistoUltimo) return;
+    String j = chatJson(p, n, rssi); esci(j);
+    if (p[2] == T_MSG) {
+      ricorda(j);
+      char buf[CHAT_MAX + 1]; int m = min((int)n - 12, CHAT_MAX); if (m < 0) m = 0; memcpy(buf, p + 12, m); buf[m] = 0;
+      String corpo = buf; int tab = corpo.indexOf('\t');
+      msgNome = tab >= 0 ? corpo.substring(0, tab) : "?"; msgTesto = tab >= 0 ? corpo.substring(tab + 1) : corpo;
+      msgTipo = p[7] == 0 ? "GLOBALE" : p[7] == 1 ? "FAZIONE" : "PER TE"; msgDa = millis(); msgNuovo = true;
+    }
+  };
   Serial1.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
   if (!accendiLoRa()) { scrivi("PATTUGLIA", "ERRORE", "LoRa non partita"); return; }
   radio.startReceive();
-  Serial.println("Pattuglia " + idTesto(mioId) + ": manda la posizione ogni " + String(PATTUGLIA_MS / 1000) + " s. Pulsante = manda subito.");
+  Serial.println("Pattuglia " + idTesto(mioId) + ": posizione ogni " + String(PATTUGLIA_MS / 1000) + " s. Pulsante = manda subito. Bluetooth: AC-LORA-" + idTesto(mioId));
   ultimo = millis() - PATTUGLIA_MS + 3000;
 }
+// testo lungo a righe da 21 caratteri (display piccolo)
+String rigaN(const String &t, int k) { return t.substring(min((int)t.length(), k * 21), min((int)t.length(), k * 21 + 21)); }
 void loop() {
   while (Serial1.available()) gps.encode(Serial1.read());
   bool ok = gps.location.isValid() && gps.location.age() < 10000;
   // con il GPS ogni 15 s (+ un po' a caso, per non trasmettere sempre insieme a qualcun altro); senza, ogni 60 s solo per dire "ci sono"
   static uint32_t attesa = PATTUGLIA_MS;
-  if (millis() - ultimo >= (ok ? attesa : 60000UL)) { ultimo = millis(); attesa = PATTUGLIA_MS + random(0, 3000); inviaPos(); }
-  if (pulsante() == 1) { ultimo = millis(); inviaPos(); }
+  if (statoLoRa == 0 && millis() - ultimo >= (ok ? attesa : 60000UL)) { ultimo = millis(); attesa = PATTUGLIA_MS + random(0, 3000); inviaPos(); }
+  static uint32_t annuncio = 0;
+  if (statoLoRa == 0 && millis() - annuncio > 60000) { annuncio = millis() - random(0, 5000); chatAnnuncia(miaFaz, batteria(), nomeVisto()); }
+  // radio: chat e annunci degli altri
+  if (arrivato) {
+    arrivato = false;
+    uint8_t p[16 + CHAT_MAX]; size_t len = radio.getPacketLength();
+    int st = radio.readData(p, min(len, sizeof(p)));
+    float rs = radio.getRSSI();
+    radio.startReceive();
+    if (st == RADIOLIB_ERR_NONE) chatRicevi(p, min(len, sizeof(p)), rs);
+  }
+  chatLoop(); chatRiprova();
+  bool vedoMsg = msgNuovo && millis() - msgDa < 60000;
+  int pr = pulsante();
+  if (pr == 1) { if (vedoMsg) msgNuovo = false; else { ultimo = millis(); inviaPos(); } }   // con un messaggio sul display il tasto lo chiude
   static uint32_t disp = 0;
   if (millis() - disp >= 500) {
     disp = millis();
-    uint32_t prossimo = (ok ? attesa : 60000UL) - min(millis() - ultimo, ok ? attesa : 60000UL);
-    scrivi("PATTUGLIA " + idTesto(mioId) + " " + battTesto(batteria()),
-           millis() < inviatoFino ? String(ultimoEsito == RADIOLIB_ERR_NONE ? "INVIATA" : "ERR LoRa") : ok ? "GPS OK" : "NO GPS",
-           ok ? String(gps.location.lat(), 5) + " " + String(gps.location.lng(), 5) : String("cerco i satelliti... cielo aperto"),
-           "Satelliti " + String(gps.satellites.value()) + (gps.hdop.isValid() ? "  HDOP " + String(gps.hdop.hdop(), 1) : ""),
-           "#" + String(seq) + " " + loraTesto() + " prossima " + String(prossimo / 1000) + "s");
+    if (vedoMsg) {
+      int pagine = max(1, ((int)msgTesto.length() + 62) / 63), pg = ((millis() - msgDa) / 4000) % pagine;
+      if (haOled && ((millis() - msgDa) < 3000) && ((millis() / 250) % 2)) { oled.invertDisplay(true); } else if (haOled) oled.invertDisplay(false);
+      scrivi(msgTipo + " " + String((millis() - msgDa) / 1000) + "s" + (pagine > 1 ? " " + String(pg + 1) + "/" + String(pagine) : ""), msgNome.substring(0, 10),
+             rigaN(msgTesto, pg * 3), rigaN(msgTesto, pg * 3 + 1), rigaN(msgTesto, pg * 3 + 2));
+    } else {
+      if (haOled) oled.invertDisplay(false);
+      uint32_t prossimo = (ok ? attesa : 60000UL) - min(millis() - ultimo, ok ? attesa : 60000UL);
+      scrivi(nomeVisto().substring(0, 15) + " " + battTesto(batteria()),
+             millis() < inviatoFino ? String(ultimoEsito == RADIOLIB_ERR_NONE ? "INVIATA" : "ERR LoRa") : ok ? "GPS OK" : "NO GPS",
+             ok ? String(gps.location.lat(), 5) + " " + String(gps.location.lng(), 5) : String("cerco i satelliti... cielo aperto"),
+             String(miaFaz == 1 ? "BLU" : miaFaz == 2 ? "ROSSI" : "fazione ?") + " · BT " + (bleConnesso ? "telefono ok" : "AC-LORA-" + idTesto(mioId)),
+             "#" + String(seq) + " " + loraTesto() + " prossima " + String(prossimo / 1000) + "s");
+    }
   }
-  String r; if (leggiRiga(r)) { if (r == "invia") { ultimo = millis(); inviaPos(); } else if (r == "riavvia") ESP.restart(); else Serial.println("comandi: invia, riavvia"); }
+  String r; if (leggiRiga(r)) comandoPat(r);
+  righeBle(comandoPat);
+  static uint32_t st10 = 0; if (millis() - st10 > 10000) { st10 = millis(); stato(); }
   delay(10);
 }
 #endif
