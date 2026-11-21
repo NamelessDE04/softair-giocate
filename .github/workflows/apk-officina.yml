@@ -12,6 +12,8 @@ on:
 jobs:
   apk:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -75,3 +77,10 @@ jobs:
         with:
           name: officina-apk
           path: out/*.apk
+      - name: Pubblica l'APK (pagina Releases del repository, da scaricare col telefono)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          T="officina-${{ inputs.versione }}"
+          gh release view "$T" >/dev/null 2>&1 || gh release create "$T" --prerelease --title "Officina AC ${{ inputs.versione }}" --notes "App Android Officina AC: firmware, configurazione dispositivi, beacon, chat LoRa. Installa il file .apk dal telefono."
+          gh release upload "$T" out/*.apk --clobber
