@@ -1,0 +1,77 @@
+name: APK Officina (solo a mano)
+
+# Parte SOLO quando lo lanci tu (Actions → APK Officina → Run workflow): niente aggiornamenti automatici dell'APK.
+on:
+  workflow_dispatch:
+    inputs:
+      versione:
+        description: 'Nome della versione (es. 0.1)'
+        required: true
+        default: '0.1'
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ hashFiles('bandiera/platformio.ini') }}
+      - name: Firmware (gli stessi dell'app web)
+        run: |
+          pip install -q platformio
+          cd bandiera
+          OUT=../web/firmware/bin; mkdir -p $OUT
+          VER=$(grep -o 'define VERSIONE "[^"]*"' src/main.cpp | cut -d'"' -f2)
+          PK=~/.platformio/packages
+          for e in bandiera hq tag pattuglia iniettore; do
+            pio run -e $e
+            B=.pio/build/$e
+            python $PK/tool-esptoolpy/esptool.py --chip esp32 merge_bin -o $OUT/$e.bin --flash_mode dio --flash_freq 40m --flash_size 4MB \
+              0x1000 $B/bootloader.bin 0x8000 $B/partitions.bin 0xe000 $PK/framework-arduinoespressif32/tools/partitions/boot_app0.bin 0x10000 $B/firmware.bin
+            printf '{"name":"Airsoft Conflict %s","version":"%s","new_install_prompt_erase":true,"builds":[{"chipFamily":"ESP32","parts":[{"path":"%s.bin","offset":0}]}]}' "$e" "$VER" "$e" > $OUT/$e.json
+          done
+          echo "{\"versione\":\"$VER\",\"quando\":\"$(date -u +%Y-%m-%dT%H:%MZ)\",\"commit\":\"${GITHUB_SHA::7}\"}" > $OUT/build.json
+      - name: ESP Web Tools
+        run: |
+          cd "$RUNNER_TEMP" && npm pack esp-web-tools@10 && tar xzf esp-web-tools-*.tgz
+          mkdir -p "$GITHUB_WORKSPACE/web/firmware/ewt" && cp -r package/dist/web/* "$GITHUB_WORKSPACE/web/firmware/ewt/"
+      - name: Pagine dentro l'APK
+        run: python tool-android/prepara.py
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+      - name: Chiave di firma
+        env:
+          KS_BASE64: ${{ secrets.KS_BASE64 }}
+          KS_PASS_S: ${{ secrets.KS_PASS }}
+        run: |
+          if [ -n "$KS_BASE64" ]; then
+            echo "$KS_BASE64" | base64 -d > "$RUNNER_TEMP/firma.jks"; echo "KS_PASS=$KS_PASS_S" >> $GITHUB_ENV
+          else
+            echo "::warning::Manca il segreto KS_BASE64: firmo con una chiave temporanea (per aggiornare bisognerà disinstallare l'app prima)"
+            keytool -genkeypair -keystore "$RUNNER_TEMP/firma.jks" -storepass officina -keypass officina -alias officina -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Officina AC" 
+            echo "KS_PASS=officina" >> $GITHUB_ENV
+          fi
+          echo "KS_FILE=$RUNNER_TEMP/firma.jks" >> $GITHUB_ENV
+      - name: Compila l'APK
+        env:
+          VERSIONE_NOME: ${{ inputs.versione }}
+          VERSIONE_CODICE: ${{ github.run_number }}
+        run: |
+          cd tool-android
+          gradle --no-daemon assembleRelease
+          mkdir -p ../out && cp app/build/outputs/apk/release/app-release.apk "../out/officina-ac-${{ inputs.versione }}.apk"
+          ls -la ../out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: officina-apk
+          path: out/*.apk

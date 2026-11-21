@@ -3,8 +3,9 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.74';
+  var VERSIONE = '0.75';
   var S = window.S40, F = window.S40F;
+  var TOOL = !!window.AC_TOOL;   // dentro l'app Android «Officina»: niente account, solo dispositivi
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
   var $ = function (id) { return document.getElementById(id); };
@@ -97,7 +98,7 @@
     app.innerHTML = ''; window.scrollTo(0, 0);
     $('pieno').hidden = true; $('pieno').innerHTML = '';
     document.body.classList.remove('a-pieno');
-    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva, dmz: pagDmz, dmzModifica: pagDmzModifica, dmzLive: pagDmzLive, mortaioProva: pagMortaioProva, banco: pagBanco, beaconProg: pagBeaconProg, provaTbeam: pagProvaTbeam, esercizio: pagEsercizio, lab: pagLab, chat: pagChat }[c.v];
+    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva, dmz: pagDmz, dmzModifica: pagDmzModifica, dmzLive: pagDmzLive, mortaioProva: pagMortaioProva, banco: pagBanco, beaconProg: pagBeaconProg, provaTbeam: pagProvaTbeam, esercizio: pagEsercizio, lab: pagLab, chat: pagChat, officina: pagOfficina }[c.v];
     (r || home)(c.p);
   }
   function aPieno() { document.body.classList.add('a-pieno'); var p = $('pieno'); p.hidden = false; p.innerHTML = ''; return p; }
@@ -155,12 +156,15 @@
     var t = teamDi(me.team); tx.appendChild(el('small', null, (t ? t.nome : 'Nessun team') + ' · ' + S.nomeRuolo(st.ruolo)));
     chi.appendChild(tx); m.appendChild(chi);
     var voci = [];
+    if (TOOL) voci = OFF_VOCI.map(function (x) { return [x[0], x[2], x[4]]; });
+    else {
     if (me.team) voci.push(['team', 'Il mio team', function () { vai('team', me.team); }]);
     voci.push(['profilo', 'Profilo', function () { vai('profilo'); }]);
     if (organizza()) voci.push(['organizza', 'Organizza', function () { vai('organizza'); }]);
     if (st.dev || (st.ruolo && st.ruolo !== 'truppa')) voci.push(['chat', 'Chat LoRa', function () { vai('chat'); }]);
     if (st.dev || P('conflitti')) voci.push(['prova', 'Prova e test', function () { vai('lab'); }]);
     voci.push(['esci', 'Esci', function () { S.logout(); }, 'menu-esci']);
+    }
     voci.forEach(function (v) {
       var b = el('button', 'menu-voce' + (v[3] ? ' ' + v[3] : '')); b.type = 'button';
       b.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' + ICO[v[0]] + '</svg>';
@@ -198,7 +202,159 @@
     if (navigator.share) navigator.share({ text: msg }).catch(function () {}); else { navigator.clipboard && navigator.clipboard.writeText(msg); toast('Link copiato'); }
   }
   function finitoApriEvento() { apriEvento = null; try { sessionStorage.removeItem('apriEvento'); } catch (e) {} }
+  // ================= OFFICINA DISPOSITIVI (anche nell'app Android, senza account)
+  var OFF_VOCI = [
+    ['organizza', '🔧', 'Collega e configura', 'bandiere, HQ, LoRa team leader, tag finti: nomi e impostazioni', function () { vai('officina'); }],
+    ['iniettore', '⬇', 'Firmware', 'carica il firmware sulle schede col cavo', function () { location.href = 'firmware/index.html'; }],
+    ['beacon', '◉', 'Beacon prog', 'programma i tag con l\'iniettore', function () { vai('beaconProg'); }],
+    ['iniettore', '⌁', 'Iniettore', 'tutti i dati e i comandi del T-Beam collegato', function () { vai('banco'); }],
+    ['prova', '⚑', 'Prova 3 T-Beam', 'bandiera, tag e conquista al banco', function () { vai('provaTbeam'); }],
+    ['chat', '📡', 'Chat LoRa', 'messaggi sulla rete LoRa, senza internet', function () { vai('chat'); }]
+  ];
+  function homeTool() {
+    app.appendChild(el('h2', 'off-tit', 'Officina dispositivi'));
+    app.appendChild(el('p', 'hint', 'Tutto qui funziona senza internet e senza account: col cavo OTG o col Bluetooth del telefono. Per giocate, giocatori e assegnazione dei beacon usa l\'app web.'));
+    OFF_VOCI.forEach(function (x) {
+      var k = el('button', 'carta off-voce'); k.type = 'button';
+      k.appendChild(el('span', 'off-ic', x[1])); var t = el('div'); t.appendChild(el('b', null, x[2])); t.appendChild(el('small', null, x[3])); k.appendChild(t);
+      k.onclick = x[4]; app.appendChild(k);
+    });
+    var fw = el('small', 'hint off-fw', 'Firmware dentro questa app: …'); app.appendChild(fw);
+    fetch('firmware/bin/build.json').then(function (r) { return r.json(); }).then(function (j) { fw.textContent = 'Firmware dentro questa app: ' + j.versione + ' (' + j.quando.slice(0, 10) + ')'; }).catch(function () { fw.textContent = ''; });
+  }
+  function pagOfficina() {
+    testata('Officina dispositivi');
+    var b = BANCO, box = el('div', 'officina'); app.appendChild(box);
+    var REG = {}; try { REG = JSON.parse(localStorage.getItem('officina-reg') || '{}'); } catch (e) {}
+    function salvaReg() { try { localStorage.setItem('officina-reg', JSON.stringify(REG)); } catch (e) {} }
+    var conn = el('div', 'carta'); box.appendChild(conn);
+    var pan = el('div'); box.appendChild(pan);
+    var regBox = el('div', 'carta'); box.appendChild(regBox);
+    var term = el('details', 'carta off-term'); term.appendChild(el('summary', null, 'Terminale (comandi a mano)')); box.appendChild(term);
+    var tin = el('input'); tin.placeholder = 'es. info · soglia -75 · cmd tutte test'; var tgo = bottone('Manda', '', function () { if (tin.value.trim()) { bancoInvia(tin.value.trim()); tin.value = ''; } });
+    var tr = el('div', 'riga2'); tr.appendChild(tin); tr.appendChild(tgo); term.appendChild(tr); var tpre = el('pre', 'off-pre'); term.appendChild(tpre);
+    var sel = null;   // bandiera scelta quando si è collegati all'HQ (o 'tutte')
+    function ruolo() {
+      if (!b.via) return null;
+      if (b.avvio === 'HQ' || b.hq) return 'HQ';
+      if (b.avvio === 'LORA' || CHAT.io) return 'LORA';
+      if (b.avvio === 'INIETTORE') return 'INIETTORE';
+      if (b.avvio === 'TAG' || b.tag) return 'TAG';
+      if (b.avvio === 'BANDIERA' || Object.keys(b.band).length) return 'BANDIERA';
+      return '?';
+    }
+    var NOMI = { HQ: 'HQ', LORA: 'LoRa team leader', INIETTORE: 'Iniettore', TAG: 'Tag finto', BANDIERA: 'Bandiera', '?': 'non ancora riconosciuto' };
+    function idCollegato(r) { if (r === 'HQ') return b.hq && b.hq.hq; if (r === 'LORA') return CHAT.io && CHAT.io.id; if (r === 'BANDIERA') return Object.keys(b.band)[0]; return null; }
+    function ricorda(id, r, extra) { if (!id) return; var x = REG[id] = REG[id] || {}; x.ruolo = r; x.visto = Date.now(); if (b.versione) x.versione = b.versione; Object.assign(x, extra || {}); }
+    function riga(etichetta, campo, valore, invia) { var r = el('div', 'off-riga'); r.appendChild(el('span', null, etichetta)); r.appendChild(campo); r.appendChild(bottone('Invia', 'piccolo', function () { invia(campo.value); })); return r; }
+    function num(v, min, max) { var i = el('input'); i.type = 'number'; i.inputMode = 'numeric'; if (min != null) i.min = min; if (max != null) i.max = max; i.value = v == null ? '' : v; return i; }
+    function formBandiera(k, pre, j) {
+      var cmd = function (c) { bancoInvia(pre + c); toast('Mandato: ' + c + (pre ? ' (via radio, risponde tra qualche secondo)' : '')); };
+      k.appendChild(riga('Soglia segnale tag (dBm)', num(j && j.soglia, -100, -30), null, function (v) { cmd('soglia ' + v); }));
+      k.appendChild(el('small', 'hint', 'Più vicino a 0 = bisogna stare più vicini alla bandiera (-75 ≈ 5-8 m all\'aperto).'));
+      k.appendChild(riga('Tempo di conquista (s)', num(j && j.tempo, 5, 3600), null, function (v) { cmd('tempo ' + v); }));
+      k.appendChild(riga('Luminosità luci (0-255)', num(null, 0, 255), null, function (v) { cmd('luce ' + v); }));
+      k.appendChild(riga('Manda lo stato ogni (s)', num(null, 2, 120), null, function (v) { cmd('ogni ' + v); }));
+      var fz = select([['0', 'Neutra'], ['1', 'BLU'], ['2', 'ROSSI']], j && j.owner === 'blu' ? '1' : j && j.owner === 'rossa' ? '2' : '0');
+      k.appendChild(riga('Di chi è l\'area adesso', fz, null, function (v) { cmd('fazione ' + v); }));
+      var g = el('div', 'off-tasti');
+      [['🔊 Prova luci e suono', 'test'], ['📍 Coordinate sul display 20 min', 'posizione 20'], ['🔇 Muto', 'muto 1'], ['🔔 Suono', 'muto 0'], ['↺ Area neutra', 'reset'], ['📨 Manda lo stato', 'invia'], ['ℹ Info', 'info'], ['⏻ Riavvia', 'riavvia']].forEach(function (x) {
+        g.appendChild(bottone(x[0], 'piccolo', function () { if (x[1] === 'riavvia' && !confirm('Riavviare?')) return; cmd(x[1]); }));
+      });
+      k.appendChild(g);
+      var av = el('details'); av.appendChild(el('summary', null, 'Avanzate'));
+      av.appendChild(bottone('Inverti il segnale del cicalino (se suona sempre o mai)', 'piccolo', function () { cmd('buzzer'); }));
+      av.appendChild(bottone('Togli i colpiti dalla memoria', 'piccolo', function () { cmd('morti -'); }));
+      k.appendChild(av);
+    }
+    var firma = '', chiesto = null;
+    function disegna() {
+      var r = ruolo(), id = idCollegato(r);
+      var cc = b.via === 'BT' ? b.dev : b.porta; if (b.via && r === '?' && chiesto !== cc) { chiesto = cc; setTimeout(function () { bancoInvia('info'); }, 600); }
+      var f = JSON.stringify([b.via, r, id, Object.keys(b.band).sort(), sel, CHAT.io && [CHAT.io.nome, CHAT.io.f], b.versione, Object.keys(CHAT.lora).length, Object.keys(REG).length]);
+      if (term.open) tpre.textContent = b.righe.slice(-40).join('\n');
+      if (f === firma) return; firma = f;
+      if (r && r !== '?') { ricorda(id, r); salvaReg(); }
+      conn.innerHTML = '';
+      if (!b.via) {
+        conn.appendChild(el('b', null, 'Collega un dispositivo'));
+        conn.appendChild(el('p', 'hint', (window.ACPonte ? 'Cavo OTG: attacca il T-Beam al telefono e premi «USB». ' : 'Cavo: dal computer con Chrome o Edge. ') + 'Bluetooth: per HQ, LoRa team leader e iniettore.'));
+        var rr = el('div', 'riga2'); rr.appendChild(bottone('USB (cavo)', 'accent', bancoUsb)); rr.appendChild(bottone('Bluetooth', '', bancoBle)); conn.appendChild(rr);
+      } else {
+        var nomeLoc = id && REG[id] && REG[id].nome;
+        conn.appendChild(el('b', 'off-blocco', '🔌 ' + NOMI[r] + (id ? ' · ' + id : '') + (nomeLoc ? ' · «' + nomeLoc + '»' : '')));
+        conn.appendChild(el('small', 'hint off-blocco', 'Collegato via ' + b.via + (b.versione ? ' · firmware ' + b.versione : '')));
+        var r2 = el('div', 'riga2');
+        r2.appendChild(bottone('Chiedi chi è', 'piccolo', function () { bancoInvia('info'); }));
+        if (id) r2.appendChild(bottone('✎ Nome / nota', 'piccolo', function () { var v = prompt('Nome o nota per ' + id + ' (es. ALFA, «antenna da rifare»)', nomeLoc || ''); if (v === null) return; REG[id] = REG[id] || { ruolo: r }; REG[id].nome = v.trim(); salvaReg(); firma = ''; disegna(); }));
+        r2.appendChild(bottone('Scollega', 'piccolo', function () { bancoScollega(); firma = ''; disegna(); }));
+        conn.appendChild(r2);
+      }
+      pan.innerHTML = '';
+      if (r === '?') { var k0 = el('div', 'carta'); k0.appendChild(el('p', 'hint', 'Non so ancora cos\'è: premi «Chiedi chi è», oppure riavvia la scheda col tasto RST mentre è collegata.')); pan.appendChild(k0); }
+      if (r === 'BANDIERA') {
+        var j = b.band[id], k = el('div', 'carta'); k.appendChild(el('h3', null, '⚑ Bandiera ' + id));
+        if (j) k.appendChild(el('small', 'hint', 'Area: ' + (j.owner ? esNomeFaz(j.owner) : 'neutra') + ' · soglia ' + j.soglia + ' · conquista ' + j.tempo + ' s · batteria ' + (j.batt === 255 ? 'USB' : j.batt + '%') + ' · GPS ' + (j.gpsFisso ? 'ok' : 'senza fix')));
+        formBandiera(k, '', j); pan.appendChild(k);
+      }
+      if (r === 'HQ') {
+        var k2 = el('div', 'carta'); k2.appendChild(el('h3', null, '📡 HQ ' + (id || '')));
+        k2.appendChild(el('small', 'hint', 'Da qui configuri via radio le bandiere accese. Ogni bandiera si fa sentire ogni 10-20 secondi.'));
+        var ids = Object.keys(b.band).sort();
+        var s = select([['', ids.length ? 'Scegli la bandiera…' : 'Nessuna bandiera sentita ancora'], ['tutte', 'TUTTE le bandiere']].concat(ids.map(function (q) { var n = REG[q] && REG[q].nome; return [q, q + (n ? ' · ' + n : '') + ' · ' + (b.band[q].owner ? esNomeFaz(b.band[q].owner) : 'neutra')]; })), sel || '');
+        s.onchange = function () { sel = s.value || null; firma = ''; disegna(); };
+        k2.appendChild(campoForm('Bandiera', s));
+        if (sel) { formBandiera(k2, 'cmd ' + sel + ' ', sel === 'tutte' ? null : b.band[sel]); ids.forEach(function (q) { ricorda(q, 'BANDIERA'); }); salvaReg(); }
+        var lo = Object.keys(CHAT.lora); if (lo.length) k2.appendChild(el('small', 'hint', 'LoRa in rete: ' + lo.map(function (q) { return CHAT.lora[q].nome || q; }).join(', ')));
+        pan.appendChild(k2);
+      }
+      if (r === 'LORA') {
+        var k3 = el('div', 'carta'); k3.appendChild(el('h3', null, '📡 LoRa team leader ' + (id || '')));
+        var io = CHAT.io || {};
+        var nm = el('input'); nm.value = io.nome || ''; nm.maxLength = 28; nm.placeholder = 'es. TAURI·WHIPLASH';
+        var fz2 = select([['-', 'Nessuna'], ['blu', 'BLU'], ['rossa', 'ROSSI']], io.f || '-');
+        k3.appendChild(campoForm('Nome', nm)); k3.appendChild(campoForm('Fazione', fz2));
+        k3.appendChild(bottone('Salva sul LoRa', 'accent', function () { bancoInvia('chi ' + fz2.value + ' ' + nm.value.trim().toUpperCase()); toast('Salvato sul LoRa'); }));
+        var g3 = el('div', 'off-tasti');
+        g3.appendChild(bottone('📨 Manda la posizione', 'piccolo', function () { bancoInvia('invia'); }));
+        g3.appendChild(bottone('📡 Apri la chat', 'piccolo', function () { vai('chat'); }));
+        g3.appendChild(bottone('⏻ Riavvia', 'piccolo', function () { if (confirm('Riavviare?')) bancoInvia('riavvia'); }));
+        k3.appendChild(g3); pan.appendChild(k3);
+      }
+      if (r === 'TAG') {
+        var k4 = el('div', 'carta'); k4.appendChild(el('h3', null, '◉ Tag finto'));
+        var t = b.tag || {};
+        k4.appendChild(riga('Fazione (1 blu, 2 rossi)', num(t.f === 'rossa' ? 2 : 1, 1, 2), null, function (v) { bancoInvia('f ' + v); }));
+        k4.appendChild(riga('Numero', num(t.tag, 1, 999), null, function (v) { bancoInvia('n ' + v); }));
+        k4.appendChild(riga('Potenza (0-7)', num(null, 0, 7), null, function (v) { bancoInvia('pot ' + v); }));
+        pan.appendChild(k4);
+      }
+      if (r === 'INIETTORE') {
+        var k5 = el('div', 'carta'); k5.appendChild(el('h3', null, '⬇ Iniettore'));
+        k5.appendChild(el('p', 'hint', 'Per programmare i tag usa Beacon prog: il collegamento resta questo.'));
+        var g5 = el('div', 'riga2'); g5.appendChild(bottone('Beacon prog', 'accent', function () { vai('beaconProg'); })); g5.appendChild(bottone('Iniettore', '', function () { vai('banco'); })); k5.appendChild(g5);
+        pan.appendChild(k5);
+      }
+      regBox.innerHTML = ''; regBox.appendChild(el('b', null, 'I tuoi dispositivi'));
+      var ks = Object.keys(REG).sort(function (x, y) { return (REG[y].visto || 0) - (REG[x].visto || 0); });
+      if (!ks.length) regBox.appendChild(el('p', 'hint', 'Qui compare ogni dispositivo che colleghi, con l\'ultima volta che l\'hai visto. Sono salvati su questo telefono.'));
+      ks.forEach(function (q) {
+        var x = REG[q], d = new Date(x.visto || 0), rr2 = el('div', 'off-reg');
+        rr2.appendChild(el('span', null, (NOMI[x.ruolo] || x.ruolo) + ' · ' + q + (x.nome ? ' · «' + x.nome + '»' : '')));
+        rr2.appendChild(el('small', 'hint', (x.versione ? 'fw ' + x.versione + ' · ' : '') + 'visto ' + d.toLocaleDateString() + ' ' + ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2)));
+        rr2.onclick = function () { var v = prompt('Nome o nota per ' + q + ' (vuoto = togli dalla lista)', x.nome || ''); if (v === null) return; if (!v.trim() && confirm('Togliere ' + q + ' dalla lista?')) delete REG[q]; else x.nome = v.trim(); salvaReg(); firma = ''; disegna(); };
+        regBox.appendChild(rr2);
+      });
+    }
+    var prima = b.cb, prossimo = null;
+    b.cb = function () { if (prima) prima(); if (prossimo) return; prossimo = setTimeout(function () { prossimo = null; if (!pan.contains(document.activeElement) || !document.activeElement.matches('input,select')) disegna(); }, 400); };
+    term.ontoggle = function () { if (term.open) tpre.textContent = b.righe.slice(-40).join('\n'); };
+    var tk = setInterval(function () { if (!document.activeElement.matches('input,select')) disegna(); }, 3000); disegna();
+    if (b.via) bancoInvia('info');
+    var ch = chiusura; chiusura = function () { clearInterval(tk); b.cb = prima; if (ch) ch(); };
+  }
   function home() {
+    if (TOOL) { homeTool(); return; }
     if (apriNascosta) { var v = apriNascosta; apriNascosta = null; history.replaceState(null, '', location.pathname); setTimeout(function () { vai(v); }, 0); }
     if (apriEvento && S.stato().me.callsign) {
       var tipoE = apriEvento[0], idE = apriEvento.slice(2), lst = tipoE === 'a' ? D.allenamenti : D.conflitti;
@@ -2156,7 +2312,8 @@
     LS.pos = LS.pos || {};
     // strumenti
     var tiles = el('div', 'tiles lab-tiles');
-    [['✹', 'Mortaio', 'simulazione, niente arriva in campo', function () { vai('mortaioProva', cid || ''); }, P('conflitti')],
+    [['🔧', 'Officina', 'collega e configura un dispositivo', function () { vai('officina'); }, true],
+     ['✹', 'Mortaio', 'simulazione, niente arriva in campo', function () { vai('mortaioProva', cid || ''); }, P('conflitti')],
      ['⚑', 'Prova 3 T-Beam', 'schema con tag, conquista e controlli', function () { vai('provaTbeam'); }, st.dev],
      ['⌁', 'Iniettore', 'bandiere, tag, comandi, firmware', function () { vai('banco'); }, st.dev],
      ['◉', 'Beacon prog', 'programma i tag', function () { vai('beaconProg'); }, true]].forEach(function (x) {
@@ -4838,5 +4995,5 @@
   })();
   history.replaceState({ n: 1 }, '');
   S.avvia();
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});
+  if (!TOOL && 'serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});
 })();

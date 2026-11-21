@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- CP210x (Silicon Labs), CH340/CH9102 (WCH), FTDI: i chip USB dei T-Beam e simili -->
+    <usb-device vendor-id="4292" />
+    <usb-device vendor-id="6790" />
+    <usb-device vendor-id="1027" />
+    <usb-device vendor-id="12346" />
+</resources>

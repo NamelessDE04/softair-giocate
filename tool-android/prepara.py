@@ -1,0 +1,21 @@
+"""Prepara le pagine dentro l'APK: copia l'app web, la mette in modalità Officina (senza account) e ci aggiunge i firmware."""
+import os, re, shutil, sys
+R = os.path.dirname(os.path.abspath(__file__))
+WEB = os.path.join(R, '..', 'web')
+OUT = os.path.join(R, 'app', 'src', 'main', 'assets', 'www')
+if os.path.exists(OUT): shutil.rmtree(OUT)
+shutil.copytree(WEB, OUT, ignore=shutil.ignore_patterns('sw.js', 'manifest.webmanifest', '*.map'))
+p = os.path.join(OUT, 'index.html'); s = open(p, encoding='utf-8').read()
+s = re.sub(r'<script src="https://www\.gstatic\.com/firebasejs/[^"]+"></script>\s*', '', s)
+s = s.replace('<script src="config.js"></script>', '<script>window.AC_TOOL = true;</script>').replace('<script src="db.js"></script>', '<script src="db-tool.js"></script>')
+s = s.replace('<link rel="manifest" href="manifest.webmanifest">', '')
+open(p, 'w', encoding='utf-8').write(s)
+f = os.path.join(OUT, 'firmware', 'index.html')
+if os.path.exists(f):
+    t = open(f, encoding='utf-8').read()
+    t = re.sub(r'<p>Serve <b>Chrome o Edge su computer</b>.*?</p>', '<p>Collega il T-Beam al telefono col <b>cavo OTG</b>, premi il tasto del firmware che vuoi e conferma. Android chiede il permesso di usare la scheda USB: rispondi sì. Non scollegare finché non ha finito (1-3 minuti).</p>', t, flags=re.S)
+    t = re.sub(r'<p class="k">Se il tasto non compare:.*?</p>', '', t, flags=re.S)
+    t = t.replace('<a href="../">← torna all\'app</a>', '<a href="../index.html">← torna all\'Officina</a>')
+    t = t.replace('<body>', '<body><p><a href="../index.html">← Officina</a></p>', 1)
+    open(f, 'w', encoding='utf-8').write(t)
+print('pagine pronte in', OUT)

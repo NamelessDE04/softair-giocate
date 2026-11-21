@@ -927,3 +927,16 @@ main > .btn.big { margin-bottom: 6px; }
 .chat-dev { padding: 10px 12px; margin-bottom: 6px; } .chat-dev b { display: block; } .chat-dev.vecchio { opacity: .5; }
 .chat-storico summary { cursor: pointer; font-weight: 700; }
 .chat-id { display: grid; grid-template-columns: 1fr 2fr; gap: 8px; margin-top: 6px; } .chat-id input, .chat-id select { width: 100%; }
+/* officina */
+.off-tit { margin: 6px 0 4px; }
+.off-voce { display: flex; gap: 14px; align-items: center; padding: 14px; }
+.off-voce b { display: block; font-size: 20px; } .off-voce small { color: var(--muto); }
+.off-ic { font-size: 28px; width: 36px; text-align: center; }
+.off-fw { display: block; margin-top: 10px; text-align: center; }
+.off-riga { display: grid; grid-template-columns: 1fr 96px auto; gap: 8px; align-items: center; margin: 8px 0; }
+.off-riga input, .off-riga select { width: 100%; }
+.off-tasti { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.off-reg { padding: 8px 0; border-top: 1px solid var(--linea); cursor: pointer; } .off-reg span { display: block; }
+.off-pre { max-height: 240px; overflow: auto; font-size: 11px; }
+.off-term summary { cursor: pointer; font-weight: 700; }
+.off-blocco { display: block; }

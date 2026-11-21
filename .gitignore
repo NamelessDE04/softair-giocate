@@ -1,3 +1,7 @@
 node_modules/
 .firebase/
 *.log
+tool-android/app/src/main/assets/www/
+tool-android/app/build/
+tool-android/.gradle/
+tool-android/build/
