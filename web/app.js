@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.73';
+  var VERSIONE = '0.74';
   var S = window.S40, F = window.S40F;
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
   var GIORNO = 86400000;
@@ -97,7 +97,7 @@
     app.innerHTML = ''; window.scrollTo(0, 0);
     $('pieno').hidden = true; $('pieno').innerHTML = '';
     document.body.classList.remove('a-pieno');
-    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva, dmz: pagDmz, dmzModifica: pagDmzModifica, dmzLive: pagDmzLive, mortaioProva: pagMortaioProva, banco: pagBanco, beaconProg: pagBeaconProg, provaTbeam: pagProvaTbeam, esercizio: pagEsercizio, lab: pagLab }[c.v];
+    var r = { home: home, conflitto: pagConflitto, team: pagTeam, teamModifica: pagTeamModifica, profilo: pagProfilo, organizza: pagOrganizza, allenamento: pagAllenamento, allenamentoModifica: pagAllenamentoModifica, radio: pagRadio, scenario: pagScenario, stampaQr: pagStampaQr, posa: pagPosa, giocatori: pagGiocatori, permessi: pagPermessi, mappa: pagMappa, conflittoModifica: pagConflittoModifica, prova: pagProva, dmz: pagDmz, dmzModifica: pagDmzModifica, dmzLive: pagDmzLive, mortaioProva: pagMortaioProva, banco: pagBanco, beaconProg: pagBeaconProg, provaTbeam: pagProvaTbeam, esercizio: pagEsercizio, lab: pagLab, chat: pagChat }[c.v];
     (r || home)(c.p);
   }
   function aPieno() { document.body.classList.add('a-pieno'); var p = $('pieno'); p.hidden = false; p.innerHTML = ''; return p; }
@@ -132,6 +132,7 @@
     organizza: '<path d="M4 6h16M4 12h10M4 18h13"/><circle cx="18" cy="12" r="2.2"/>',
     esci: '<path d="M14 4h5v16h-5M10 8l-4 4 4 4M6 12h10"/>',
     iniettore: '<path d="M18 3l3 3M16.5 4.5l3 3M19 6l-9 9-3-3 9-9M7 12l-4 4M4 15l2 2M10 15l-1 1"/>',
+    chat: '<path d="M4 5h16v10H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
     prova: '<path d="M9 3h6M10 3v6L4.5 18.5A1.7 1.7 0 0 0 6 21h12a1.7 1.7 0 0 0 1.5-2.5L14 9V3"/><path d="M7 15h10"/>',
     beacon: '<circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/>'
   };
@@ -157,6 +158,7 @@
     if (me.team) voci.push(['team', 'Il mio team', function () { vai('team', me.team); }]);
     voci.push(['profilo', 'Profilo', function () { vai('profilo'); }]);
     if (organizza()) voci.push(['organizza', 'Organizza', function () { vai('organizza'); }]);
+    if (st.dev || (st.ruolo && st.ruolo !== 'truppa')) voci.push(['chat', 'Chat LoRa', function () { vai('chat'); }]);
     if (st.dev || P('conflitti')) voci.push(['prova', 'Prova e test', function () { vai('lab'); }]);
     voci.push(['esci', 'Esci', function () { S.logout(); }, 'menu-esci']);
     voci.forEach(function (v) {
@@ -1142,12 +1144,184 @@
         else if (j.auto != null) { BANCO.avvio = 'INIETTORE'; BANCO.inj.auto = j.auto ? j : null; }
         else if (j.pattuglia) { BANCO.pat[j.pattuglia] = j; bancoPattuglia(j); }
         else if (j.risposta) { BANCO.visto.risposta = 1; if (/mortaio/i.test(j.testo || '')) BANCO.visto.colpo = 1; BANCO.storia.push({ t: Date.now(), testo: 'Risposta via radio da ' + j.risposta + ': ' + j.testo }); }
+        else if (j.chat) chatArriva(j.chat);
+        else if (j.inviato) chatInviato(j.inviato);
+        else if (j.ok && typeof j.ok === 'object') chatStato(j.ok.seq, j.ok.da, 'ok');
+        else if (j.fallito) chatStato(j.fallito.seq, j.fallito.a, 'fallito');
+        else if (j.lora && typeof j.lora === 'object') { CHAT.lora[j.lora.id] = Object.assign({}, j.lora, { _t: j._t }); }
+        else if (j.pat) { BANCO.avvio = 'LORA'; chatIo(j); }
         else if (j.hqtag) { BANCO.hqtag = BANCO.hqtag || {}; j.hqtag.forEach(function (t) { BANCO.hqtag[t.f + t.n] = { f: t.f, n: t.n, rssi: t.rssi, _t: j._t }; }); }
         else if (j.hq) { BANCO.hq = j; BANCO.avvio = 'HQ'; }
         else if (j.tag != null) { if (!BANCO.avvio) BANCO.avvio = 'TAG'; BANCO.tag = j; }
       } catch (e) { BANCO.righe.push(hh + ' !! JSON non valido: ' + e.message); }
     }
     if (BANCO.cb) BANCO.cb();
+  }
+  // ================= CHAT LoRa: messaggi tra team leader (e regia) sulla rete LoRa, senza internet
+  var CHAT = { msg: [], lora: {}, io: null, chiT: 0, storiaPer: null };
+  try { CHAT.msg = JSON.parse(localStorage.getItem('chat-lora') || '[]'); } catch (e) {}
+  function chatSalva() { if (CHAT.msg.length > 400) CHAT.msg = CHAT.msg.slice(-400); try { localStorage.setItem('chat-lora', JSON.stringify(CHAT.msg)); } catch (e) {} }
+  function chatConf() { var c = {}; try { c = JSON.parse(localStorage.getItem('chat-conf') || '{}'); } catch (e) {} return c; }
+  function chatNomeDefault() {
+    var me = S.stato().me || {}, t = teamDi(me.team), sq = t && (t.squadre || []).filter(function (q) { return q.id === me.squadra; })[0];
+    return ((t ? t.nome.replace(/^ASD\s+/i, '').split(/\s+/)[0] : '') + (sq ? '·' + sq.nome : me.callsign ? '·' + me.callsign : '')).toUpperCase().slice(0, 28) || 'TEAM LEADER';
+  }
+  function chatVoluto() { var c = chatConf(); return { f: c.f || '', nome: (c.nome || chatNomeDefault()).slice(0, 28) }; }
+  // a che evento appartiene un messaggio (per lo storico): esercitazione in corso o allenamento di oggi
+  function chatEvento() {
+    var now = Date.now(), e = esercizioInCorso(); if (e) return e.id;
+    var a = D.allenamenti.filter(function (x) { return (x.inizio || 0) - 3 * 3600000 < now && (x.fine || x.inizio || 0) + 3 * 3600000 > now; })[0];
+    return a ? a.id : null;
+  }
+  function chatArriva(c) {
+    var k = c.da + '-' + c.seq + '-' + c.tipo;
+    if (CHAT.msg.some(function (m) { return m.k === k; })) return;
+    CHAT.msg.push({ k: k, da: c.da, nome: c.nome, f: c.f, tipo: c.tipo, a: c.a, testo: c.testo, t: Date.now(), rssi: c.rssi, hop: c.hop, ev: chatEvento() });
+    chatSalva();
+    if (corrente().v !== 'chat') { toast('📡 ' + c.nome + ': ' + c.testo); try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch (e) {} }
+    suonoImpatto(false);
+  }
+  function chatInviato(c) {
+    var k = c.da + '-' + c.seq + '-' + c.tipo; if (CHAT.msg.some(function (m) { return m.k === k; })) return;
+    var io = CHAT.io || {};
+    CHAT.msg.push({ k: k, da: c.da, seq: c.seq, nome: io.nome || (BANCO.avvio === 'HQ' ? 'HQ' : ''), f: io.f || '', tipo: c.tipo, a: c.a, testo: c.testo, t: Date.now(), mio: true, stato: c.tipo === 'diretto' ? 'attesa' : 'inviato', ev: chatEvento() });
+    chatSalva();
+  }
+  function chatStato(seq, altro, stato) {
+    for (var i = CHAT.msg.length - 1; i >= 0; i--) { var m = CHAT.msg[i]; if (m.mio && m.seq === seq && m.a === altro) { m.stato = stato; break; } }
+    chatSalva(); if (stato === 'fallito') toast('📡 Messaggio non consegnato: il destinatario non risponde');
+  }
+  // il LoRa collegato dice chi è: se non è come lo vuole il telefono, glielo diciamo
+  function chatIo(j) {
+    CHAT.io = { id: j.pat, nome: j.nome, f: j.f === 'nessuna' ? '' : j.f, batt: j.batt, fix: j.fix, _t: j._t };
+    var v = chatVoluto();
+    if (v.f && (CHAT.io.nome !== v.nome || CHAT.io.f !== v.f) && Date.now() - CHAT.chiT > 5000) { CHAT.chiT = Date.now(); bancoInvia('chi ' + v.f + ' ' + v.nome); }
+    var conn = BANCO.via === 'BT' ? BANCO.dev : BANCO.porta; if (conn && CHAT.storiaPer !== conn) { CHAT.storiaPer = conn; bancoInvia('storia'); }
+  }
+  // finito l'evento, i messaggi passano nello storico (così nessuno legge la fazione avversaria durante il gioco)
+  function chatCaricaStorico() {
+    if (!S.stato().user || !navigator.onLine) return;
+    var now = Date.now(), fatti = 0;
+    CHAT.msg.forEach(function (m) {
+      if (!m.ev || m.caricato) return;
+      var a = D.allenamenti.filter(function (x) { return x.id === m.ev; })[0];
+      var finito = a && ((a.fine || a.inizio || 0) < now || (a.esercizio && a.esercizio.fase === 'fine'));
+      if (!finito) return;
+      m.caricato = 1; fatti++;
+      S.salvaChat(m.ev, m.k, { da: m.da, nome: m.nome || '', f: m.f || '', tipo: m.tipo, a: m.a || '', testo: m.testo, t: m.t, uid: S.stato().user.uid }).catch(function () { m.caricato = 0; });
+    });
+    if (fatti) chatSalva();
+  }
+  setInterval(chatCaricaStorico, 60000); setTimeout(chatCaricaStorico, 15000);
+  function pagChat(arg) {
+    testata('Chat LoRa');
+    var b = BANCO, canale = arg || 'g', box = el('div', 'chat'); app.appendChild(box);
+    var testa = el('div', 'carta chat-testa'), schede = el('div', 'chat-schede'), lista = el('div', 'chat-lista'), scrivi = el('form', 'chat-scrivi');
+    box.appendChild(testa); box.appendChild(schede); box.appendChild(lista); box.appendChild(scrivi);
+    var ta = el('textarea'); ta.rows = 2; ta.placeholder = 'Messaggio (anche coordinate: 32T 0356 4983)'; var cont = el('small', 'hint');
+    var invia = el('button', 'btn accent', 'Invia'); invia.type = 'submit';
+    scrivi.appendChild(ta); var rr = el('div', 'chat-scrivi-r'); rr.appendChild(cont); rr.appendChild(invia); scrivi.appendChild(rr);
+    function hq() { return b.via && b.avvio === 'HQ'; }
+    function pronto() { return b.via && (hq() || CHAT.io); }
+    function maxCar() { var v = chatVoluto(); return 160 - (hq() ? 2 : (v.nome || '').length) - 1; }
+    ta.oninput = function () { var n = new TextEncoder().encode(ta.value).length; cont.textContent = n + ' / ' + maxCar(); cont.className = 'hint' + (n > maxCar() ? ' avviso' : ''); };
+    scrivi.onsubmit = function (e) {
+      e.preventDefault(); var t = ta.value.replace(/\s+/g, ' ').trim(); if (!t) return;
+      if (!pronto()) { toast('Collega prima il tuo LoRa'); return; }
+      if (new TextEncoder().encode(t).length > maxCar()) { toast('Messaggio troppo lungo per la radio: accorcialo'); return; }
+      var tipo = canale === 'g' ? 'g' : canale === 'f' ? 'f' : 'd', dest = canale.indexOf('d:') === 0 ? canale.slice(2) : '-';
+      if (tipo === 'f' && !chatVoluto().f) { toast('Scegli prima la tua fazione'); return; }
+      bancoInvia('chat ' + tipo + ' ' + dest + ' ' + t); ta.value = ''; ta.oninput();
+    };
+    function testata2() {
+      testa.innerHTML = '';
+      if (!b.via) {
+        testa.appendChild(el('b', null, 'Collega il tuo LoRa'));
+        testa.appendChild(el('p', 'hint', 'Accendi il T-Beam da team leader e collegalo: dal telefono col Bluetooth (si chiama AC-LORA-…), dal PC col cavo. La regia si collega all\'HQ allo stesso modo.'));
+        var r = el('div', 'riga2'); r.appendChild(bottone('Bluetooth', 'accent', bancoBle)); r.appendChild(bottone('USB (cavo)', '', bancoUsb)); testa.appendChild(r);
+        testa.appendChild(el('small', 'hint', 'Su iPhone il Bluetooth dalle pagine web funziona solo col browser Bluefy.'));
+      } else if (hq()) {
+        testa.appendChild(el('b', null, '📡 Collegato all\'HQ (regia)'));
+        testa.appendChild(el('small', 'hint', 'La regia legge il canale globale e i messaggi diretti all\'HQ.'));
+      } else if (CHAT.io) {
+        var io = CHAT.io, v = chatVoluto();
+        testa.appendChild(el('b', null, '📡 ' + (io.nome || 'LoRa ' + io.id) + ' · ' + (io.f ? esNomeFaz(io.f) : 'fazione?') + ' · batteria ' + (io.batt === 255 ? 'USB' : io.batt + '%')));
+        var g = el('div', 'chat-id');
+        var fs = select([['', 'Fazione?'], ['blu', 'BLU'], ['rossa', 'ROSSI']], v.f); fs.onchange = function () { var c = chatConf(); c.f = fs.value; localStorage.setItem('chat-conf', JSON.stringify(c)); CHAT.chiT = 0; if (fs.value) bancoInvia('chi ' + fs.value + ' ' + chatVoluto().nome); };
+        var ni = el('input'); ni.value = v.nome; ni.maxLength = 28; ni.onchange = function () { var c = chatConf(); c.nome = ni.value.trim().toUpperCase(); localStorage.setItem('chat-conf', JSON.stringify(c)); CHAT.chiT = 0; if (chatVoluto().f) bancoInvia('chi ' + chatVoluto().f + ' ' + chatVoluto().nome); };
+        g.appendChild(campoForm('La tua fazione oggi', fs)); g.appendChild(campoForm('Nome sul LoRa', ni)); testa.appendChild(g);
+      } else testa.appendChild(el('p', 'hint', 'Collegato: aspetto che il LoRa risponda… (serve il firmware 1.4.0 «Pattuglia»)'));
+    }
+    function schede2() {
+      schede.innerHTML = '';
+      var tabs = [['g', '🌐 Globale']]; if (!hq()) tabs.push(['f', '⚑ Fazione']); tabs.push(['d', '✉ Diretti']);
+      tabs.forEach(function (x) {
+        var on = canale === x[0] || (x[0] === 'd' && canale.indexOf('d:') === 0);
+        var t = el('button', 'chat-scheda' + (on ? ' su' : ''), x[1]); t.type = 'button'; t.onclick = function () { sostituisci('chat', x[0]); }; schede.appendChild(t);
+      });
+    }
+    function quando(t) { var d = new Date(t); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
+    function lista2() {
+      lista.innerHTML = ''; var mioId = hq() ? (b.hq && b.hq.hq) : CHAT.io && CHAT.io.id;
+      if (canale === 'd') {
+        var ids = Object.keys(CHAT.lora).filter(function (id) { return id !== mioId; }).sort(function (x, y) { return CHAT.lora[y]._t - CHAT.lora[x]._t; });
+        if (!ids.length) lista.appendChild(el('p', 'hint', pronto() ? 'Nessun altro LoRa sentito ancora: ognuno si annuncia ogni minuto.' : 'Collega il tuo LoRa per vedere chi c\'è in rete.'));
+        ids.forEach(function (id) {
+          var l = CHAT.lora[id], sec = Math.round((Date.now() - l._t) / 1000), r = el('button', 'carta chat-dev'); r.type = 'button';
+          r.appendChild(el('b', null, (l.nome || id) + (l.f && l.f !== 'nessuna' ? ' · ' + esNomeFaz(l.f) : '')));
+          r.appendChild(el('small', 'hint', 'visto ' + (sec < 60 ? sec + ' s' : Math.round(sec / 60) + ' min') + ' fa · ' + (l.hop ? 'tramite ripetitore' : 'diretto ' + l.rssi + ' dBm') + ' · batt ' + (l.batt === 255 ? 'USB' : l.batt + '%')));
+          if (sec > 180) r.classList.add('vecchio');
+          r.onclick = function () { sostituisci('chat', 'd:' + id); }; lista.appendChild(r);
+        });
+        scrivi.hidden = true; return;
+      }
+      scrivi.hidden = false;
+      var dest = canale.indexOf('d:') === 0 ? canale.slice(2) : null;
+      if (dest) { var l = CHAT.lora[dest] || {}; lista.appendChild(el('div', 'chat-con', '✉ con ' + (l.nome || dest) + (l.f && l.f !== 'nessuna' ? ' · ' + esNomeFaz(l.f) : ''))); }
+      var vis = CHAT.msg.filter(function (m) {
+        if (canale === 'g') return m.tipo === 'globale';
+        if (canale === 'f') return m.tipo === 'fazione';
+        return m.tipo === 'diretto' && ((m.mio && m.a === dest) || (!m.mio && m.da === dest));
+      }).slice(-80);
+      if (!vis.length) lista.appendChild(el('p', 'hint', canale === 'g' ? 'Il canale globale lo leggono tutte e due le fazioni e la regia.' : canale === 'f' ? 'Lo leggono solo i LoRa della tua fazione.' : 'Solo voi due. Quando arriva vedi ✓✓.'));
+      vis.forEach(function (m) {
+        var r = el('div', 'chat-msg' + (m.mio ? ' mio' : '') + (m.f === 'blu' ? ' blu' : m.f === 'rossa' ? ' rossa' : ''));
+        if (!m.mio) r.appendChild(el('b', null, m.nome || m.da));
+        r.appendChild(el('div', 'chat-testo', m.testo));
+        r.appendChild(el('small', null, quando(m.t) + (m.mio ? (m.stato === 'ok' ? ' ✓✓' : m.stato === 'fallito' ? ' ✗ non consegnato' : m.stato === 'attesa' ? ' ✓ in attesa' : ' ✓') : (m.hop ? ' · via ripetitore' : ''))));
+        lista.appendChild(r);
+      });
+      setTimeout(function () { lista.scrollTop = lista.scrollHeight; }, 0);
+    }
+    var firma = '';
+    function tutto() {
+      var f = JSON.stringify([b.via, b.avvio, CHAT.io && [CHAT.io.nome, CHAT.io.f, CHAT.io.batt], CHAT.msg.length, CHAT.msg.length && CHAT.msg[CHAT.msg.length - 1].stato, Object.keys(CHAT.lora).length, Math.floor(Date.now() / 30000)]);
+      if (f === firma) return; firma = f;
+      if (!(testa.contains(document.activeElement) && document.activeElement.matches('input,select,textarea'))) testata2();
+      schede2(); lista2(); ta.oninput();
+    }
+    var prima = b.cb, prossimo = null;
+    b.cb = function () { if (prima) prima(); if (prossimo) return; prossimo = setTimeout(function () { prossimo = null; tutto(); }, 300); };
+    var tk = setInterval(tutto, 5000); tutto();
+    var ch = chiusura; chiusura = function () { clearInterval(tk); b.cb = prima; if (ch) ch(); };
+  }
+  // storico della chat di un evento finito (pagina dell'allenamento)
+  function cartaChatStorico(a) {
+    var k = el('details', 'carta chat-storico'); k.appendChild(el('summary', null, '📡 Chat LoRa della giornata'));
+    var dentro = el('div'); k.appendChild(dentro); var caricata = false;
+    k.ontoggle = function () {
+      if (!k.open || caricata) return; caricata = true; dentro.textContent = 'Carico…';
+      S.leggiChat(a.id).then(function (ms) {
+        dentro.innerHTML = ''; if (!ms.length) { dentro.appendChild(el('p', 'hint', 'Nessun messaggio salvato per questo evento.')); return; }
+        ms.sort(function (x, y) { return x.t - y.t; }).forEach(function (m) {
+          var d = new Date(m.t), r = el('div', 'chat-msg ' + (m.f === 'blu' ? 'blu' : m.f === 'rossa' ? 'rossa' : ''));
+          r.appendChild(el('b', null, (m.nome || m.da) + ' · ' + (m.tipo === 'globale' ? 'globale' : m.tipo === 'fazione' ? 'fazione ' + esNomeFaz(m.f) : 'diretto')));
+          r.appendChild(el('div', 'chat-testo', m.testo)); r.appendChild(el('small', null, ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2)));
+          dentro.appendChild(r);
+        });
+      }, function (e) { dentro.textContent = 'Non riesco a caricarla: ' + (e.message || e); });
+    };
+    return k;
   }
   function bancoLinee() { var buf = ''; return function (pezzo) { buf += pezzo; var i; while ((i = buf.indexOf('\n')) >= 0) { bancoRiga(buf.slice(0, i)); buf = buf.slice(i + 1); } if (buf.length > 40000) { bancoRiga(buf); buf = ''; } }; }
   function bancoScollega() {
@@ -1182,7 +1356,7 @@
   }
   function bancoBle() {
     if (!navigator.bluetooth) { toast('Bluetooth web non disponibile: serve Chrome su Android o su computer (non iPhone)'); return; }
-    navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'AC-HQ' }, { namePrefix: 'AC-INJ' }], optionalServices: [NUS.s] }).then(function (dev) {
+    navigator.bluetooth.requestDevice({ filters: [{ namePrefix: 'AC-HQ' }, { namePrefix: 'AC-INJ' }, { namePrefix: 'AC-LORA' }], optionalServices: [NUS.s] }).then(function (dev) {
       BANCO.dev = dev; bancoRiga('-- collego ' + dev.name + '…', '##');
       dev.addEventListener('gattserverdisconnected', function () { if (BANCO.via === 'BT') { BANCO.via = null; bancoRiga('-- Bluetooth perso (scollegato o fuori portata)', '##'); } });
       return dev.gatt.connect().then(function (g) { return g.getPrimaryService(NUS.s); }).then(function (s) {
@@ -3406,6 +3580,7 @@
     if (faseAll(a) === 'finito') hero.appendChild(el('div', 'conf-fine', 'ALLENAMENTO CONCLUSO'));
     if (a.annullato) { hero.classList.add('annullato'); hero.appendChild(timbroAnnullato(a)); }
     app.appendChild(hero);
+    if (faseAll(a) === 'finito' || (a.esercizio && a.esercizio.fase === 'fine')) app.appendChild(cartaChatStorico(a));
     if (esAttivo(a)) app.appendChild(bottone('⚑ ESERCITAZIONE IN CORSO · apri', 'accent big es-home', function () { vai('esercizio', a.id); }));
     else if (P('allenamenti') && a.campo) app.appendChild(bottone('⚑ Esercitazione bandiere (regia)', '', function () { vai('esercizio', a.id); }));
     if (S.stato().me.team && (a.team || []).indexOf(S.stato().me.team) >= 0 && faseAll(a) !== 'finito' && !a.annullato) {

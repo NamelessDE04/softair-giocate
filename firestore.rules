@@ -163,6 +163,11 @@ service cloud.firestore {
         allow read: if signed();
         allow create: if signed() && (request.resource.data.uid == request.auth.uid || perm('allenamenti'));
       }
+      // chat LoRa: ognuno carica, a evento finito, i messaggi che ha visto (lo stesso messaggio ha lo stesso id)
+      match /chat/{m} {
+        allow read: if signed();
+        allow create, update: if signed() && request.resource.data.uid == request.auth.uid && request.resource.data.testo is string && request.resource.data.testo.size() < 400;
+      }
     }
     match /beacon/{mac} {
       allow read: if signed();
