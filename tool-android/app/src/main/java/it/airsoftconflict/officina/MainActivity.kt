@@ -89,8 +89,8 @@ class MainActivity : Activity() {
 
     override fun onDestroy() { chiudiUsb(); chiudiBle(); super.onDestroy() }
 
-    private fun js(codice: String) = main.post { web.evaluateJavascript(codice, null) }
-    private fun fine(id: Int, ok: Boolean, dati: String = "") = js("window.ACPonte&&ACPonte._fine($id,$ok,${JSONObject.quote(dati)})")
+    private fun js(codice: String) { main.post { web.evaluateJavascript(codice, null) } }
+    private fun fine(id: Int, ok: Boolean, dati: String = "") { js("window.ACPonte&&ACPonte._fine($id,$ok,${JSONObject.quote(dati)})") }
 
     inner class Ponte {
         @JavascriptInterface
