@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.77';
+  var VERSIONE = '0.78';
   var S = window.S40, F = window.S40F;
   var TOOL = !!window.AC_TOOL;   // dentro l'app Android «Officina»: niente account, solo dispositivi
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
@@ -317,6 +317,8 @@
         k3.appendChild(bottone('Salva sul LoRa', 'accent', function () { bancoInvia('chi ' + fz2.value + ' ' + nm.value.trim().toUpperCase()); toast('Salvato sul LoRa'); }));
         var g3 = el('div', 'off-tasti');
         g3.appendChild(bottone('📨 Manda la posizione', 'piccolo', function () { bancoInvia('invia'); }));
+        g3.appendChild(bottone('🌙 Notte', 'piccolo', function () { bancoInvia('notte 1'); toast('Schermo al minimo'); }));
+        g3.appendChild(bottone('☀ Giorno', 'piccolo', function () { bancoInvia('notte 0'); toast('Schermo pieno'); }));
         g3.appendChild(bottone('📡 Apri la chat', 'piccolo', function () { vai('chat'); }));
         g3.appendChild(bottone('⏻ Riavvia', 'piccolo', function () { if (confirm('Riavviare?')) bancoInvia('riavvia'); }));
         k3.appendChild(g3); pan.appendChild(k3);

@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.4.3"
+#define VERSIONE "1.4.4"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -819,6 +819,7 @@ void avviaBle(const String &nome) {
   s->start();
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
   adv->addServiceUUID(NUS_SERV); adv->setScanResponse(true);
+  adv->setMinInterval(800); adv->setMaxInterval(1600);   // 0,5-1 s: si trova lo stesso e consuma meno
   adv->start();
 }
 // righe arrivate dall'app via Bluetooth
@@ -1077,6 +1078,18 @@ uint8_t seq = 0;
 uint32_t ultimo = 0, inviatoFino = 0;
 int ultimoEsito = 1;
 uint8_t miaFaz = 0; String mioNome = "";   // li manda il telefono quando si collega ("chi blu TAURI·WHIPLASH")
+// risparmio: lo schermo si spegne da solo; di notte contrasto al minimo e niente lampeggi
+bool notte = false, schermoAcceso = true; uint32_t accesoFino = 0, avvisoFino = 0; String avviso = "";
+void contrasto() {
+  if (!haOled) return;
+  oled.ssd1306_command(0x81); oled.ssd1306_command(notte ? 0x00 : 0xCF);   // contrasto
+  oled.ssd1306_command(0xD9); oled.ssd1306_command(notte ? 0x11 : 0xF1);   // precarica: più bassa = più scuro
+  oled.ssd1306_command(0xDB); oled.ssd1306_command(notte ? 0x00 : 0x40);   // tensione VCOMH
+}
+void sveglia(uint32_t ms) {
+  accesoFino = max(accesoFino, millis() + ms);
+  if (!schermoAcceso && haOled) { oled.ssd1306_command(0xAF); schermoAcceso = true; }
+}
 // ultimo messaggio da mostrare sul display
 String msgNome = "", msgTesto = "", msgTipo = ""; uint32_t msgDa = 0; bool msgNuovo = false;
 // gli ultimi messaggi, da ridare al telefono quando si ricollega
@@ -1111,16 +1124,19 @@ void comandoPat(const String &c0) {
     return;
   }
   if (low.startsWith("chat ")) { chatDaApp(c, miaFaz, nomeVisto()); return; }
+  if (low.startsWith("notte")) { notte = low.indexOf('0') < 0; pref.putBool("notte", notte); contrasto(); sveglia(15000); stato(); return; }
   if (low == "storia") { for (int i = 0; i < nStoria; i++) esci(storia[i]); stato(); return; }
   if (low == "invia") { ultimo = millis(); inviaPos(); return; }
   if (low == "stato" || low == "info") { stato(); return; }
   if (low == "riavvia") { delay(200); ESP.restart(); }
-  Serial.println("comandi: chi blu|rossa|- <nome>, chat g|f|d <id|-> <testo>, storia, invia, stato, riavvia");
+  Serial.println("comandi: chi blu|rossa|- <nome>, chat g|f|d <id|-> <testo>, notte 1|0, storia, invia, stato, riavvia");
 }
 void setup() {
   avvioComune("PATTUGLIA");
+  setCpuFrequencyMhz(80);   // basta e avanza per GPS, LoRa e Bluetooth: un terzo di consumo in meno del processore
   pref.begin("ac", false);
   miaFaz = pref.getUChar("faz", 0); mioNome = pref.getString("nome", "");
+  notte = pref.getBool("notte", false); contrasto(); sveglia(60000);
   avviaBle("AC-LORA-" + idTesto(mioId));
   chatCb = [](const uint8_t *p, size_t n, float rssi) {
     if (!chatPerMe(p, miaFaz)) return;
@@ -1132,12 +1148,13 @@ void setup() {
       String corpo = buf; int tab = corpo.indexOf('\t');
       msgNome = tab >= 0 ? corpo.substring(0, tab) : "?"; msgTesto = tab >= 0 ? corpo.substring(tab + 1) : corpo;
       msgTipo = p[7] == 0 ? "GLOBALE" : p[7] == 1 ? "FAZIONE" : "PER TE"; msgDa = millis(); msgNuovo = true;
+      sveglia(60000);
     }
   };
   Serial1.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
   if (!accendiLoRa()) { scrivi("PATTUGLIA", "ERRORE", "LoRa non partita"); return; }
   radio.startReceive();
-  Serial.println("Pattuglia " + idTesto(mioId) + ": posizione ogni " + String(PATTUGLIA_MS / 1000) + " s. Pulsante = manda subito. Bluetooth: AC-LORA-" + idTesto(mioId));
+  Serial.println("Pattuglia " + idTesto(mioId) + ": posizione ogni " + String(PATTUGLIA_MS / 1000) + " s col GPS. Pulsante: accende lo schermo / giorno-notte; tenuto premuto = manda la posizione. Bluetooth: AC-LORA-" + idTesto(mioId));
   ultimo = millis() - PATTUGLIA_MS + 3000;
 }
 // testo lungo a righe da 21 caratteri (display piccolo)
@@ -1145,11 +1162,12 @@ String rigaN(const String &t, int k) { return t.substring(min((int)t.length(), k
 void loop() {
   while (Serial1.available()) gps.encode(Serial1.read());
   bool ok = gps.location.isValid() && gps.location.age() < 10000;
-  // con il GPS ogni 15 s (+ un po' a caso, per non trasmettere sempre insieme a qualcun altro); senza, ogni 60 s solo per dire "ci sono"
+  // con il GPS ogni 15 s (+ un po' a caso, per non trasmettere sempre insieme a qualcun altro); senza GPS non manda niente
+  // (che il LoRa c'è lo dice già l'annuncio della chat, ogni 2 minuti)
   static uint32_t attesa = PATTUGLIA_MS;
-  if (statoLoRa == 0 && millis() - ultimo >= (ok ? attesa : 60000UL)) { ultimo = millis(); attesa = PATTUGLIA_MS + random(0, 3000); inviaPos(); }
+  if (statoLoRa == 0 && ok && millis() - ultimo >= attesa) { ultimo = millis(); attesa = PATTUGLIA_MS + random(0, 3000); inviaPos(); }
   static uint32_t annuncio = 0;
-  if (statoLoRa == 0 && millis() - annuncio > 60000) { annuncio = millis() - random(0, 5000); chatAnnuncia(miaFaz, batteria(), nomeVisto()); }
+  if (statoLoRa == 0 && millis() - annuncio > 120000) { annuncio = millis() - random(0, 8000); chatAnnuncia(miaFaz, batteria(), nomeVisto()); }
   // radio: chat e annunci degli altri
   if (arrivato) {
     arrivato = false;
@@ -1161,24 +1179,34 @@ void loop() {
   }
   chatLoop(); chatRiprova();
   bool vedoMsg = msgNuovo && millis() - msgDa < 60000;
+  // tasto: schermo spento -> lo accende; con un messaggio -> lo chiude; altrimenti giorno <-> notte. Tenuto premuto: manda la posizione
   int pr = pulsante();
-  if (pr == 1) { if (vedoMsg) msgNuovo = false; else { ultimo = millis(); inviaPos(); } }   // con un messaggio sul display il tasto lo chiude
+  if (pr == 1) {
+    if (!schermoAcceso) sveglia(30000);
+    else if (vedoMsg) { msgNuovo = false; sveglia(30000); }
+    else { notte = !notte; pref.putBool("notte", notte); contrasto(); avviso = notte ? "NOTTE" : "GIORNO"; avvisoFino = millis() + 1500; sveglia(30000); }
+  }
+  if (pr == 2) { sveglia(30000); ultimo = millis(); inviaPos(); avviso = "INVIATA"; avvisoFino = millis() + 1500; }
+  if (schermoAcceso && millis() > accesoFino && haOled) { oled.invertDisplay(false); oled.ssd1306_command(0xAE); schermoAcceso = false; }
   static uint32_t disp = 0;
-  if (millis() - disp >= 500) {
+  if (schermoAcceso && millis() < avvisoFino) {
+    if (millis() - disp >= 300) { disp = millis(); scrivi("", "  " + avviso, "", notte ? "contrasto minimo" : "contrasto pieno", ""); }
+  } else if (schermoAcceso && millis() - disp >= 500) {
     disp = millis();
     if (vedoMsg) {
       int pagine = max(1, ((int)msgTesto.length() + 62) / 63), pg = ((millis() - msgDa) / 4000) % pagine;
-      if (haOled && ((millis() - msgDa) < 3000) && ((millis() / 250) % 2)) { oled.invertDisplay(true); } else if (haOled) oled.invertDisplay(false);
+      // di giorno lampeggia per farsi notare; di notte no (niente luce)
+      if (haOled && !notte && ((millis() - msgDa) < 3000) && ((millis() / 250) % 2)) { oled.invertDisplay(true); } else if (haOled) oled.invertDisplay(false);
       scrivi(msgTipo + " " + String((millis() - msgDa) / 1000) + "s" + (pagine > 1 ? " " + String(pg + 1) + "/" + String(pagine) : ""), msgNome.substring(0, 10),
              rigaN(msgTesto, pg * 3), rigaN(msgTesto, pg * 3 + 1), rigaN(msgTesto, pg * 3 + 2));
     } else {
       if (haOled) oled.invertDisplay(false);
-      uint32_t prossimo = (ok ? attesa : 60000UL) - min(millis() - ultimo, ok ? attesa : 60000UL);
+      uint32_t prossimo = attesa - min(millis() - ultimo, attesa);
       scrivi(nomeVisto().substring(0, 15) + " " + battTesto(batteria()),
              millis() < inviatoFino ? String(ultimoEsito == RADIOLIB_ERR_NONE ? "INVIATA" : "ERR LoRa") : ok ? "GPS OK" : "NO GPS",
              ok ? String(gps.location.lat(), 5) + " " + String(gps.location.lng(), 5) : String("cerco i satelliti... cielo aperto"),
              String(miaFaz == 1 ? "BLU" : miaFaz == 2 ? "ROSSI" : "fazione ?") + " · BT " + (bleConnesso ? "telefono ok" : "AC-LORA-" + idTesto(mioId)),
-             "#" + String(seq) + " " + loraTesto() + " prossima " + String(prossimo / 1000) + "s");
+             ok ? "#" + String(seq) + " " + loraTesto() + " prossima " + String(prossimo / 1000) + "s" : String("posizione: aspetto il GPS"));
     }
   }
   String r; if (leggiRiga(r)) comandoPat(r);
