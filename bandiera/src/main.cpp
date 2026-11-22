@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.4.9"
+#define VERSIONE "1.5.0"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -1094,6 +1094,26 @@ void contrasto() {
   oled.ssd1306_command(0xD9); oled.ssd1306_command(v[1]);
   oled.ssd1306_command(0xDB); oled.ssd1306_command(v[2]);
 }
+// niente luci che fanno vedere il team leader: LED di carica del chip di alimentazione e LED del GPS (impulso al secondo)
+void ubx(uint8_t cls, uint8_t id, const uint8_t *pl, uint16_t n) {
+  uint8_t a = 0, b = 0; uint8_t h[4] = { cls, id, (uint8_t)(n & 0xFF), (uint8_t)(n >> 8) };
+  Serial1.write(0xB5); Serial1.write(0x62);
+  for (int i = 0; i < 4; i++) { Serial1.write(h[i]); a += h[i]; b += a; }
+  for (int i = 0; i < n; i++) { Serial1.write(pl[i]); a += pl[i]; b += a; }
+  Serial1.write(a); Serial1.write(b); Serial1.flush();
+}
+void spegniLed() {
+  if (PMU) PMU->setChargingLedMode(XPOWERS_CHG_LED_OFF);
+  // GPS u-blox: NEO-6 (CFG-TP, impulso spento) e NEO-M8 (CFG-TP5, impulso non attivo); quello che non capisce lo ignora
+  uint8_t tp[20] = { 0x40, 0x42, 0x0F, 0x00, 0xA0, 0x86, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x32, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+  ubx(0x06, 0x07, tp, sizeof(tp));
+  delay(60);
+  uint8_t tp5[32] = { 0 }; tp5[0] = 0; tp5[1] = 1;   // indice 0, versione 1, flags = 0 (non attivo)
+  ubx(0x06, 0x31, tp5, sizeof(tp5));
+  delay(60);
+  uint8_t salva[13] = { 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x17 };   // CFG-CFG: salva nella memoria del GPS
+  ubx(0x06, 0x09, salva, sizeof(salva));
+}
 void sveglia(uint32_t ms) {
   accesoFino = max<uint32_t>(accesoFino, millis() + ms);
   if (!schermoAcceso && haOled) { oled.ssd1306_command(0xAF); schermoAcceso = true; }
@@ -1170,6 +1190,7 @@ void setup() {
     }
   };
   Serial1.begin(9600, SERIAL_8N1, GPS_RX, GPS_TX);
+  delay(300); spegniLed();
   if (!accendiLoRa()) { scrivi("PATTUGLIA", "ERRORE", "LoRa non partita"); return; }
   radio.startReceive();
   Serial.println("Pattuglia " + idTesto(mioId) + ": posizione ogni " + String(PATTUGLIA_MS / 1000) + " s col GPS. Pulsante: accende lo schermo / giorno-notte; tenuto premuto = manda la posizione. Bluetooth: AC-LORA-" + idTesto(mioId));
