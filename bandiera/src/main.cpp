@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.4.4"
+#define VERSIONE "1.4.5"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -1080,11 +1080,15 @@ int ultimoEsito = 1;
 uint8_t miaFaz = 0; String mioNome = "";   // li manda il telefono quando si collega ("chi blu TAURI·WHIPLASH")
 // risparmio: lo schermo si spegne da solo; di notte contrasto al minimo e niente lampeggi
 bool notte = false, schermoAcceso = true; uint32_t accesoFino = 0, avvisoFino = 0; String avviso = "";
+uint8_t livNotte = 2;   // quanto è scuro di notte: 1 scurissimo, 2 medio, 3 chiaro (comando "livello N" o dall'Officina)
 void contrasto() {
   if (!haOled) return;
-  oled.ssd1306_command(0x81); oled.ssd1306_command(notte ? 0x00 : 0xCF);   // contrasto
-  oled.ssd1306_command(0xD9); oled.ssd1306_command(notte ? 0x11 : 0xF1);   // precarica: più bassa = più scuro
-  oled.ssd1306_command(0xDB); oled.ssd1306_command(notte ? 0x00 : 0x40);   // tensione VCOMH
+  // contrasto, precarica (più bassa = più scuro), tensione VCOMH: i valori variano un po' da schermo a schermo
+  static const uint8_t L[4][3] = { { 0xCF, 0xF1, 0x40 }, { 0x00, 0x22, 0x00 }, { 0x10, 0x22, 0x20 }, { 0x40, 0xF1, 0x30 } };
+  const uint8_t *v = L[notte ? constrain(livNotte, 1, 3) : 0];
+  oled.ssd1306_command(0x81); oled.ssd1306_command(v[0]);
+  oled.ssd1306_command(0xD9); oled.ssd1306_command(v[1]);
+  oled.ssd1306_command(0xDB); oled.ssd1306_command(v[2]);
 }
 void sveglia(uint32_t ms) {
   accesoFino = max<uint32_t>(accesoFino, millis() + ms);
@@ -1124,6 +1128,7 @@ void comandoPat(const String &c0) {
     return;
   }
   if (low.startsWith("chat ")) { chatDaApp(c, miaFaz, nomeVisto()); return; }
+  if (low.startsWith("livello")) { livNotte = constrain(low.substring(7).toInt(), 1, 3); pref.putUChar("livNotte", livNotte); notte = true; pref.putBool("notte", true); contrasto(); sveglia(15000); avviso = "NOTTE " + String(livNotte); avvisoFino = millis() + 2000; stato(); return; }
   if (low.startsWith("notte")) { notte = low.indexOf('0') < 0; pref.putBool("notte", notte); contrasto(); sveglia(15000); stato(); return; }
   if (low == "storia") { for (int i = 0; i < nStoria; i++) esci(storia[i]); stato(); return; }
   if (low == "invia") { ultimo = millis(); inviaPos(); return; }
@@ -1136,7 +1141,7 @@ void setup() {
   setCpuFrequencyMhz(80);   // basta e avanza per GPS, LoRa e Bluetooth: un terzo di consumo in meno del processore
   pref.begin("ac", false);
   miaFaz = pref.getUChar("faz", 0); mioNome = pref.getString("nome", "");
-  notte = pref.getBool("notte", false); contrasto(); sveglia(60000);
+  notte = pref.getBool("notte", false); livNotte = pref.getUChar("livNotte", 2); contrasto(); sveglia(60000);
   avviaBle("AC-LORA-" + idTesto(mioId));
   chatCb = [](const uint8_t *p, size_t n, float rssi) {
     if (!chatPerMe(p, miaFaz)) return;
@@ -1190,7 +1195,7 @@ void loop() {
   if (schermoAcceso && millis() > accesoFino && haOled) { oled.invertDisplay(false); oled.ssd1306_command(0xAE); schermoAcceso = false; }
   static uint32_t disp = 0;
   if (schermoAcceso && millis() < avvisoFino) {
-    if (millis() - disp >= 300) { disp = millis(); scrivi("", "  " + avviso, "", notte ? "contrasto minimo" : "contrasto pieno", ""); }
+    if (millis() - disp >= 300) { disp = millis(); scrivi("", "  " + avviso, "", notte ? "schermo scuro (" + String(livNotte) + "/3)" : "contrasto pieno", ""); }
   } else if (schermoAcceso && millis() - disp >= 500) {
     disp = millis();
     if (vedoMsg) {
