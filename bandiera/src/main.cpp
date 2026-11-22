@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.4.0"
+#define VERSIONE "1.4.1"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -1347,7 +1347,8 @@ bool leggiIbeacon(NimBLEAdvertisedDevice &d, uint8_t *u, uint16_t &maj, uint16_t
 // I CP35 trasmettono a turno piu' pacchetti (iBeacon, Eddystone, nome...): bisogna guardarli uno per uno,
 // non solo l'ultimo ricevuto. Questa tabella raccoglie tutto quello che si sente durante una scansione.
 struct Visto { char mac[18]; char nome[20]; int rssi; bool coll, ib, nostro; uint16_t ma, mi; uint8_t tipo; uint16_t mv; char tlm[33]; char altro[48]; };
-Visto visti[40]; volatile int nVisti = 0; volatile bool raccogli = false;
+#define MAX_VISTI 72
+Visto visti[MAX_VISTI]; volatile int nVisti = 0; volatile bool raccogli = false;
 portMUX_TYPE muxV = portMUX_INITIALIZER_UNLOCKED;
 class Raccolta : public NimBLEAdvertisedDeviceCallbacks {
   void onResult(NimBLEAdvertisedDevice *d) override {
@@ -1376,10 +1377,21 @@ class Raccolta : public NimBLEAdvertisedDeviceCallbacks {
         for (int j = 0; j < (int)sd.size() && o + 2 < 47; j++, o += 2) sprintf(altro + o, "%02X", (uint8_t)sd[j]);
       }
     }
+    // in casa ci sono decine di altri dispositivi Bluetooth (telefoni, TV, cuffie...): la tabella non deve riempirsi di quelli
+    bool utile = ib || mv || tlm[0] || nm.size() || d->getRSSI() >= vicinoDb;
     portENTER_CRITICAL(&muxV);
     int i = 0; for (; i < nVisti; i++) if (!strcmp(visti[i].mac, mac.c_str())) break;
-    if (i == nVisti && nVisti < 40) { memset(&visti[i], 0, sizeof(Visto)); strncpy(visti[i].mac, mac.c_str(), 17); visti[i].rssi = -999; visti[i].tipo = d->getAddress().getType(); nVisti++; }
-    if (i < 40) {
+    if (i == nVisti) {
+      if (!utile) i = MAX_VISTI;
+      else if (nVisti < MAX_VISTI) nVisti++;
+      else {   // piena: prendo il posto del dispositivo estraneo più debole
+        int peggio = -1;
+        for (int k = 0; k < nVisti; k++) if (!visti[k].ib && !visti[k].tlm[0] && (peggio < 0 || visti[k].rssi < visti[peggio].rssi)) peggio = k;
+        i = (peggio >= 0 && (ib || tlm[0] || d->getRSSI() > visti[peggio].rssi)) ? peggio : MAX_VISTI;
+      }
+      if (i < MAX_VISTI) { memset(&visti[i], 0, sizeof(Visto)); strncpy(visti[i].mac, mac.c_str(), 17); visti[i].rssi = -999; visti[i].tipo = d->getAddress().getType(); }
+    }
+    if (i < MAX_VISTI) {
       Visto &v = visti[i];
       if (d->getRSSI() > v.rssi) v.rssi = d->getRSSI();
       if (coll) v.coll = true;
@@ -1392,11 +1404,14 @@ class Raccolta : public NimBLEAdvertisedDeviceCallbacks {
     portEXIT_CRITICAL(&muxV);
   }
 };
+// La radio Bluetooth scarta i pacchetti identici già sentiti nella stessa scansione: i CP35 ripetono sempre gli stessi,
+// quindi una scansione lunga ne perde tanti. Faccio tante scansioni da 1 s di fila e sommo quello che sento.
 void scansiona(int sec) {
   NimBLEScan *sc = NimBLEDevice::getScan();
+  sc->setDuplicateFilter(false);
   nVisti = 0; raccogli = true;
-  sc->start(sec, false);
-  raccogli = false; sc->clearResults();
+  for (int k = 0; k < sec; k++) { sc->start(1, false); sc->clearResults(); }
+  raccogli = false;
 }
 
 void schermo() {
@@ -1534,7 +1549,7 @@ bool piuVicino(NimBLEAddress &out, bool saltaFatti) {
 }
 
 void elenco() {
-  scansiona(5);
+  scansiona(8);   // i CP35 mandano il pacchetto iBeacon a turno con gli altri: 8 s bastano per sentirli tutti
   String js = "{\"vicini\":["; int nostri = 0;
   Out.println("Tag nei dintorni (i nostri hanno l'UUID giusto):");
   for (int i = 0; i < nVisti; i++) {

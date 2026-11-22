@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.75';
+  var VERSIONE = '0.76';
   var S = window.S40, F = window.S40F;
   var TOOL = !!window.AC_TOOL;   // dentro l'app Android «Officina»: niente account, solo dispositivi
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
@@ -1859,7 +1859,7 @@
     }
     function riprogramma() { if (confirm('Il tag ' + tag.gia + ' diventerà ' + sig(faz, numero()) + '. Sicuro?')) scrivi(); }
     function finale() {
-      controllo = { v: I.vicini, t: Date.now(), attesa: true }; disegna(); bancoInvia('elenco');
+      controllo = { v: I.vicini, t: Date.now(), attesa: true, giro: 1, somma: {} }; disegna(); bancoInvia('elenco');
     }
     function grosso(cls, titolo, testo) { var c = el('div', 'bp-card ' + cls); c.appendChild(el('div', 'bp-tit', titolo)); if (testo) c.appendChild(el('div', 'bp-txt', testo)); return c; }
     function tasto(t, cls, fn) { var x = bottone(t, 'bp-btn ' + (cls || ''), fn); return x; }
@@ -1967,7 +1967,7 @@
       fin.appendChild(tasto('Controllo finale', '', finale));
       fin.appendChild(tasto('Cambia numeri (' + tot('blu') + ' blu, ' + tot('rossa') + ' rossi)', 'link', function () { pianoEdit = true; disegna(); }));
       if (controllo) {
-        if (controllo.attesa) fin.appendChild(el('p', 'hint', 'Metti tutti i tag vicino alla T-Beam… (5 secondi)'));
+        if (controllo.attesa) fin.appendChild(el('p', 'hint', 'Metti tutti i tag vicino alla T-Beam… (circa 15 secondi, ascolto due volte)'));
         else {
           var vs = (controllo.v || []).filter(function (v) { return v.nostro; }), h = '';
           ['blu', 'rossa'].forEach(function (f) {
@@ -2166,7 +2166,13 @@
     }
     var vecchiVicini = I.viciniT || 0;
     b.cb = function () {
-      if (controllo && controllo.attesa && (I.viciniT || 0) > vecchiVicini) { vecchiVicini = I.viciniT; controllo = { v: I.vicini, attesa: false }; }
+      if (controllo && controllo.attesa && (I.viciniT || 0) > vecchiVicini) {
+        // due ascolti di fila e si sommano: un tag che in un giro non si è fatto sentire c'è quasi sempre nell'altro
+        vecchiVicini = I.viciniT;
+        (I.vicini || []).forEach(function (v) { var x = controllo.somma[v.mac]; if (!x || (v.nostro && !x.nostro) || v.rssi > x.rssi) controllo.somma[v.mac] = Object.assign({}, v, x && x.nostro && !v.nostro ? { nostro: true, f: x.f, n: x.n } : {}); });
+        if (controllo.giro < 2) { controllo.giro++; bancoInvia('elenco'); }
+        else controllo = { v: Object.keys(controllo.somma).map(function (k) { return controllo.somma[k]; }), attesa: false };
+      }
       arrivi(); arriviModi(); disegna();
     };
     // appena collegati chiediamo chi è (l'iniettore risponde con "info")
