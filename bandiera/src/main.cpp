@@ -1087,7 +1087,7 @@ void contrasto() {
   oled.ssd1306_command(0xDB); oled.ssd1306_command(notte ? 0x00 : 0x40);   // tensione VCOMH
 }
 void sveglia(uint32_t ms) {
-  accesoFino = max(accesoFino, millis() + ms);
+  accesoFino = max<uint32_t>(accesoFino, millis() + ms);
   if (!schermoAcceso && haOled) { oled.ssd1306_command(0xAF); schermoAcceso = true; }
 }
 // ultimo messaggio da mostrare sul display
@@ -1201,7 +1201,7 @@ void loop() {
              rigaN(msgTesto, pg * 3), rigaN(msgTesto, pg * 3 + 1), rigaN(msgTesto, pg * 3 + 2));
     } else {
       if (haOled) oled.invertDisplay(false);
-      uint32_t prossimo = attesa - min(millis() - ultimo, attesa);
+      uint32_t prossimo = attesa - min<uint32_t>(millis() - ultimo, attesa);
       scrivi(nomeVisto().substring(0, 15) + " " + battTesto(batteria()),
              millis() < inviatoFino ? String(ultimoEsito == RADIOLIB_ERR_NONE ? "INVIATA" : "ERR LoRa") : ok ? "GPS OK" : "NO GPS",
              ok ? String(gps.location.lat(), 5) + " " + String(gps.location.lng(), 5) : String("cerco i satelliti... cielo aperto"),

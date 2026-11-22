@@ -31,7 +31,7 @@ jobs:
           VER=$(grep -o 'define VERSIONE "[^"]*"' src/main.cpp | cut -d'"' -f2)
           PK=~/.platformio/packages
           for e in bandiera hq tag pattuglia iniettore; do
-            pio run -e $e
+            if ! pio run -e $e; then echo "::error::Firmware $e NON compilato: resta quello vecchio"; FALLITI="$FALLITI $e"; continue; fi
             B=.pio/build/$e
             python $PK/tool-esptoolpy/esptool.py --chip esp32 merge_bin -o $OUT/$e.bin --flash_mode dio --flash_freq 40m --flash_size 4MB \
               0x1000 $B/bootloader.bin 0x8000 $B/partitions.bin 0xe000 $PK/framework-arduinoespressif32/tools/partitions/boot_app0.bin 0x10000 $B/firmware.bin
