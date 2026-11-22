@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.4.8"
+#define VERSIONE "1.4.9"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -1087,7 +1087,8 @@ void contrasto() {
   // contrasto, precarica (più bassa = più scuro), tensione VCOMH: i valori variano un po' da schermo a schermo
   // livello 1 = la "luminosità minima" standard di questi schermi (si vede sempre); 2 e 3 un po' più chiari.
   // Abbassare anche precarica e VCOMH su alcuni schermi spegneva del tutto i pixel: non lo faccio più.
-  static const uint8_t L[4][3] = { { 0xCF, 0xF1, 0x40 }, { 0x00, 0xF1, 0x40 }, { 0x18, 0xF1, 0x40 }, { 0x50, 0xF1, 0x40 } };
+  // NOTTE 1 = 1 16 16, scelto da Luca al buio sui suoi schermi; 2 e 3 un po' più chiari
+  static const uint8_t L[4][3] = { { 0xCF, 0xF1, 0x40 }, { 1, 16, 16 }, { 8, 34, 32 }, { 32, 120, 48 } };
   const uint8_t *v = L[notte ? constrain(livNotte, 1, 3) : 0];
   oled.ssd1306_command(0x81); oled.ssd1306_command(v[0]);
   oled.ssd1306_command(0xD9); oled.ssd1306_command(v[1]);
@@ -1153,7 +1154,7 @@ void setup() {
   setCpuFrequencyMhz(80);   // basta e avanza per GPS, LoRa e Bluetooth: un terzo di consumo in meno del processore
   pref.begin("ac", false);
   miaFaz = pref.getUChar("faz", 0); mioNome = pref.getString("nome", "");
-  notte = pref.getBool("notte", false); livNotte = pref.getUChar("livNotte", 2); contrasto(); sveglia(60000);
+  notte = pref.getBool("notte", false); livNotte = pref.getUChar("livNotte", 1); contrasto(); sveglia(60000);
   avviaBle("AC-LORA-" + idTesto(mioId));
   chatCb = [](const uint8_t *p, size_t n, float rssi) {
     if (!chatPerMe(p, miaFaz)) return;
