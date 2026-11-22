@@ -1967,7 +1967,7 @@
       fin.appendChild(tasto('Controllo finale', '', finale));
       fin.appendChild(tasto('Cambia numeri (' + tot('blu') + ' blu, ' + tot('rossa') + ' rossi)', 'link', function () { pianoEdit = true; disegna(); }));
       if (controllo) {
-        if (controllo.attesa) fin.appendChild(el('p', 'hint', 'Metti tutti i tag vicino alla T-Beam… (circa 15 secondi, ascolto due volte)'));
+        if (controllo.attesa) fin.appendChild(el('p', 'hint', 'Metti tutti i tag vicino alla T-Beam… (circa 20 secondi, ascolto due volte)'));
         else {
           var vs = (controllo.v || []).filter(function (v) { return v.nostro; }), h = '';
           ['blu', 'rossa'].forEach(function (f) {

@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.4.1"
+#define VERSIONE "1.4.2"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -129,6 +129,19 @@ int pulsante() {
   return 0;
 }
 
+// iBeacon dentro un pacchetto Bluetooth: guardo TUTTI i campi, non solo il primo "dati del produttore"
+// (con l'ascolto attivo la risposta del tag si aggiunge al pacchetto e può contenere altri dati del produttore)
+bool trovaIbeacon(const uint8_t *p, size_t n, uint8_t *u, uint16_t &maj, uint16_t &min_) {
+  for (size_t i = 0; i + 1 < n;) {
+    uint8_t l = p[i]; if (!l || i + 1 + l > n) break;
+    if (p[i + 1] == 0xFF && l >= 26 && p[i + 2] == 0x4C && p[i + 3] == 0x00 && p[i + 4] == 0x02 && p[i + 5] == 0x15) {
+      memcpy(u, p + i + 6, 16); maj = (p[i + 22] << 8) | p[i + 23]; min_ = (p[i + 24] << 8) | p[i + 25];
+      return true;
+    }
+    i += 1 + l;
+  }
+  return false;
+}
 bool leggiUuid(const char *s, uint8_t *out) {
   int k = 0;
   for (int i = 0; s[i] && k < 32; i++) {
@@ -422,14 +435,9 @@ void registra(uint16_t minor, uint8_t major, int rssi) {
 
 class Ascolto : public NimBLEAdvertisedDeviceCallbacks {
   void onResult(NimBLEAdvertisedDevice *d) override {
-    if (!d->haveManufacturerData()) return;
-    std::string m = d->getManufacturerData();
-    if (m.length() < 25) return;
-    const uint8_t *b = (const uint8_t *)m.data();
-    // iBeacon: produttore 0x004C, tipo 0x02, lunghezza 0x15
-    if (b[0] != 0x4C || b[1] != 0x00 || b[2] != 0x02 || b[3] != 0x15) return;
-    if (memcmp(b + 4, uuid, 16) != 0) return;
-    uint16_t major = (b[20] << 8) | b[21], minor = (b[22] << 8) | b[23];
+    uint8_t u[16]; uint16_t major, minor;
+    if (!trovaIbeacon(d->getPayload(), d->getPayloadLength(), u, major, minor)) return;
+    if (memcmp(u, uuid, 16) != 0) return;
     if (major != 1 && major != 2) return;    // 1 blu, 2 rossa
     registra(minor, (uint8_t)major, d->getRSSI());
   }
@@ -880,12 +888,8 @@ portMUX_TYPE muxHq = portMUX_INITIALIZER_UNLOCKED;
 uint8_t uuidHq[16];
 class AscoltoHq : public NimBLEAdvertisedDeviceCallbacks {
   void onResult(NimBLEAdvertisedDevice *d) override {
-    if (!d->haveManufacturerData()) return;
-    std::string m = d->getManufacturerData();
-    if (m.length() < 25) return;
-    const uint8_t *b = (const uint8_t *)m.data();
-    if (b[0] != 0x4C || b[1] != 0x00 || b[2] != 0x02 || b[3] != 0x15 || memcmp(b + 4, uuidHq, 16) != 0) return;
-    uint16_t major = (b[20] << 8) | b[21], minor = (b[22] << 8) | b[23];
+    uint8_t u[16]; uint16_t major, minor;
+    if (!trovaIbeacon(d->getPayload(), d->getPayloadLength(), u, major, minor) || memcmp(u, uuidHq, 16) != 0) return;
     if (major != 1 && major != 2) return;
     int rssi = d->getRSSI(); uint32_t ora = millis();
     portENTER_CRITICAL(&muxHq);
@@ -1337,12 +1341,10 @@ void esito(bool ok, const String &mac, uint8_t f, uint16_t n, const String &test
 }
 
 // iBeacon nella pubblicità: 4C 00 02 15 + uuid(16) + major(2) + minor(2) + potenza
+// cerco l'iBeacon in TUTTI i campi del pacchetto (pubblicità + risposta alla scansione), non solo nel primo "dati del produttore":
+// i CP35 nella risposta alla scansione mettono altri dati loro, che a volte coprivano l'iBeacon
 bool leggiIbeacon(NimBLEAdvertisedDevice &d, uint8_t *u, uint16_t &maj, uint16_t &min_) {
-  if (!d.haveManufacturerData()) return false;
-  std::string m = d.getManufacturerData();
-  if (m.size() < 25 || (uint8_t)m[0] != 0x4C || (uint8_t)m[1] != 0x00 || (uint8_t)m[2] != 0x02 || (uint8_t)m[3] != 0x15) return false;
-  memcpy(u, m.data() + 4, 16); maj = ((uint8_t)m[20] << 8) | (uint8_t)m[21]; min_ = ((uint8_t)m[22] << 8) | (uint8_t)m[23];
-  return true;
+  return trovaIbeacon(d.getPayload(), d.getPayloadLength(), u, maj, min_);
 }
 // I CP35 trasmettono a turno piu' pacchetti (iBeacon, Eddystone, nome...): bisogna guardarli uno per uno,
 // non solo l'ultimo ricevuto. Questa tabella raccoglie tutto quello che si sente durante una scansione.
@@ -1410,7 +1412,9 @@ void scansiona(int sec) {
   NimBLEScan *sc = NimBLEDevice::getScan();
   sc->setDuplicateFilter(false);
   nVisti = 0; raccogli = true;
-  for (int k = 0; k < sec; k++) { sc->start(1, false); sc->clearResults(); }
+  // a turno: ascolto "passivo" (ogni pacchetto arriva subito, così non si perdono gli iBeacon) e "attivo" (chiede anche il nome)
+  for (int k = 0; k < sec; k++) { sc->setActiveScan(k % 2 == 1); sc->start(1, false); sc->clearResults(); }
+  sc->setActiveScan(true);
   raccogli = false;
 }
 
@@ -1549,7 +1553,7 @@ bool piuVicino(NimBLEAddress &out, bool saltaFatti) {
 }
 
 void elenco() {
-  scansiona(8);   // i CP35 mandano il pacchetto iBeacon a turno con gli altri: 8 s bastano per sentirli tutti
+  scansiona(10);   // i CP35 mandano il pacchetto iBeacon a turno con gli altri: 8 s bastano per sentirli tutti
   String js = "{\"vicini\":["; int nostri = 0;
   Out.println("Tag nei dintorni (i nostri hanno l'UUID giusto):");
   for (int i = 0; i < nVisti; i++) {
