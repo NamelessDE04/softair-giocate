@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.4.5"
+#define VERSIONE "1.4.6"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -1184,12 +1184,16 @@ void loop() {
   }
   chatLoop(); chatRiprova();
   bool vedoMsg = msgNuovo && millis() - msgDa < 60000;
-  // tasto: schermo spento -> lo accende; con un messaggio -> lo chiude; altrimenti giorno <-> notte. Tenuto premuto: manda la posizione
+  // tasto: schermo spento -> lo accende; con un messaggio -> lo chiude; altrimenti giorno -> notte 3 -> 2 -> 1 -> giorno. Tenuto premuto: manda la posizione
   int pr = pulsante();
   if (pr == 1) {
     if (!schermoAcceso) sveglia(30000);
     else if (vedoMsg) { msgNuovo = false; sveglia(30000); }
-    else { notte = !notte; pref.putBool("notte", notte); contrasto(); avviso = notte ? "NOTTE" : "GIORNO"; avvisoFino = millis() + 1500; sveglia(30000); }
+    else {   // giro: GIORNO -> NOTTE 3 (chiara) -> NOTTE 2 -> NOTTE 1 (scurissima) -> GIORNO
+      if (!notte) { notte = true; livNotte = 3; } else if (livNotte > 1) livNotte--; else notte = false;
+      pref.putBool("notte", notte); pref.putUChar("livNotte", livNotte); contrasto();
+      avviso = notte ? "NOTTE " + String(livNotte) : "GIORNO"; avvisoFino = millis() + 1500; sveglia(30000);
+    }
   }
   if (pr == 2) { sveglia(30000); ultimo = millis(); inviaPos(); avviso = "INVIATA"; avvisoFino = millis() + 1500; }
   if (schermoAcceso && millis() > accesoFino && haOled) { oled.invertDisplay(false); oled.ssd1306_command(0xAE); schermoAcceso = false; }
