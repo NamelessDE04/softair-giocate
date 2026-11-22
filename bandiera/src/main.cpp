@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.4.7"
+#define VERSIONE "1.4.8"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -1080,6 +1080,7 @@ int ultimoEsito = 1;
 uint8_t miaFaz = 0; String mioNome = "";   // li manda il telefono quando si collega ("chi blu TAURI·WHIPLASH")
 // risparmio: lo schermo si spegne da solo; di notte contrasto al minimo e niente lampeggi
 bool notte = false, schermoAcceso = true; uint32_t accesoFino = 0, avvisoFino = 0; String avviso = "";
+bool provaLum = false;   // prova della luminosità in corso (comando "lum")
 uint8_t livNotte = 2;   // quanto è scuro di notte: 1 scurissimo, 2 medio, 3 chiaro (comando "livello N" o dall'Officina)
 void contrasto() {
   if (!haOled) return;
@@ -1130,7 +1131,16 @@ void comandoPat(const String &c0) {
     return;
   }
   if (low.startsWith("chat ")) { chatDaApp(c, miaFaz, nomeVisto()); return; }
-  if (low.startsWith("livello")) { livNotte = constrain(low.substring(7).toInt(), 1, 3); pref.putUChar("livNotte", livNotte); notte = true; pref.putBool("notte", true); contrasto(); sveglia(15000); avviso = "NOTTE " + String(livNotte); avvisoFino = millis() + 2000; stato(); return; }
+  // prova a mano: "lum 0 241 64" = contrasto (0-255), precarica (1-255), VCOMH (0, 32, 48, 64). Non si salva: per trovare i valori giusti
+  if (low.startsWith("lum ")) {
+    long c1 = 0, p1 = 241, v1 = 64; sscanf(low.c_str() + 4, "%ld %ld %ld", &c1, &p1, &v1);
+    c1 = constrain(c1, 0, 255); p1 = constrain(p1, 1, 255); v1 = constrain(v1, 0, 112);
+    if (haOled) { oled.ssd1306_command(0x81); oled.ssd1306_command(c1); oled.ssd1306_command(0xD9); oled.ssd1306_command(p1); oled.ssd1306_command(0xDB); oled.ssd1306_command(v1); }
+    sveglia(60000); provaLum = true; avviso = String(c1) + " " + String(p1) + " " + String(v1); avvisoFino = millis() + 60000;
+    esci("{\"lum\":[" + String(c1) + "," + String(p1) + "," + String(v1) + "]}");
+    return;
+  }
+  if (low.startsWith("livello")) { provaLum = false; livNotte = constrain(low.substring(7).toInt(), 1, 3); pref.putUChar("livNotte", livNotte); notte = true; pref.putBool("notte", true); contrasto(); sveglia(15000); avviso = "NOTTE " + String(livNotte); avvisoFino = millis() + 2000; stato(); return; }
   if (low.startsWith("notte")) { notte = low.indexOf('0') < 0; pref.putBool("notte", notte); contrasto(); sveglia(15000); stato(); return; }
   if (low == "storia") { for (int i = 0; i < nStoria; i++) esci(storia[i]); stato(); return; }
   if (low == "invia") { ultimo = millis(); inviaPos(); return; }
@@ -1188,6 +1198,8 @@ void loop() {
   bool vedoMsg = msgNuovo && millis() - msgDa < 60000;
   // tasto: schermo spento -> lo accende; con un messaggio -> lo chiude; altrimenti giorno -> notte 3 -> 2 -> 1 -> giorno. Tenuto premuto: manda la posizione
   int pr = pulsante();
+  if (provaLum && millis() >= avvisoFino) { provaLum = false; contrasto(); }
+  if (pr == 1 && provaLum) { provaLum = false; avvisoFino = 0; contrasto(); sveglia(30000); pr = 0; }
   if (pr == 1) {
     if (!schermoAcceso) sveglia(30000);
     else if (vedoMsg) { msgNuovo = false; sveglia(30000); }
@@ -1201,7 +1213,8 @@ void loop() {
   if (schermoAcceso && millis() > accesoFino && haOled) { oled.invertDisplay(false); oled.ssd1306_command(0xAE); schermoAcceso = false; }
   static uint32_t disp = 0;
   if (schermoAcceso && millis() < avvisoFino) {
-    if (millis() - disp >= 300) { disp = millis(); scrivi("", "  " + avviso, "", notte ? "schermo scuro (" + String(livNotte) + "/3)" : "contrasto pieno", ""); }
+    if (millis() - disp >= 300) { disp = millis(); if (provaLum) scrivi("PROVA: contr prec vcom", avviso, "ABCDEFGHIJ 0123456789", "TAURI WHIPLASH BLU", "tasto = torna normale");
+      else scrivi("", "  " + avviso, "", notte ? "schermo scuro (" + String(livNotte) + "/3)" : "contrasto pieno", ""); }
   } else if (schermoAcceso && millis() - disp >= 500) {
     disp = millis();
     if (vedoMsg) {

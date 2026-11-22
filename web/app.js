@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.79';
+  var VERSIONE = '0.80';
   var S = window.S40, F = window.S40F;
   var TOOL = !!window.AC_TOOL;   // dentro l'app Android «Officina»: niente account, solo dispositivi
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
@@ -321,7 +321,21 @@
         g3.appendChild(bottone('☀ Giorno', 'piccolo', function () { bancoInvia('notte 0'); toast('Schermo pieno'); }));
         g3.appendChild(bottone('📡 Apri la chat', 'piccolo', function () { vai('chat'); }));
         g3.appendChild(bottone('⏻ Riavvia', 'piccolo', function () { if (confirm('Riavviare?')) bancoInvia('riavvia'); }));
-        k3.appendChild(g3); pan.appendChild(k3);
+        k3.appendChild(g3);
+        // prova della luminosità: cambia lo schermo subito, poi mi dici i tre numeri migliori
+        var pl = el('details', 'off-lum'); pl.appendChild(el('summary', null, '🔅 Prova luminosità (per trovare la notte giusta)'));
+        var lv = { c: 0, p: 241, v: 64 }, lt = el('div', 'off-lum-val');
+        function manda() { bancoInvia('lum ' + lv.c + ' ' + lv.p + ' ' + lv.v); lt.textContent = 'Valori: ' + lv.c + ' ' + lv.p + ' ' + lv.v + '  (scrivimeli quando trovi quelli giusti)'; }
+        [['Contrasto', 'c', 0, 255, 1], ['Precarica', 'p', 1, 255, 1], ['VCOMH', 'v', 0, 64, 16]].forEach(function (x) {
+          var r = el('input'); r.type = 'range'; r.min = x[2]; r.max = x[3]; r.step = x[4]; r.value = lv[x[1]];
+          var et = el('span', null, x[0] + ': ' + lv[x[1]]);
+          r.oninput = function () { lv[x[1]] = +r.value; et.textContent = x[0] + ': ' + r.value; };
+          r.onchange = manda;
+          var w = el('div', 'off-lum-r'); w.appendChild(et); w.appendChild(r); pl.appendChild(w);
+        });
+        pl.appendChild(lt);
+        pl.appendChild(el('small', 'hint', 'Muovi un cursore e guarda lo schermo del LoRa (cambia quando lasci il cursore). In una stanza buia cerca la luce più bassa che si legge ancora. Il tasto del LoRa rimette tutto normale. Da console: lum 0 241 64'));
+        k3.appendChild(pl); pan.appendChild(k3);
       }
       if (r === 'TAG') {
         var k4 = el('div', 'carta'); k4.appendChild(el('h3', null, '◉ Tag finto'));
