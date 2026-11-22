@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.80';
+  var VERSIONE = '0.81';
   var S = window.S40, F = window.S40F;
   var TOOL = !!window.AC_TOOL;   // dentro l'app Android «Officina»: niente account, solo dispositivi
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
@@ -232,7 +232,8 @@
     var regBox = el('div', 'carta'); box.appendChild(regBox);
     var term = el('details', 'carta off-term'); term.appendChild(el('summary', null, 'Terminale (comandi a mano)')); box.appendChild(term);
     var tin = el('input'); tin.placeholder = 'es. info · soglia -75 · cmd tutte test'; var tgo = bottone('Manda', '', function () { if (tin.value.trim()) { bancoInvia(tin.value.trim()); tin.value = ''; } });
-    var tr = el('div', 'riga2'); tr.appendChild(tin); tr.appendChild(tgo); term.appendChild(tr); var tpre = el('pre', 'off-pre'); term.appendChild(tpre);
+    var tinfo = bottone('ⓘ', 'gc-i', function () { guidaComandi(ruolo(), function (c) { tin.value = c; tin.focus(); }); }); tinfo.title = 'Elenco dei comandi';
+    var tr = el('div', 'riga2'); tr.appendChild(tin); tr.appendChild(tgo); tr.appendChild(tinfo); term.appendChild(tr); var tpre = el('pre', 'off-pre'); term.appendChild(tpre);
     var sel = null;   // bandiera scelta quando si è collegati all'HQ (o 'tutte')
     function ruolo() {
       if (!b.via) return null;
@@ -369,6 +370,87 @@
     if (b.via) bancoInvia('info');
     var ch = chiusura; chiusura = function () { clearInterval(tk); b.cb = prima; if (ch) ch(); };
   }
+  // ⓘ elenco dei comandi da console, per tipo di dispositivo: tocchi un comando e finisce nella casella
+  var COMANDI = {
+    BANDIERA: ['Bandiera', 'Col cavo li scrivi così. Dall\'HQ, via radio, metti davanti «cmd» e l\'ID (o «tutte»): cmd 1A2C test · cmd tutte soglia -75', [
+      ['info', 'versione e impostazioni della bandiera'],
+      ['soglia -75', 'segnale minimo dei tag in dBm: più vicino a 0 = bisogna stare più vicini (area più piccola)'],
+      ['tempo 60', 'secondi per conquistare l\'area'],
+      ['uscita 10', 'secondi dopo cui un tag che non si sente più esce dall\'area'],
+      ['luce 120', 'luminosità delle luci (5-255)'],
+      ['fazione 1', 'area ai BLU (2 = ROSSI, 0 = neutra)'],
+      ['reset', 'area neutra, conquista azzerata'],
+      ['test', 'luci e cicalino per 4 secondi'],
+      ['muto 1', 'cicalino spento (muto 0 = acceso; muto da solo = inverte)'],
+      ['buzzer', 'inverte il segnale del cicalino (se suona sempre o non suona mai)'],
+      ['invia', 'manda subito lo stato all\'HQ'],
+      ['ogni 5', 'manda lo stato ogni N secondi (fino al riavvio)'],
+      ['posizione 60', 'coordinate GPS sul display per N secondi (0 = torna alla schermata di gioco)'],
+      ['gps', 'satelliti, precisione e posizione'],
+      ['colpo 10', 'simula un colpo di mortaio a N metri (colpo 10 15 40: raggio colpita e raggio vicino)'],
+      ['morti b3,r1', 'tag fuori gioco, non contano per la conquista (morti - = nessuno)'],
+      ['riavvia', 'riavvia la scheda']]],
+    HQ: ['HQ', 'Comandi per l\'HQ collegato al PC o al telefono.', [
+      ['info', 'stato dell\'HQ'],
+      ['cmd tutte info', 'manda un comando via radio a tutte le bandiere (o a una: cmd 1A2C …)'],
+      ['cmd tutte test', 'tutte le bandiere: luci e cicalino 4 s'],
+      ['msg RIENTRA B3', 'scritta grande sul display dell\'HQ per 6 secondi'],
+      ['qr testo', 'mostra un QR sul display (qr - lo toglie)'],
+      ['chat g - testo', 'messaggio nel canale globale della chat LoRa'],
+      ['chat d 1A2B testo', 'messaggio diretto a un LoRa (ID 1A2B)'],
+      ['riavvia', 'riavvia la scheda']]],
+    LORA: ['LoRa team leader', 'Comandi per il LoRa del team leader.', [
+      ['info', 'chi è, fazione, batteria, GPS'],
+      ['chi blu TAURI·WHIPLASH', 'fazione (blu, rossa, -) e nome che vedono gli altri'],
+      ['chat g - testo', 'messaggio a tutti (globale)'],
+      ['chat f - testo', 'messaggio alla tua fazione'],
+      ['chat d 1A2B testo', 'messaggio diretto a un LoRa'],
+      ['storia', 'ridà gli ultimi messaggi ricevuti'],
+      ['invia', 'manda subito la posizione'],
+      ['notte 1', 'schermo da notte (notte 0 = giorno)'],
+      ['livello 1', 'quanto è scura la notte: 1 scurissima, 2 media, 3 chiara'],
+      ['lum 1 16 16', 'prova luminosità: contrasto, precarica, VCOMH (per 60 s, non si salva)'],
+      ['riavvia', 'riavvia la scheda']]],
+    TAG: ['Tag finto', 'T-Beam che fa finta di essere il tag di un giocatore.', [
+      ['info', 'fazione, numero e potenza'],
+      ['f 1', 'fazione BLU (f 2 = ROSSI)'],
+      ['n 12', 'numero del tag'],
+      ['pot 4', 'potenza 0-7 (da -12 a +9 dBm): più bassa = si sente da meno lontano'],
+      ['riavvia', 'riavvia la scheda']]],
+    INIETTORE: ['Iniettore', 'Programma i tag CP35 veri.', [
+      ['info', 'impostazioni dell\'iniettore'],
+      ['auto blu 1', 'programma in fila i tag che avvicini, da BLU 1 in su (auto rossa 1 per i rossi)'],
+      ['stop', 'ferma la programmazione in fila'],
+      ['prog blu 3', 'programma solo il tag più vicino come BLU 3'],
+      ['vicino', 'dice qual è il tag più vicino'],
+      ['elenco', 'tutti i tag che si sentono (10 s)'],
+      ['nuovi', 'i tag nuovi intorno (nuovi -80 tutti = anche quelli già programmati)'],
+      ['batterie', 'batteria di tutti i tag vicini (12 s)'],
+      ['lampeggia AA:BB:CC:DD:EE:FF 20', 'fa lampeggiare un tag per N secondi, per riconoscerlo'],
+      ['vicino -60', 'soglia del tag «in mano» (dBm)'],
+      ['pot 4', 'potenza scritta nei tag (0-7)'],
+      ['intervallo 500', 'ogni quanti ms trasmettono i tag programmati'],
+      ['pwd dx1234', 'password dei tag DX-SMART'],
+      ['riavvia', 'riavvia la scheda']]]
+  };
+  function guidaComandi(ruolo, inserisci) {
+    apriFoglio(function (f) {
+      var r0 = COMANDI[ruolo] ? ruolo : 'BANDIERA';
+      f.appendChild(el('h3', null, 'ⓘ Comandi da console'));
+      var tabs = el('div', 'gc-tabs'), corpo = el('div'); f.appendChild(tabs); f.appendChild(corpo);
+      function mostra(rr) {
+        tabs.innerHTML = ''; corpo.innerHTML = '';
+        Object.keys(COMANDI).forEach(function (k) { var t = el('button', 'gc-tab' + (k === rr ? ' su' : ''), COMANDI[k][0]); t.type = 'button'; t.onclick = function () { mostra(k); }; tabs.appendChild(t); });
+        var C = COMANDI[rr]; corpo.appendChild(el('p', 'hint', C[1] + (inserisci ? ' Tocca un comando per metterlo nella casella.' : '')));
+        C[2].forEach(function (x) {
+          var r = el('button', 'gc-riga'); r.type = 'button'; r.appendChild(el('code', null, x[0])); r.appendChild(el('span', null, x[1]));
+          if (inserisci) r.onclick = function () { inserisci(x[0]); chiudiFoglio(); }; corpo.appendChild(r);
+        });
+      }
+      mostra(r0);
+    });
+  }
+  function ruoloBanco() { var b = BANCO; return b.avvio === 'HQ' || b.hq ? 'HQ' : b.avvio === 'INIETTORE' ? 'INIETTORE' : b.avvio === 'LORA' ? 'LORA' : b.avvio === 'TAG' || b.tag ? 'TAG' : 'BANDIERA'; }
   function home() {
     if (TOOL) { homeTool(); return; }
     if (apriNascosta) { var v = apriNascosta; apriNascosta = null; history.replaceState(null, '', location.pathname); setTimeout(function () { vai(v); }, 0); }
@@ -1620,7 +1702,9 @@
     bt.appendChild(bottone('Scollega', '', function () { bancoScollega(); disegna(); }));
     var fw = el('a', 'btn', 'Carica firmware ↗'); fw.href = '/firmware/'; fw.target = '_blank'; bt.appendChild(fw);
     var cmdF = el('form', 'banco-cmd'), cmdI = el('input'); cmdI.placeholder = 'comando, es. cmd tutte info'; cmdI.autocomplete = 'off'; cmdI.autocapitalize = 'off';
-    var ok = el('button', 'btn', 'Invia'); ok.type = 'submit'; cmdF.appendChild(cmdI); cmdF.appendChild(ok); box.appendChild(cmdF);
+    var ok = el('button', 'btn', 'Invia'); ok.type = 'submit'; cmdF.appendChild(cmdI); cmdF.appendChild(ok);
+    var gi = bottone('ⓘ', 'gc-i', function () { guidaComandi(ruoloBanco(), function (c) { cmdI.value = c; cmdI.focus(); }); }); gi.type = 'button'; gi.title = 'Elenco dei comandi';
+    cmdF.appendChild(gi); box.appendChild(cmdF);
     cmdF.onsubmit = function (e) { e.preventDefault(); bancoInvia(cmdI.value); cmdI.value = ''; };
     var rap = el('div', 'banco-bt'); box.appendChild(rap);
     [['info', 'info'], ['tutte info', 'cmd tutte info'], ['tutte test', 'cmd tutte test'], ['tutte reset', 'cmd tutte reset'], ['tutte invia', 'cmd tutte invia'], ['soglia…', null], ['tempo…', null]].forEach(function (x) {
@@ -2321,7 +2405,9 @@
     var lista = el('div', 'p3-lista'); box.appendChild(lista);
     var storia = el('div', 'p3-storia'); box.appendChild(storia);
     var cmdF = el('form', 'banco-cmd'), cmdI = el('input'); cmdI.placeholder = 'comando libero'; cmdI.autocapitalize = 'off'; cmdI.autocomplete = 'off';
-    var ok = el('button', 'btn', 'Invia'); ok.type = 'submit'; cmdF.appendChild(cmdI); cmdF.appendChild(ok); box.appendChild(cmdF);
+    var ok = el('button', 'btn', 'Invia'); ok.type = 'submit'; cmdF.appendChild(cmdI); cmdF.appendChild(ok);
+    var gi = bottone('ⓘ', 'gc-i', function () { guidaComandi(ruoloBanco(), function (c) { cmdI.value = c; cmdI.focus(); }); }); gi.type = 'button'; gi.title = 'Elenco dei comandi';
+    cmdF.appendChild(gi); box.appendChild(cmdF);
     cmdF.onsubmit = function (e) { e.preventDefault(); bancoInvia(cmdI.value); cmdI.value = ''; };
     var raw = el('details', 'p3-aiuto'); raw.appendChild(el('summary', null, 'Righe grezze'));
     raw.appendChild(bottone('Copia log', 'mini', function () { navigator.clipboard.writeText(b.righe.join('\n')).then(function () { toast('Log copiato: incollalo a Claude'); }, errore); }));

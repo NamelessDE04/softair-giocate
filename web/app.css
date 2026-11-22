@@ -944,3 +944,10 @@ main > .btn.big { margin-bottom: 6px; }
 .off-lum summary { cursor: pointer; font-weight: 700; margin-top: 8px; }
 .off-lum-r { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 8px; margin: 8px 0; } .off-lum-r input { width: 100%; }
 .off-lum-val { font-weight: 700; margin: 6px 0; }
+/* guida comandi */
+.gc-i { min-width: 44px; font-size: 20px; font-weight: 700; border-radius: 50%; }
+.gc-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; }
+.gc-tab { padding: 6px 10px; border-radius: 16px; border: 1px solid var(--linea); background: var(--pan); color: var(--muto); font-weight: 700; }
+.gc-tab.su { background: var(--oro); color: #1a1606; border-color: var(--oro); }
+.gc-riga { display: block; width: 100%; text-align: left; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--linea); background: none; color: inherit; }
+.gc-riga code { display: block; color: var(--oro); font-size: 15px; margin-bottom: 2px; } .gc-riga span { font-size: 14px; color: var(--muto); }
