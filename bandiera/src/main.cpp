@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.5.0"
+#define VERSIONE "1.6.0"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -95,6 +95,43 @@ String idTesto(uint16_t id) { char b[6]; snprintf(b, sizeof(b), "%04X", id); ret
 const char *nomeFaz(uint8_t f) { return f == 1 ? "blu" : f == 2 ? "rossa" : "nessuna"; }
 String jsonFaz(uint8_t f) { return f == 1 ? "\"blu\"" : f == 2 ? "\"rossa\"" : "null"; }
 
+// ---------------------------------------------------------------- spegnimento chiaro
+// Tenendo premuto il tasto PWR il chip di alimentazione avvisa (dopo ~1,5 s): mostro SPENGO 3-2-1, poi SPENTO, e spengo io
+// del tutto (niente standby). Il chip spegnerebbe comunque da solo dopo 10 s.
+void (*avvisoSpegni)(int passo) = nullptr;   // luci / suono in più per chi le ha (bandiera)
+void preparaSpegnimento() {
+  if (!PMU) return;
+  PMU->setPowerKeyPressOffTime(XPOWERS_POWEROFF_10S);
+  PMU->enableIRQ(PMU->getChipModel() == XPOWERS_AXP2101 ? XPOWERS_AXP2101_PKEY_LONG_IRQ : XPOWERS_AXP192_PKEY_LONG_IRQ);
+  PMU->getIrqStatus(); PMU->clearIrqStatus();
+}
+void scrittaGrande(const String &a, const String &b, bool inverti) {
+  if (!haOled) return;
+  oled.ssd1306_command(0xAF); oled.ssd1306_command(0x81); oled.ssd1306_command(0xCF);
+  oled.invertDisplay(inverti); oled.clearDisplay(); oled.setTextColor(SSD1306_WHITE);
+  oled.setTextSize(2); oled.setCursor(max(0, (128 - (int)a.length() * 12) / 2), 8); oled.print(a);
+  oled.setTextSize(b.length() <= 2 ? 3 : 2); int w = b.length() <= 2 ? 18 : 12; oled.setCursor(max(0, (128 - (int)b.length() * w) / 2), 36); oled.print(b);
+  oled.display();
+}
+void spegniOra() {
+  Serial.println("{\"spegnimento\":true}");
+  for (int k = 3; k > 0; k--) { scrittaGrande("SPENGO", String(k), false); if (avvisoSpegni) avvisoSpegni(k); delay(500); }
+  scrittaGrande("SPENTO", "OFF", true); if (avvisoSpegni) avvisoSpegni(0);
+  delay(1500);
+  if (haOled) { oled.invertDisplay(false); oled.clearDisplay(); oled.display(); oled.ssd1306_command(0xAE); }
+  if (PMU) PMU->shutdown();
+  esp_deep_sleep_start();   // se il chip non spegne (es. alimentato dalla USB), almeno il programma si ferma
+}
+void controllaSpegnimento() {
+  static uint32_t t = 0;
+  if (!PMU || millis() - t < 150) return;
+  t = millis();
+  PMU->getIrqStatus();
+  bool lungo = PMU->isPekeyLongPressIrq();
+  PMU->clearIrqStatus();
+  if (lungo) spegniOra();
+}
+
 void avvioComune(const char *ruolo) {
   Serial.begin(115200); delay(300);
   Wire.begin(I2C_SDA, I2C_SCL);
@@ -105,6 +142,7 @@ void avvioComune(const char *ruolo) {
   Serial.printf("{\"avvio\":\"%s\",\"id\":\"%s\",\"versione\":\"%s\"}\n", ruolo, idTesto(mioId).c_str(), VERSIONE);
   scrivi("AIRSOFT CONFLICT", String(ruolo).substring(0, 9), "id " + idTesto(mioId), "Avvio...");
   pinMode(PULSANTE, INPUT);
+  preparaSpegnimento();
 }
 
 // righe di comando da USB (una per riga)
@@ -726,6 +764,10 @@ void setup() {
   soglia = pref.getInt("soglia", SOGLIA_RSSI); tempoConq = pref.getInt("tempo", CONQUISTA_S); luce = pref.getInt("luce", LUCE);
   muto = pref.getBool("muto", false); buzBasso = pref.getBool("buzBasso", BUZZER_BASSO);
   chatRipete = true;   // le bandiere fanno da ripetitori per la chat dei team leader
+  avvisoSpegni = [](int k) {
+    digitalWrite(PIN_LED_ROSSO, k > 0); digitalWrite(PIN_LED_BLU, k > 0);
+    if (!muto && k > 0) { digitalWrite(PIN_BUZZER, buzBasso ? LOW : HIGH); delay(60 + (3 - k) * 60); digitalWrite(PIN_BUZZER, buzBasso ? HIGH : LOW); }
+  };
   pinMode(PIN_BUZZER, OUTPUT); digitalWrite(PIN_BUZZER, buzBasso ? HIGH : LOW);
   led.begin(); led.clear(); led.show();
   pinMode(PIN_LED_ROSSO, OUTPUT); pinMode(PIN_LED_BLU, OUTPUT);
@@ -747,13 +789,27 @@ void setup() {
 }
 
 void loop() {
+  controllaSpegnimento();
   while (Serial1.available()) gps.encode(Serial1.read());
   aggiornaPos();
   String riga; if (leggiRiga(riga)) Serial.println("> " + comando(riga));
   ascoltaRadio();
-  int b = pulsante();
-  if (b == 1) { ultimoInvio = 0; posFino = millis() + 60000UL; aggiornaDisplay(); }
-  if (b == 2) Serial.println("> " + comando("reset"));
+  // tasto: corto = schermata posizione per 1 minuto; tenuto 1,5-5 s = area neutra; tenuto 5 s = muto / suono
+  static uint32_t giuDa = 0; static bool fatto5 = false;
+  if (digitalRead(PULSANTE) == LOW) {
+    if (!giuDa) { giuDa = millis(); fatto5 = false; }
+    if (!fatto5 && millis() - giuDa >= 5000) {
+      fatto5 = true; Serial.println("> " + comando(muto ? "muto 0" : "muto 1"));
+      scrittaGrande(muto ? "BANDIERA" : "BANDIERA", muto ? "MUTA" : "SUONA", false);
+      for (int i = 0; i < 3; i++) { digitalWrite(PIN_LED_ROSSO, HIGH); digitalWrite(PIN_LED_BLU, HIGH); delay(120); digitalWrite(PIN_LED_ROSSO, LOW); digitalWrite(PIN_LED_BLU, LOW); delay(120); }
+      if (!muto) { digitalWrite(PIN_BUZZER, buzBasso ? LOW : HIGH); delay(150); digitalWrite(PIN_BUZZER, buzBasso ? HIGH : LOW); }
+      delay(1200);
+    }
+  } else if (giuDa) {
+    uint32_t d = millis() - giuDa; giuDa = 0;
+    if (!fatto5 && d >= 1500) Serial.println("> " + comando("reset"));
+    else if (!fatto5 && d > 40) { ultimoInvio = 0; posFino = millis() + 60000UL; aggiornaDisplay(); }
+  }
   static uint32_t ultimoPasso = millis(), ultimoDisp = 0;
   // conteggio ogni secondo (prima solo a ogni invio, ogni 20 s: per questo l'uscita dall'area era lenta)
   if (millis() - ultimoPasso >= 1000) { conta(); passoConquista((millis() - ultimoPasso) / 1000.0f); ultimoPasso = millis(); }
@@ -1006,6 +1062,7 @@ void setup() {
 }
 
 void loop() {
+  controllaSpegnimento();
   static uint32_t ultimoDisplay = 0;
   if (millis() - ultimoDisplay > (millis() < msgFino ? 200 : 1000)) { ultimoDisplay = millis(); mostra(); }
   // tag vicini: ogni secondo all'app, e si riparte con l'ascolto (la radio scarta i pacchetti identici già sentiti)
@@ -1199,6 +1256,7 @@ void setup() {
 // testo lungo a righe da 21 caratteri (display piccolo)
 String rigaN(const String &t, int k) { return t.substring(min((int)t.length(), k * 21), min((int)t.length(), k * 21 + 21)); }
 void loop() {
+  controllaSpegnimento();
   while (Serial1.available()) gps.encode(Serial1.read());
   bool ok = gps.location.isValid() && gps.location.age() < 10000;
   // con il GPS ogni 15 s (+ un po' a caso, per non trasmettere sempre insieme a qualcun altro); senza GPS non manda niente
@@ -1317,6 +1375,7 @@ void setup() {
 }
 
 void loop() {
+  controllaSpegnimento();
   String riga; if (leggiRiga(riga)) comando(riga);
   int b = pulsante();
   if (b == 1) { fazione = fazione == 1 ? 2 : 1; annuncia(); }
@@ -1829,6 +1888,7 @@ void setup() {
 }
 
 void loop() {
+  controllaSpegnimento();
   String riga; if (leggiRiga(riga)) comando(riga);
   String bl; portENTER_CRITICAL(&muxBle); bl = daBle; daBle = ""; portEXIT_CRITICAL(&muxBle);
   static String bufBle; bufBle += bl;
