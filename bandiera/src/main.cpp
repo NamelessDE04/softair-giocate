@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.4.2"
+#define VERSIONE "1.4.3"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -1663,14 +1663,18 @@ void comando(String c) {
   }
   if (k == "elenco") { elenco(); return; }
   // tutti i tag NUOVI (non ancora nostri) intorno all'iniettore, per programmarli in blocco
+  // "nuovi -80 tutti": anche quelli già programmati (per riprogrammarli)
   if (k == "nuovi") {
     int soglia = v.length() ? constrain(v.toInt(), -100, -20) : -80;
-    scansiona(6);
+    bool tutti = v.indexOf("tutti") >= 0;
+    scansiona(10);
     String js = "{\"nuovi\":[";
     for (int i = 0; i < nVisti; i++) {
       Visto &w = visti[i];
-      if (w.nostro || w.rssi < soglia || strncmp(w.nome, "CP35", 4)) continue;
-      char b[120]; snprintf(b, sizeof(b), "%s{\"mac\":\"%s\",\"nome\":\"%s\",\"rssi\":%d,\"mv\":%u}", js.endsWith("[") ? "" : ",", w.mac, w.nome, w.rssi, w.mv);
+      if (w.rssi < soglia) continue;
+      if (w.nostro ? !tutti : strncmp(w.nome, "CP35", 4) != 0) continue;
+      char b[160]; snprintf(b, sizeof(b), "%s{\"mac\":\"%s\",\"nome\":\"%s\",\"rssi\":%d,\"mv\":%u,\"nostro\":%s,\"f\":\"%s\",\"n\":%u}", js.endsWith("[") ? "" : ",", w.mac, w.nome, w.rssi, w.mv,
+                           w.nostro ? "true" : "false", w.nostro ? nomeFaz(w.ma) : "", w.nostro ? w.mi : 0);
       js += b;
     }
     Out.println(js + "]}");

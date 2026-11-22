@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.76';
+  var VERSIONE = '0.77';
   var S = window.S40, F = window.S40F;
   var TOOL = !!window.AC_TOOL;   // dentro l'app Android «Officina»: niente account, solo dispositivi
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
@@ -1793,16 +1793,30 @@
     var b = BANCO, I = b.inj, box = el('div', 'bp'); app.appendChild(box);
     var reg = null, faz = (function () { try { return localStorage.getItem('bp-faz') || 'blu'; } catch (e) { return 'blu'; } })();
     var fase = 'pronto', target = null, tag = null, esito = null, attesa = null, scelto = null, controllo = null, timer = null;
-    var modo = 'uno', L = null, Bt = null, utenti = null, report = [], stopU = null;
+    var modo = 'uno', L = null, Bt = null, utenti = null, report = [], stopU = null, Rp = null;
     var stopRep = S.ascoltaReportBatt(function (r) { report = r; if (modo === 'batterie') disegna(); });
     var piano = null, pianoEdit = false;   // quanti tag per fazione: documento beacon/_piano
-    var stopReg = S.ascoltaBeacon(function (r) {
+    // registro dei tag: nel database; nell'Officina (senza account) su questo telefono
+    var LREG = 'bp-registro';
+    function regLocale() { try { return JSON.parse(localStorage.getItem(LREG) || '{}'); } catch (e) { return {}; } }
+    function regDaLocale() { var o = regLocale(); return Object.keys(o).map(function (k) { return Object.assign({ id: k }, o[k]); }); }
+    function regScrivi(mac, dati, unisci) {
+      if (!TOOL) return unisci ? S.aggiornaBeacon(mac, dati) : S.salvaBeacon(mac, dati);
+      var o = regLocale(); o[mac] = unisci ? Object.assign({}, o[mac] || {}, dati) : dati; try { localStorage.setItem(LREG, JSON.stringify(o)); } catch (e) {}
+      riceviReg(regDaLocale()); return Promise.resolve();
+    }
+    function regTogli(mac) {
+      if (!TOOL) return S.eliminaBeacon(mac);
+      var o = regLocale(); delete o[mac]; try { localStorage.setItem(LREG, JSON.stringify(o)); } catch (e) {} riceviReg(regDaLocale()); return Promise.resolve();
+    }
+    var stopReg = TOOL ? (setTimeout(function () { riceviReg(regDaLocale()); }, 0), function () {}) : S.ascoltaBeacon(riceviReg);
+    function riceviReg(r) {
       r = r || [];
       var p0 = r.filter(function (x) { return x.id === '_piano'; })[0];
       piano = p0 ? { blu: p0.blu || 0, rossa: p0.rossa || 0 } : null;
       reg = r.filter(function (x) { return x.id.charAt(0) !== '_'; });
       disegna();
-    });
+    }
     function tot(f) { return piano ? piano[f] : 0; }
     function completa(f) { for (var n = 1; n <= tot(f); n++) if (!perNum(f, n)) return false; return true; }
     function sig(f, n) { return (f === 'rossa' ? 'R' : 'B') + n; }
@@ -1816,11 +1830,28 @@
     function vai2(f) { fase = f; disegna(); }
     function aspetta(tipo, ms) {
       attesa = { tipo: tipo, v: I.seqV || 0, f: I.fatti.length, t: Date.now() };
-      clearTimeout(timer); timer = setTimeout(function () { if (attesa) { attesa = null; esito = { testo: 'La T-Beam non risponde. Controlla il cavo e riprova.' }; vai2('errore'); } }, ms);
+      clearTimeout(timer); timer = setTimeout(function () {
+        if (!attesa) return; var rr = attesa.tipo.charAt(0) === 'r' && Rp; attesa = null;
+        if (rr) { Rp.fase = 'errore'; Rp.testo = 'La T-Beam non risponde. Controlla il collegamento e riprova.'; disegna(); return; }
+        esito = { testo: 'La T-Beam non risponde. Controlla il cavo e riprova.' }; vai2('errore');
+      }, ms);
     }
     // risposte dell'iniettore
     function arrivi() {
       if (!attesa) return;
+      if (attesa.tipo === 'rleggi' && (I.seqV || 0) > attesa.v) {
+        var tr = I.vicino; attesa = null; clearTimeout(timer);
+        if (!tr || !tr.mac) { Rp.fase = 'nessuno'; return disegna(); }
+        if (tr.altri > 0) { Rp.fase = 'troppi'; return disegna(); }
+        var gr = perMac(tr.mac);
+        Rp = { fase: 'scegli', tag: tr, f: tr.nostro ? tr.f : gr ? gr.f : faz, n: tr.nostro ? tr.n : gr ? gr.n : prossimo(faz) };
+        return disegna();
+      }
+      if (attesa.tipo === 'rscrivi' && I.fatti.length > attesa.f) {
+        var er = I.fatti[0]; attesa = null; clearTimeout(timer);
+        if (er.iniettore !== 'ok') { Rp.fase = 'errore'; Rp.testo = er.testo || 'errore'; return disegna(); }
+        return rpRegistra();
+      }
       if ((attesa.tipo === 'cerca' || attesa.tipo === 'verifica') && (I.seqV || 0) > attesa.v) {
         var t = I.vicino, tipo = attesa.tipo; attesa = null; clearTimeout(timer);
         if (tipo === 'verifica') {
@@ -1854,7 +1885,7 @@
     }
     function registra() {
       var dati = { f: faz, n: target, quando: Date.now(), da: S.stato().me.callsign || '', nome: (tag && tag.nome) || '' };
-      S.salvaBeacon(tag.mac, dati).then(function () { scelto = null; vai2('fatto'); }, function (e) { esito = { testo: 'Tag scritto ma non salvato nel registro: ' + (e.message || e) }; vai2('errore'); });
+      regScrivi(tag.mac, dati).then(function () { scelto = null; vai2('fatto'); }, function (e) { esito = { testo: 'Tag scritto ma non salvato nel registro: ' + (e.message || e) }; vai2('errore'); });
       fase = 'fatto'; disegna();
     }
     function riprogramma() { if (confirm('Il tag ' + tag.gia + ' diventerà ' + sig(faz, numero()) + '. Sicuro?')) scrivi(); }
@@ -1893,7 +1924,7 @@
         });
         pc.appendChild(tasto('INIZIA', 'acc', function () {
           if (!val.blu && !val.rossa) { toast('Almeno un tag'); return; }
-          S.salvaBeacon('_piano', { blu: val.blu, rossa: val.rossa, quando: Date.now(), da: S.stato().me.callsign || '' }).then(function () { pianoEdit = false; if (!val[faz]) faz = val.blu ? 'blu' : 'rossa'; }, errore);
+          regScrivi('_piano', { blu: val.blu, rossa: val.rossa, quando: Date.now(), da: S.stato().me.callsign || '' }).then(function () { pianoEdit = false; if (!val[faz]) faz = val.blu ? 'blu' : 'rossa'; }, errore);
         }));
         if (pianoEdit) pc.appendChild(tasto('Annulla', 'link', function () { pianoEdit = false; disegna(); }));
         box.appendChild(pc); return;
@@ -1917,7 +1948,7 @@
         x.textContent = sig(faz, n);
         x.onclick = function () {
           if (fase === 'scrivo' || fase === 'cerca') return;
-          if (r) { if (confirm(sig(faz, n) + ' fatto il ' + new Date(r.quando).toLocaleString('it-IT') + (r.da ? ' da ' + r.da : '') + '\nIndirizzo ' + r.id + '\n\nToglierlo dal registro? (solo se il tag è perso o sbagliato)')) S.eliminaBeacon(r.id).catch(errore); return; }
+          if (r) { if (confirm(sig(faz, n) + ' fatto il ' + new Date(r.quando).toLocaleString('it-IT') + (r.da ? ' da ' + r.da : '') + '\nIndirizzo ' + r.id + '\n\nToglierlo dal registro? (solo se il tag è perso o sbagliato)')) regTogli(r.id).catch(errore); return; }
           if (n !== prossimo(faz) && !confirm('Saltare i numeri liberi e fare ' + sig(faz, n) + '?')) return;
           if (n > tot(faz)) return;
           scelto = n; vai2('pronto');
@@ -1957,6 +1988,7 @@
       box.appendChild(card);
       if (fase === 'pronto' || fase === 'fatto') {
         var alt = el('div', 'bp-alt');
+        alt.appendChild(tasto('RIPROGRAMMA UN TAG', '', function () { modo = 'riprog'; Rp = { fase: 'leggi' }; disegna(); }));
         alt.appendChild(tasto('TANTI TAG INSIEME', '', function () { modo = 'lotto'; L = { fase: 'conta' }; disegna(); }));
         alt.appendChild(tasto('BATTERIE', '', function () { modo = 'batterie'; Bt = null; disegna(); }));
         alt.appendChild(tasto('ASSEGNA AI GIOCATORI', '', function () { modo = 'assegna'; caricaUtenti(); disegna(); }));
@@ -1987,8 +2019,9 @@
       box.appendChild(fin);
     }
     // ---------- modi: tanti tag insieme, batterie, assegnazione
-    function liberi(f, k) { var r = [], n = 1; while (r.length < k && n <= tot(f)) { if (!perNum(f, n)) r.push(n); n++; } return r; }
-    function indietro2() { if (L && (L.fase === 'scrivo')) return; if (L && L.fase === 'etichette') bancoInvia('basta'); modo = 'uno'; L = null; fase = 'pronto'; disegna(); }
+    // numeri liberi: contano come liberi anche quelli dei tag che sto per riprogrammare
+    function liberi(f, k, macs) { var r = [], n = 1; while (r.length < k && n <= tot(f)) { var g = perNum(f, n); if (!g || (macs && macs.indexOf(g.id) >= 0)) r.push(n); n++; } return r; }
+    function indietro2() { if (L && (L.fase === 'scrivo')) return; if (Rp && (Rp.fase === 'scrivo' || Rp.fase === 'leggo')) return; Rp = null; if (L && L.fase === 'etichette') bancoInvia('basta'); modo = 'uno'; L = null; fase = 'pronto'; disegna(); }
     function stepper(val, min, max, onch) {
       var r = el('div', 'bp-step'), meno = bottone('−', 'bp-pm'), num = el('span', 'bp-val', String(val)), piu = bottone('+', 'bp-pm');
       meno.onclick = function () { if (val > min) { val--; num.textContent = val; onch(val); } };
@@ -2001,7 +2034,7 @@
         var e = I.fatti[0], it = L.lista[L.i]; L.attesa = null; clearTimeout(L.to);
         if (e.iniettore === 'ok' && e.mac === it.mac) {
           it.stato = 'ok';
-          S.salvaBeacon(it.mac, { f: L.f, n: it.n, quando: Date.now(), da: S.stato().me.callsign || '', nome: it.nome || '' }).catch(function () { it.stato = 'noreg'; });
+          regScrivi(it.mac, { f: L.f, n: it.n, quando: Date.now(), da: S.stato().me.callsign || '', nome: it.nome || '' }).catch(function () { it.stato = 'noreg'; });
           L.i++;
         } else if (!it.riprova) { it.riprova = true; }
         else { it.stato = 'errore'; it.testo = e.testo; L.i++; }
@@ -2064,21 +2097,62 @@
       });
       return t;
     }
+    // riprogramma un tag qualsiasi (nuovo o già fatto) con la fazione e il numero che vuoi
+    function rpLeggi() { Rp = { fase: 'leggo' }; disegna(); aspetta('rleggi', 15000); bancoInvia('vicino'); }
+    function rpScrivi() {
+      var altro = perNum(Rp.f, Rp.n);
+      if (altro && altro.id !== Rp.tag.mac && !confirm(sig(Rp.f, Rp.n) + ' nel registro è un altro tag (' + altro.id + ').\nQuello verrà tolto dal registro: il numero passa a questo tag. Va bene?')) return;
+      Rp.fase = 'scrivo'; Rp.altro = altro && altro.id !== Rp.tag.mac ? altro.id : null; disegna();
+      aspetta('rscrivi', 60000); bancoInvia('progmac ' + Rp.tag.mac + ' ' + Rp.f + ' ' + Rp.n);
+    }
+    function rpRegistra() {
+      var lav = [regScrivi(Rp.tag.mac, { f: Rp.f, n: Rp.n, quando: Date.now(), da: S.stato().me.callsign || '', nome: Rp.tag.nome || '' })];
+      if (Rp.altro) lav.push(regTogli(Rp.altro));
+      Promise.all(lav).then(function () { Rp.fase = 'fatto'; disegna(); }, function (e) { Rp.fase = 'fatto'; Rp.nota = 'Scritto sul tag, ma il registro non si è aggiornato: ' + (e.message || e); disegna(); });
+    }
+    function disegnaRiprog() {
+      var card;
+      if (Rp.fase === 'leggi') {
+        card = grosso('', 'Riprogramma un tag', 'Appoggia sulla T-Beam il tag da cambiare (nuovo o già programmato). Gli altri tag tienili lontani o spenti.');
+        card.appendChild(tasto('LEGGI IL TAG', 'acc', rpLeggi));
+      } else if (Rp.fase === 'leggo') card = grosso('', 'Leggo il tag…', 'Tienilo fermo sulla T-Beam.');
+      else if (Rp.fase === 'nessuno') { card = grosso('ko', 'Non vedo il tag', 'Appoggialo sulla T-Beam. Se non va, togli e rimetti la batteria.'); card.appendChild(tasto('RIPROVA', 'acc', rpLeggi)); }
+      else if (Rp.fase === 'troppi') { card = grosso('ko', 'Troppi tag vicini', 'Allontana gli altri tag (almeno 2 metri) o togligli la batteria.'); card.appendChild(tasto('RIPROVA', 'acc', rpLeggi)); }
+      else if (Rp.fase === 'scegli') {
+        var t = Rp.tag, g = perMac(t.mac), ora = t.nostro ? sig(t.f, t.n) : g ? sig(g.f, g.n) : null;
+        card = grosso(Rp.f, ora ? 'Questo è ' + ora : 'Tag nuovo', (t.nome || '') + ' · ' + t.mac + (g && g.gioc ? ' · ce l\'ha ' + g.gioc : ''));
+        var fzr = el('div', 'bp-faz');
+        ['blu', 'rossa'].forEach(function (f) { var x = el('button', 'bp-fz ' + f + (Rp.f === f ? ' on' : '')); x.type = 'button'; x.appendChild(el('b', null, nomeF(f))); x.onclick = function () { Rp.f = f; disegna(); }; fzr.appendChild(x); });
+        card.appendChild(el('div', 'bp-txt bp-pic', 'Diventa:')); card.appendChild(fzr);
+        card.appendChild(stepper(Rp.n, 1, 99, function (v) { Rp.n = v; var a2 = perNum(Rp.f, v); avv.textContent = a2 && a2.id !== t.mac ? '⚠ ' + sig(Rp.f, v) + ' nel registro è un altro tag: lo sostituisci' : ''; }));
+        var a0 = perNum(Rp.f, Rp.n), avv = el('div', 'bp-txt', a0 && a0.id !== t.mac ? '⚠ ' + sig(Rp.f, Rp.n) + ' nel registro è un altro tag: lo sostituisci' : ''); card.appendChild(avv);
+        card.appendChild(tasto('PROGRAMMA', 'acc', rpScrivi));
+      } else if (Rp.fase === 'scrivo') card = grosso('', 'Scrivo ' + sig(Rp.f, Rp.n) + '…', 'Non muovere il tag. Circa 15 secondi.');
+      else if (Rp.fase === 'fatto') {
+        card = grosso('ok ' + Rp.f, '✓ Ora è ' + sig(Rp.f, Rp.n), Rp.nota || 'Correggi la scritta sul tag col pennarello.');
+        card.appendChild(tasto('UN ALTRO', 'acc', function () { Rp = { fase: 'leggi' }; disegna(); }));
+      } else if (Rp.fase === 'errore') { card = grosso('ko', 'Non riuscito', Rp.testo || ''); card.appendChild(tasto('RIPROVA', 'acc', rpLeggi)); }
+      box.appendChild(card);
+    }
     function disegnaModo() {
       var card, T;
       box.appendChild(tasto('← Indietro', 'link', indietro2));
+      if (modo === 'riprog') { disegnaRiprog(); return; }
       if (modo === 'lotto') {
         if (L.fase === 'conta') {
-          card = grosso(faz, 'Tanti tag ' + nomeP(faz), 'Togli la linguetta ai tag nuovi e mettili TUTTI intorno alla T-Beam (meno di 1 metro).');
-          card.appendChild(tasto('CONTA I TAG', 'acc', function () { L.attesa = 'nuovi'; L.seqN = I.seqN || 0; L.fase = 'contando'; bancoInvia('nuovi'); disegna(); }));
-        } else if (L.fase === 'contando') card = grosso('', 'Conto i tag…', 'Aspetta 6 secondi.');
+          card = grosso(faz, 'Tanti tag ' + nomeP(faz), L.anche ? 'Metti TUTTI i tag da programmare intorno alla T-Beam (meno di 1 metro), nuovi e già fatti: diventano ' + nomeP(faz) + ' con numeri nuovi.' : 'Togli la linguetta ai tag nuovi e mettili TUTTI intorno alla T-Beam (meno di 1 metro).');
+          var ck = el('label', 'bp-ck-anche'), cb = el('input'); cb.type = 'checkbox'; cb.checked = !!L.anche; cb.onchange = function () { L.anche = cb.checked; disegna(); };
+          ck.appendChild(cb); ck.appendChild(document.createTextNode(' Anche i tag già programmati (li riprogrammo)')); card.appendChild(ck);
+          card.appendChild(tasto('CONTA I TAG', 'acc', function () { L.attesa = 'nuovi'; L.seqN = I.seqN || 0; L.fase = 'contando'; bancoInvia(L.anche ? 'nuovi -80 tutti' : 'nuovi'); disegna(); }));
+        } else if (L.fase === 'contando') card = grosso('', 'Conto i tag…', 'Aspetta 10 secondi.');
         else if (L.fase === 'contati') {
-          card = grosso('', 'Vedo ' + L.visti.length + ' tag', 'Quanti ne hai messi tu?');
+          var giaF = L.visti.filter(function (v) { return v.nostro; });
+          card = grosso('', 'Vedo ' + L.visti.length + ' tag', (giaF.length ? giaF.length + ' già programmati (' + giaF.map(function (v) { return sig(v.f, v.n); }).join(', ') + ') li riprogrammo. ' : '') + 'Quanti ne hai messi tu?');
           card.appendChild(stepper(L.messi, 0, 60, function (v) { L.messi = v; }));
           card.appendChild(tasto('CONFERMA', 'acc', function () {
             if (!L.messi) { toast('Conta i tag che hai messo'); return; }
             if (L.messi !== L.visti.length) { L.fase = 'diverso'; disegna(); return; }
-            var lib = liberi(faz, L.visti.length);
+            var lib = liberi(faz, L.visti.length, L.visti.map(function (v) { return v.mac; }));
             if (lib.length < L.visti.length) { L.fase = 'troppi'; L.lib = lib.length; disegna(); return; }
             L.f = faz; L.lista = L.visti.map(function (v, k) { return { mac: v.mac, nome: v.nome, n: lib[k], stato: null }; }); L.fase = 'pronto'; disegna();
           }));

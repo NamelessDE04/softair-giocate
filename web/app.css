@@ -940,3 +940,4 @@ main > .btn.big { margin-bottom: 6px; }
 .off-pre { max-height: 240px; overflow: auto; font-size: 11px; }
 .off-term summary { cursor: pointer; font-weight: 700; }
 .off-blocco { display: block; }
+.bp-ck-anche { display: flex; align-items: center; gap: 8px; margin: 10px 0; font-size: 16px; } .bp-ck-anche input { width: 22px; height: 22px; }
