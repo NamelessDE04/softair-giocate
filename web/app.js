@@ -1929,6 +1929,7 @@
         if (pianoEdit) pc.appendChild(tasto('Annulla', 'link', function () { pianoEdit = false; disegna(); }));
         box.appendChild(pc); return;
       }
+      if (modo === 'riprog') { box.appendChild(tasto('← Indietro', 'link', indietro2)); disegnaRiprog(); return; }
       if (!tot(faz) && tot(faz === 'blu' ? 'rossa' : 'blu')) faz = faz === 'blu' ? 'rossa' : 'blu';
       // 2. fazione
       var fz = el('div', 'bp-faz');
