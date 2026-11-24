@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.7.0"
+#define VERSIONE "1.7.1"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -129,7 +129,7 @@ void controllaSpegnimento() {
   PMU->getIrqStatus();
   bool lungo = PMU->isPekeyLongPressIrq();
   PMU->clearIrqStatus();
-  if (lungo) spegniOra();
+  if (lungo && millis() > 5000) spegniOra();   // nei primi secondi ignoro (segnali rimasti dall'accensione)
 }
 
 void avvioComune(const char *ruolo) {
