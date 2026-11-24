@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.82';
+  var VERSIONE = '0.83';
   var S = window.S40, F = window.S40F;
   var TOOL = !!window.AC_TOOL;   // dentro l'app Android «Officina»: niente account, solo dispositivi
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
@@ -1395,13 +1395,14 @@
       try {
         var j = JSON.parse(s); j._t = Date.now();
         if (j.bandiera) { bancoStoria(BANCO.band[j.bandiera], j); BANCO.band[j.bandiera] = j; bancoInoltra(j); }
-        else if (j.avvio) { BANCO.avvio = j.avvio; BANCO.versione = j.versione; }
+        else if (j.pat) { BANCO.avvio = 'LORA'; chatIo(j); }   // prima degli altri: lo stato del LoRa ha anche il campo "vicini"
+        else if (j.avvio) { BANCO.avvio = j.avvio === 'PATTUGLIA' ? 'LORA' : j.avvio; BANCO.versione = j.versione; }
         else if (j.iniettore) { BANCO.avvio = 'INIETTORE'; if (j.iniettore === 'ok' || j.iniettore === 'errore') BANCO.inj.fatti.unshift(j); else if (j.iniettore === 'info') BANCO.inj.info = j; }
         else if (j.nuovi) { BANCO.avvio = 'INIETTORE'; BANCO.inj.nuovi = j.nuovi; BANCO.inj.seqN = (BANCO.inj.seqN || 0) + 1; }
         else if (j.batterie) { BANCO.avvio = 'INIETTORE'; BANCO.inj.batt = j.batterie; BANCO.inj.seqB = (BANCO.inj.seqB || 0) + 1; }
         else if (j.lampeggia) { BANCO.inj.lamp = j; BANCO.inj.seqL = (BANCO.inj.seqL || 0) + 1; }
         else if (j.vicino) { BANCO.avvio = 'INIETTORE'; BANCO.inj.vicino = j.vicino; BANCO.inj.seqV = (BANCO.inj.seqV || 0) + 1; }
-        else if (j.vicini) { BANCO.avvio = 'INIETTORE'; BANCO.inj.vicini = j.vicini; BANCO.inj.viciniT = Date.now(); }
+        else if (Array.isArray(j.vicini)) { BANCO.avvio = 'INIETTORE'; BANCO.inj.vicini = j.vicini; BANCO.inj.viciniT = Date.now(); }
         else if (j.auto != null) { BANCO.avvio = 'INIETTORE'; BANCO.inj.auto = j.auto ? j : null; }
         else if (j.pattuglia) { BANCO.pat[j.pattuglia] = j; bancoPattuglia(j); }
         else if (j.risposta) { BANCO.visto.risposta = 1; if (/mortaio/i.test(j.testo || '')) BANCO.visto.colpo = 1; BANCO.storia.push({ t: Date.now(), testo: 'Risposta via radio da ' + j.risposta + ': ' + j.testo }); }
@@ -1410,7 +1411,6 @@
         else if (j.ok && typeof j.ok === 'object') chatStato(j.ok.seq, j.ok.da, 'ok');
         else if (j.fallito) chatStato(j.fallito.seq, j.fallito.a, 'fallito');
         else if (j.lora && typeof j.lora === 'object') { CHAT.lora[j.lora.id] = Object.assign({}, j.lora, { _t: j._t }); }
-        else if (j.pat) { BANCO.avvio = 'LORA'; chatIo(j); }
         else if (j.hqtag) { BANCO.hqtag = BANCO.hqtag || {}; j.hqtag.forEach(function (t) { BANCO.hqtag[t.f + t.n] = { f: t.f, n: t.n, rssi: t.rssi, _t: j._t }; }); }
         else if (j.hq) { BANCO.hq = j; BANCO.avvio = 'HQ'; }
         else if (j.tag != null) { if (!BANCO.avvio) BANCO.avvio = 'TAG'; BANCO.tag = j; }
@@ -1597,6 +1597,8 @@
     };
     return k;
   }
+  // un dispositivo nuovo collegato: dimentico chi c'era prima (ruolo, bandiere, HQ, tag, LoRa)
+  function bancoAzzera() { BANCO.avvio = null; BANCO.versione = null; BANCO.hq = null; BANCO.tag = null; BANCO.band = {}; BANCO.pat = {}; BANCO.hqtag = null; CHAT.io = null; }
   function bancoLinee() { var buf = ''; return function (pezzo) { buf += pezzo; var i; while ((i = buf.indexOf('\n')) >= 0) { bancoRiga(buf.slice(0, i)); buf = buf.slice(i + 1); } if (buf.length > 40000) { bancoRiga(buf); buf = ''; } }; }
   function bancoScollega() {
     var b = BANCO;
@@ -1609,7 +1611,7 @@
     if (!navigator.serial) { toast('USB non disponibile: serve Chrome o Edge su computer'); return; }
     navigator.serial.requestPort().then(function (porta) {
       return porta.open({ baudRate: 115200 }).then(function () {
-        BANCO.porta = porta; BANCO.via = 'USB'; bancoRiga('-- collegato via USB', '##');
+        bancoAzzera(); BANCO.porta = porta; BANCO.via = 'USB'; bancoRiga('-- collegato via USB', '##');
         // DTR/RTS a riposo: la scheda non resta in reset
         return porta.setSignals({ dataTerminalReady: false, requestToSend: false }).catch(function () {}).then(function () {
           var dec = new TextDecoder(), linee = bancoLinee();
@@ -1644,7 +1646,7 @@
           for (var i = 0; i < b.length; i += 20) (function (pz) { p = p.then(function () { return cc[1].writeValueWithoutResponse ? cc[1].writeValueWithoutResponse(pz) : cc[1].writeValue(pz); }); })(b.slice(i, i + 20));
           return p;
         };
-        return cc[0].startNotifications().then(function () { BANCO.via = 'BT'; bancoRiga('-- collegato via Bluetooth a ' + dev.name, '##'); });
+        return cc[0].startNotifications().then(function () { bancoAzzera(); BANCO.via = 'BT'; bancoRiga('-- collegato via Bluetooth a ' + dev.name, '##'); });
       });
     }).catch(function (e) { if (e && e.name !== 'NotFoundError') errore(e); });
   }
