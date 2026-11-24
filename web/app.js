@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.83';
+  var VERSIONE = '0.84';
   var S = window.S40, F = window.S40F;
   var TOOL = !!window.AC_TOOL;   // dentro l'app Android «Officina»: niente account, solo dispositivi
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
@@ -312,17 +312,42 @@
       if (r === 'LORA') {
         var k3 = el('div', 'carta'); k3.appendChild(el('h3', null, '📡 LoRa team leader ' + (id || '')));
         var io = CHAT.io || {};
-        var nm = el('input'); nm.value = io.nome || ''; nm.maxLength = 28; nm.placeholder = 'es. TAURI·WHIPLASH';
         var fz2 = select([['-', 'Nessuna'], ['blu', 'BLU'], ['rossa', 'ROSSI']], io.f || '-');
-        k3.appendChild(campoForm('Nome', nm)); k3.appendChild(campoForm('Fazione', fz2));
-        k3.appendChild(bottone('Salva sul LoRa', 'accent', function () { bancoInvia('chi ' + fz2.value + ' ' + nm.value.trim().toUpperCase()); toast('Salvato sul LoRa'); }));
+        var squadre = []; (D.team || []).forEach(function (t) { (t.squadre || []).forEach(function (q) { squadre.push({ t: t, sq: q, k: t.id + '|' + q.id }); }); });
+        if (!TOOL && squadre.length) {
+          // squadra dall'anagrafica: nome sul LoRa e lista dei tag dei suoi giocatori, tutto in automatico
+          var ora = squadraDaNome(io.nome), kOra = ora ? ora.t.id + '|' + ora.sq.id : '';
+          var ssq = select([['', ora || !io.nome ? 'Scegli team e squadra…' : 'Nome a mano: ' + io.nome]].concat(squadre.map(function (x) { return [x.k, teamCorto(x.t) + ' · ' + x.sq.nome]; })), kOra);
+          k3.appendChild(campoForm('Squadra', ssq)); k3.appendChild(campoForm('Fazione', fz2));
+          var info = el('small', 'hint', ora ? 'Legato a ' + teamCorto(ora.t) + ' · ' + ora.sq.nome + '. Operatori vicini adesso: ' + (io.op != null ? io.op : '?') + ' · tag in lista: ' + (io.sq ? io.sq.split(',').length : 0) : 'Scegli la squadra: il LoRa prende il nome e i tag dei suoi giocatori.');
+          k3.appendChild(info);
+          var lega = function (x) {
+            info.textContent = 'Cerco i giocatori di ' + x.sq.nome + ' e i loro beacon…';
+            tagDiSquadra(x.t.id, x.sq.id).then(function (r) {
+              if (!r) { info.textContent = 'Non riesco a leggere l\'anagrafica (sei online?)'; return; }
+              var f = fz2.value !== '-' ? fz2.value : (r.f || '-'); fz2.value = f;
+              bancoInvia('chi ' + f + ' ' + nomeLoraDi(x.t, x.sq));
+              setTimeout(function () { bancoInvia('squadra ' + (r.tag || '-')); }, 400);
+              info.textContent = x.sq.nome + ': ' + r.giocatori + ' giocatori, ' + r.conBeacon + ' con il beacon' + (r.tag ? ' (' + r.tag + ')' : '') + '.';
+              toast(r.conBeacon ? 'LoRa legato a ' + x.sq.nome + ': conta ' + r.conBeacon + ' operatori' : 'Nessun giocatore di ' + x.sq.nome + ' ha un beacon assegnato');
+            });
+          };
+          ssq.onchange = function () { var x = squadre.filter(function (y) { return y.k === ssq.value; })[0]; if (x) lega(x); };
+          fz2.onchange = function () { bancoInvia('chi ' + fz2.value + ' ' + (io.nome || '')); };
+          var sqr = el('div', 'riga2');
+          if (ora) sqr.appendChild(bottone('↻ Aggiorna i tag dalla squadra', 'piccolo', function () { lega(ora); }));
+          k3.appendChild(sqr);
+        } else {
+          var nm = el('input'); nm.value = io.nome || ''; nm.maxLength = 28; nm.placeholder = 'es. TAURI·WHIPLASH';
+          k3.appendChild(campoForm('Nome', nm)); k3.appendChild(campoForm('Fazione', fz2));
+          k3.appendChild(bottone('Salva sul LoRa', 'accent', function () { bancoInvia('chi ' + fz2.value + ' ' + nm.value.trim().toUpperCase()); toast('Salvato sul LoRa'); }));
+        }
+        // lista a mano: solo per prove
+        var dm = el('details'); dm.appendChild(el('summary', null, 'Lista dei tag a mano (prove)'));
         var sqi = el('input'); sqi.value = io.sq || ''; sqi.placeholder = 'es. r1,r2,r5'; sqi.autocapitalize = 'off';
-        k3.appendChild(campoForm('Tag della squadra (per contare gli operatori vicini)', sqi));
-        k3.appendChild(el('small', 'hint', 'Operatori vicini adesso: ' + (io.op != null ? io.op : '?') + '. Senza lista conta tutti i tag della fazione.'));
-        var sqr = el('div', 'riga2');
-        sqr.appendChild(bottone('Salva la lista', 'piccolo', function () { bancoInvia('squadra ' + (sqi.value.replace(/\s+/g, '') || '-')); toast('Lista salvata sul LoRa'); }));
-        if (!TOOL) sqr.appendChild(bottone('Prendi dalla mia squadra', 'piccolo', function () { tagSquadraMia().then(function (t) { if (!t) { toast('Nessun tag assegnato ai giocatori della tua squadra'); return; } sqi.value = t; bancoInvia('squadra ' + t); toast('Lista: ' + t); }); }));
-        k3.appendChild(sqr);
+        dm.appendChild(campoForm('Tag', sqi));
+        dm.appendChild(bottone('Salva la lista', 'piccolo', function () { bancoInvia('squadra ' + (sqi.value.replace(/\s+/g, '') || '-')); toast('Lista salvata sul LoRa'); }));
+        k3.appendChild(dm);
         var g3 = el('div', 'off-tasti');
         g3.appendChild(bottone('📨 Manda la posizione', 'piccolo', function () { bancoInvia('invia'); }));
         [['🌑 Notte scurissima', 1], ['🌙 Notte media', 2], ['🌘 Notte chiara', 3]].forEach(function (x) { g3.appendChild(bottone(x[0], 'piccolo', function () { bancoInvia('livello ' + x[1]); toast('Guarda lo schermo: se non si legge al buio, prova quella più chiara'); })); });
@@ -1452,24 +1477,38 @@
     for (var i = CHAT.msg.length - 1; i >= 0; i--) { var m = CHAT.msg[i]; if (m.mio && m.seq === seq && m.a === altro) { m.stato = stato; break; } }
     chatSalva(); if (stato === 'fallito') toast('📡 Messaggio non consegnato: il destinatario non risponde');
   }
-  // tag dei giocatori della mia squadra (dal registro dei beacon), es. "r1,r4,r7": il LoRa conta gli operatori vicini
-  function tagSquadraMia() {
-    var me = S.stato().me || {};
-    if (TOOL || !me.team || !me.squadra) return Promise.resolve(null);
-    return Promise.all([S.leggiMembri(me.team), new Promise(function (ok) { var st = null, fatto = false; st = S.ascoltaBeacon(function (r) { if (fatto) return; fatto = true; setTimeout(function () { try { st && st(); } catch (e) {} }, 0); ok(r || []); }); setTimeout(function () { if (!fatto) { fatto = true; ok([]); } }, 8000); })])
-      .then(function (x) {
-        var uids = {}; (x[0] || []).forEach(function (m) { if (m.squadra === me.squadra) uids[m.id || m.uid] = 1; });
-        var t = (x[1] || []).filter(function (b) { return b.uid && uids[b.uid] && (b.f === 'blu' || b.f === 'rossa'); }).map(function (b) { return (b.f === 'blu' ? 'b' : 'r') + b.n; });
-        return t.sort().join(',');
-      }).catch(function () { return null; });
+  // ---- LoRa team leader legato all'anagrafica: il nome sul LoRa è "TEAM·SQUADRA" e da lì si risale alla squadra
+  function teamCorto(t) { return (t.nome || '').replace(/^ASD\s+/i, '').split(/\s+/)[0].toUpperCase(); }
+  function nomeLoraDi(t, sq) { return (teamCorto(t) + '·' + (sq.nome || '')).toUpperCase().slice(0, 28); }
+  function squadraDaNome(nome) {
+    var n = String(nome || '').toUpperCase().replace(/\s*[·|\/]\s*|\s+-\s+|-/, '·'), i = n.indexOf('·');
+    if (i < 0) return null;
+    var tn = n.slice(0, i).trim(), sn = n.slice(i + 1).trim(), trovato = null;
+    (D.team || []).forEach(function (t) { if (trovato || teamCorto(t) !== tn) return; (t.squadre || []).forEach(function (q) { if (!trovato && (q.nome || '').toUpperCase().trim() === sn) trovato = { t: t, sq: q }; }); });
+    return trovato;
   }
+  function beaconUnaVolta() { return new Promise(function (ok) { var st = null, fatto = false; st = S.ascoltaBeacon(function (r) { if (fatto) return; fatto = true; setTimeout(function () { try { st && st(); } catch (e) {} }, 0); ok(r || []); }); setTimeout(function () { if (!fatto) { fatto = true; ok([]); } }, 8000); }); }
+  // giocatori segnati in quella squadra e i loro beacon: { tag: "r1,r4,r7", giocatori: 6, conBeacon: 3, f: 'rossa'|'blu'|'' }
+  function tagDiSquadra(tid, sqid) {
+    if (TOOL || !tid || !sqid) return Promise.resolve(null);
+    return Promise.all([S.leggiMembri(tid), beaconUnaVolta()]).then(function (x) {
+      var uids = {}, nG = 0; (x[0] || []).forEach(function (m) { if (m.squadra === sqid) { uids[m.id || m.uid] = 1; nG++; } });
+      var bb = (x[1] || []).filter(function (b) { return b.uid && uids[b.uid] && (b.f === 'blu' || b.f === 'rossa'); });
+      var fz = {}; bb.forEach(function (b) { fz[b.f] = 1; });
+      var chi = {}; bb.forEach(function (b) { chi[b.uid] = 1; });
+      return { tag: bb.map(function (b) { return (b.f === 'blu' ? 'b' : 'r') + b.n; }).sort().join(','), giocatori: nG, conBeacon: Object.keys(chi).length, f: Object.keys(fz).length === 1 ? Object.keys(fz)[0] : '' };
+    }).catch(function () { return null; });
+  }
+  function tagSquadraMia() { var me = S.stato().me || {}; return tagDiSquadra(me.team, me.squadra).then(function (r) { return r && r.tag; }); }
+  // per un LoRa che si collega: la squadra scritta nel suo nome, altrimenti quella di chi ha il telefono
+  function tagPerLora(nome) { var q = squadraDaNome(nome); return q ? tagDiSquadra(q.t.id, q.sq.id).then(function (r) { return r && r.tag; }) : tagSquadraMia(); }
   // il LoRa collegato dice chi è: se non è come lo vuole il telefono, glielo diciamo
   function chatIo(j) {
     var nuovo = !CHAT.io || CHAT.io.id !== j.pat;
     CHAT.io = { id: j.pat, nome: j.nome, f: j.f === 'nessuna' ? '' : j.f, batt: j.batt, fix: j.fix, _t: j._t, sq: j.sq || '', op: j.op };
-    if (nuovo) tagSquadraMia().then(function (t) { if (t && CHAT.io && t !== CHAT.io.sq) bancoInvia('squadra ' + t); });
-    var v = chatVoluto();
-    if (v.f && (CHAT.io.nome !== v.nome || CHAT.io.f !== v.f) && Date.now() - CHAT.chiT > 5000) { CHAT.chiT = Date.now(); bancoInvia('chi ' + v.f + ' ' + v.nome); }
+    if (nuovo) tagPerLora(j.nome).then(function (t) { if (t && CHAT.io && t !== CHAT.io.sq) bancoInvia('squadra ' + t); });
+    var v = chatVoluto(), cc = chatConf();
+    if (v.f && (cc.nome || !j.nome) && (CHAT.io.nome !== v.nome || CHAT.io.f !== v.f) && Date.now() - CHAT.chiT > 5000) { CHAT.chiT = Date.now(); bancoInvia('chi ' + v.f + ' ' + v.nome); }
     var conn = BANCO.via === 'BT' ? BANCO.dev : BANCO.porta; if (conn && CHAT.storiaPer !== conn) { CHAT.storiaPer = conn; bancoInvia('storia'); }
   }
   // finito l'evento, i messaggi passano nello storico (così nessuno legge la fazione avversaria durante il gioco)
