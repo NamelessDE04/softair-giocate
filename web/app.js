@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.81';
+  var VERSIONE = '0.82';
   var S = window.S40, F = window.S40F;
   var TOOL = !!window.AC_TOOL;   // dentro l'app Android «Officina»: niente account, solo dispositivi
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };
@@ -272,7 +272,7 @@
     function disegna() {
       var r = ruolo(), id = idCollegato(r);
       var cc = b.via === 'BT' ? b.dev : b.porta; if (b.via && r === '?' && chiesto !== cc) { chiesto = cc; setTimeout(function () { bancoInvia('info'); }, 600); }
-      var f = JSON.stringify([b.via, r, id, Object.keys(b.band).sort(), sel, CHAT.io && [CHAT.io.nome, CHAT.io.f], b.versione, Object.keys(CHAT.lora).length, Object.keys(REG).length]);
+      var f = JSON.stringify([b.via, r, id, Object.keys(b.band).sort(), sel, CHAT.io && [CHAT.io.nome, CHAT.io.f, CHAT.io.sq, CHAT.io.op], b.versione, Object.keys(CHAT.lora).length, Object.keys(REG).length]);
       if (term.open) tpre.textContent = b.righe.slice(-40).join('\n');
       if (f === firma) return; firma = f;
       if (r && r !== '?') { ricorda(id, r); salvaReg(); }
@@ -316,6 +316,13 @@
         var fz2 = select([['-', 'Nessuna'], ['blu', 'BLU'], ['rossa', 'ROSSI']], io.f || '-');
         k3.appendChild(campoForm('Nome', nm)); k3.appendChild(campoForm('Fazione', fz2));
         k3.appendChild(bottone('Salva sul LoRa', 'accent', function () { bancoInvia('chi ' + fz2.value + ' ' + nm.value.trim().toUpperCase()); toast('Salvato sul LoRa'); }));
+        var sqi = el('input'); sqi.value = io.sq || ''; sqi.placeholder = 'es. r1,r2,r5'; sqi.autocapitalize = 'off';
+        k3.appendChild(campoForm('Tag della squadra (per contare gli operatori vicini)', sqi));
+        k3.appendChild(el('small', 'hint', 'Operatori vicini adesso: ' + (io.op != null ? io.op : '?') + '. Senza lista conta tutti i tag della fazione.'));
+        var sqr = el('div', 'riga2');
+        sqr.appendChild(bottone('Salva la lista', 'piccolo', function () { bancoInvia('squadra ' + (sqi.value.replace(/\s+/g, '') || '-')); toast('Lista salvata sul LoRa'); }));
+        if (!TOOL) sqr.appendChild(bottone('Prendi dalla mia squadra', 'piccolo', function () { tagSquadraMia().then(function (t) { if (!t) { toast('Nessun tag assegnato ai giocatori della tua squadra'); return; } sqi.value = t; bancoInvia('squadra ' + t); toast('Lista: ' + t); }); }));
+        k3.appendChild(sqr);
         var g3 = el('div', 'off-tasti');
         g3.appendChild(bottone('📨 Manda la posizione', 'piccolo', function () { bancoInvia('invia'); }));
         [['🌑 Notte scurissima', 1], ['🌙 Notte media', 2], ['🌘 Notte chiara', 3]].forEach(function (x) { g3.appendChild(bottone(x[0], 'piccolo', function () { bancoInvia('livello ' + x[1]); toast('Guarda lo schermo: se non si legge al buio, prova quella più chiara'); })); });
@@ -1445,9 +1452,22 @@
     for (var i = CHAT.msg.length - 1; i >= 0; i--) { var m = CHAT.msg[i]; if (m.mio && m.seq === seq && m.a === altro) { m.stato = stato; break; } }
     chatSalva(); if (stato === 'fallito') toast('📡 Messaggio non consegnato: il destinatario non risponde');
   }
+  // tag dei giocatori della mia squadra (dal registro dei beacon), es. "r1,r4,r7": il LoRa conta gli operatori vicini
+  function tagSquadraMia() {
+    var me = S.stato().me || {};
+    if (TOOL || !me.team || !me.squadra) return Promise.resolve(null);
+    return Promise.all([S.leggiMembri(me.team), new Promise(function (ok) { var st = null, fatto = false; st = S.ascoltaBeacon(function (r) { if (fatto) return; fatto = true; setTimeout(function () { try { st && st(); } catch (e) {} }, 0); ok(r || []); }); setTimeout(function () { if (!fatto) { fatto = true; ok([]); } }, 8000); })])
+      .then(function (x) {
+        var uids = {}; (x[0] || []).forEach(function (m) { if (m.squadra === me.squadra) uids[m.id || m.uid] = 1; });
+        var t = (x[1] || []).filter(function (b) { return b.uid && uids[b.uid] && (b.f === 'blu' || b.f === 'rossa'); }).map(function (b) { return (b.f === 'blu' ? 'b' : 'r') + b.n; });
+        return t.sort().join(',');
+      }).catch(function () { return null; });
+  }
   // il LoRa collegato dice chi è: se non è come lo vuole il telefono, glielo diciamo
   function chatIo(j) {
-    CHAT.io = { id: j.pat, nome: j.nome, f: j.f === 'nessuna' ? '' : j.f, batt: j.batt, fix: j.fix, _t: j._t };
+    var nuovo = !CHAT.io || CHAT.io.id !== j.pat;
+    CHAT.io = { id: j.pat, nome: j.nome, f: j.f === 'nessuna' ? '' : j.f, batt: j.batt, fix: j.fix, _t: j._t, sq: j.sq || '', op: j.op };
+    if (nuovo) tagSquadraMia().then(function (t) { if (t && CHAT.io && t !== CHAT.io.sq) bancoInvia('squadra ' + t); });
     var v = chatVoluto();
     if (v.f && (CHAT.io.nome !== v.nome || CHAT.io.f !== v.f) && Date.now() - CHAT.chiT > 5000) { CHAT.chiT = Date.now(); bancoInvia('chi ' + v.f + ' ' + v.nome); }
     var conn = BANCO.via === 'BT' ? BANCO.dev : BANCO.porta; if (conn && CHAT.storiaPer !== conn) { CHAT.storiaPer = conn; bancoInvia('storia'); }
