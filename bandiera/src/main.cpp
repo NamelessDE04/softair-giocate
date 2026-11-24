@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.6.0"
+#define VERSIONE "1.7.0"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -1195,8 +1195,72 @@ void inviaPos() {
   Serial.printf("[%s] posizione #%u %s -> %s\n", idTesto(mioId).c_str(), seq, ok ? (String(la / 1e6, 6) + "," + String(lo / 1e6, 6)).c_str() : "senza GPS", ultimoEsito == RADIOLIB_ERR_NONE ? "inviata" : "ERRORE LoRa");
 }
 String nomeVisto() { return mioNome.length() ? mioNome : "LoRa " + idTesto(mioId); }
+// ---- operatori della squadra vicini: il LoRa ascolta i tag e conta quelli della sua squadra (lista dall'app: "squadra r1,r2,r5")
+struct TagSq { uint8_t f; uint16_t n; };
+#define MAX_SQ 40
+TagSq sqTag[MAX_SQ]; int nSq = 0; String sqTesto = "";
+struct VistoPat { uint8_t f; uint16_t n; int rssi; uint32_t t; };
+VistoPat vistiPat[60]; int nVistiPat = 0; portMUX_TYPE muxPat = portMUX_INITIALIZER_UNLOCKED;
+uint8_t uuidPat[16]; int sogliaOp = -90;   // "vicini": tag sentiti almeno così forte (comando "vicini -90")
+void leggiSquadra(const String &t) {
+  nSq = 0; sqTesto = t; String l = t + ","; int da = 0, ix;
+  while ((ix = l.indexOf(',', da)) >= 0 && nSq < MAX_SQ) {
+    String x = l.substring(da, ix); x.trim(); x.toLowerCase(); da = ix + 1;
+    if (x.length() >= 2 && (x[0] == 'b' || x[0] == 'r')) { sqTag[nSq].f = x[0] == 'b' ? 1 : 2; sqTag[nSq].n = x.substring(1).toInt(); nSq++; }
+  }
+}
+class AscoltoPat : public NimBLEAdvertisedDeviceCallbacks {
+  void onResult(NimBLEAdvertisedDevice *d) override {
+    uint8_t u[16]; uint16_t ma, mi;
+    if (!trovaIbeacon(d->getPayload(), d->getPayloadLength(), u, ma, mi) || memcmp(u, uuidPat, 16) || (ma != 1 && ma != 2)) return;
+    int r = d->getRSSI(); uint32_t ora = millis();
+    portENTER_CRITICAL(&muxPat);
+    int i = 0; for (; i < nVistiPat; i++) if (vistiPat[i].f == ma && vistiPat[i].n == mi) break;
+    if (i == nVistiPat && nVistiPat < 60) nVistiPat++;
+    if (i < 60) { vistiPat[i].f = ma; vistiPat[i].n = mi; vistiPat[i].rssi = r; vistiPat[i].t = ora; }
+    portEXIT_CRITICAL(&muxPat);
+  }
+};
+// quanti operatori vicini: quelli della lista della squadra; senza lista, quelli della mia fazione
+int operatori() {
+  int c = 0; uint32_t ora = millis();
+  portENTER_CRITICAL(&muxPat);
+  for (int i = 0; i < nVistiPat; i++) {
+    VistoPat &v = vistiPat[i]; if (ora - v.t > 15000 || v.rssi < sogliaOp) continue;
+    if (nSq) { for (int k = 0; k < nSq; k++) if (sqTag[k].f == v.f && sqTag[k].n == v.n) { c++; break; } }
+    else if (miaFaz && v.f == miaFaz) c++;
+  }
+  portEXIT_CRITICAL(&muxPat);
+  return c;
+}
+// schermata principale: team, squadra, operatori vicini, fazione, batteria e GPS
+void centra(const String &t, int y, int sz) { oled.setTextSize(sz); int w = t.length() * 6 * sz; oled.setCursor(max(0, (128 - w) / 2), y); oled.print(t); }
+String maiuscolo(String t) { t.toUpperCase(); return t; }
+void schermataPat(bool gpsOk) {
+  if (!haOled) return;
+  String n = mioNome; n.replace("\xC2\xB7", "|"); n.replace(" - ", "|"); n.replace("-", "|"); n.replace("/", "|");
+  int sp = n.indexOf('|'); String team = sp >= 0 ? n.substring(0, sp) : n, sq = sp >= 0 ? n.substring(sp + 1) : "";
+  team.trim(); sq.trim(); if (!team.length()) team = "LoRa " + idTesto(mioId);
+  oled.clearDisplay(); oled.setTextColor(SSD1306_WHITE);
+  centra(maiuscolo(team).substring(0, 21), 0, 1);
+  if (sq.length()) centra(maiuscolo(sq).substring(0, 21), 10, 1);
+  // operatori: numero grande + parola
+  String num = String(operatori()), par = "OPERATORI";
+  int w = num.length() * 18 + 6 + par.length() * 6, x = max(0, (128 - w) / 2);
+  oled.setTextSize(3); oled.setCursor(x, 21); oled.print(num);
+  oled.setTextSize(1); oled.setCursor(x + num.length() * 18 + 6, 30); oled.print(par);
+  centra(miaFaz == 1 ? "FAZIONE BLU" : miaFaz == 2 ? "FAZIONE ROSSA" : "FAZIONE ?", 45, 1);
+  // batteria: icona + percentuale; GPS a destra
+  uint8_t b = batteria();
+  oled.drawRect(0, 56, 16, 8, SSD1306_WHITE); oled.fillRect(16, 58, 2, 4, SSD1306_WHITE);
+  if (b != 255) oled.fillRect(2, 58, (12 * min<int>(b, 100)) / 100, 4, SSD1306_WHITE); else { oled.drawLine(4, 60, 12, 60, SSD1306_WHITE); }
+  oled.setTextSize(1); oled.setCursor(21, 56); oled.print(b == 255 ? String("USB") : String(b) + "%");
+  String g = gpsOk ? "GPS OK" : "NO GPS"; oled.setCursor(128 - g.length() * 6, 56); oled.print(g);
+  oled.display();
+}
 void stato() {   // per l'app: chi sono e come sto
-  esci("{\"pat\":\"" + idTesto(mioId) + "\",\"nome\":\"" + chatPulito(mioNome) + "\",\"f\":\"" + nomeFaz(miaFaz) + "\",\"batt\":" + String(batteria()) + ",\"fix\":" + (gps.location.isValid() && gps.location.age() < 10000 ? "true" : "false") + ",\"lora\":" + String(statoLoRa) + "}");
+  esci("{\"pat\":\"" + idTesto(mioId) + "\",\"nome\":\"" + chatPulito(mioNome) + "\",\"f\":\"" + nomeFaz(miaFaz) + "\",\"batt\":" + String(batteria()) + ",\"fix\":" + (gps.location.isValid() && gps.location.age() < 10000 ? "true" : "false") + ",\"lora\":" + String(statoLoRa) +
+       ",\"sq\":\"" + sqTesto + "\",\"op\":" + String(operatori()) + ",\"vicini\":" + String(sogliaOp) + "}");
 }
 void comandoPat(const String &c0) {
   String c = c0; c.trim(); String low = c; low.toLowerCase();
@@ -1210,6 +1274,8 @@ void comandoPat(const String &c0) {
   }
   if (low.startsWith("chat ")) { chatDaApp(c, miaFaz, nomeVisto()); return; }
   // prova a mano: "lum 0 241 64" = contrasto (0-255), precarica (1-255), VCOMH (0, 32, 48, 64). Non si salva: per trovare i valori giusti
+  if (low.startsWith("squadra")) { String t = c.substring(7); t.trim(); if (t == "-") t = ""; t.toLowerCase(); t.replace(" ", ""); leggiSquadra(t); pref.putString("sq", t); stato(); return; }
+  if (low.startsWith("vicini ")) { sogliaOp = constrain(low.substring(7).toInt(), -110, -30); pref.putInt("vicini", sogliaOp); stato(); return; }
   if (low.startsWith("lum ")) {
     long c1 = 0, p1 = 241, v1 = 64; sscanf(low.c_str() + 4, "%ld %ld %ld", &c1, &p1, &v1);
     c1 = constrain(c1, 0, 255); p1 = constrain(p1, 1, 255); v1 = constrain(v1, 0, 112);
@@ -1224,7 +1290,7 @@ void comandoPat(const String &c0) {
   if (low == "invia") { ultimo = millis(); inviaPos(); return; }
   if (low == "stato" || low == "info") { stato(); return; }
   if (low == "riavvia") { delay(200); ESP.restart(); }
-  Serial.println("comandi: chi blu|rossa|- <nome>, chat g|f|d <id|-> <testo>, notte 1|0, storia, invia, stato, riavvia");
+  Serial.println("comandi: chi blu|rossa|- <team·squadra>, squadra r1,r2,r5|-, vicini -90, chat g|f|d <id|-> <testo>, notte 1|0, livello 1-3, lum c p v, storia, invia, stato, riavvia");
 }
 void setup() {
   avvioComune("PATTUGLIA");
@@ -1232,7 +1298,11 @@ void setup() {
   pref.begin("ac", false);
   miaFaz = pref.getUChar("faz", 0); mioNome = pref.getString("nome", "");
   notte = pref.getBool("notte", false); livNotte = pref.getUChar("livNotte", 1); contrasto(); sveglia(60000);
+  leggiSquadra(pref.getString("sq", "")); sogliaOp = pref.getInt("vicini", -90);
   avviaBle("AC-LORA-" + idTesto(mioId));
+  // ascolto dei tag (operatori vicini): finestra piccola, per non consumare troppo
+  leggiUuid(TAG_UUID, uuidPat);
+  { NimBLEScan *sc = NimBLEDevice::getScan(); sc->setAdvertisedDeviceCallbacks(new AscoltoPat(), true); sc->setActiveScan(false); sc->setInterval(200); sc->setWindow(50); sc->setMaxResults(0); sc->setDuplicateFilter(false); sc->start(0, nullptr, false); }
   chatCb = [](const uint8_t *p, size_t n, float rssi) {
     if (!chatPerMe(p, miaFaz)) return;
     if (chatConferme(p, miaFaz, nomeVisto()) || chatGiaVistoUltimo) return;
@@ -1305,17 +1375,13 @@ void loop() {
              rigaN(msgTesto, pg * 3), rigaN(msgTesto, pg * 3 + 1), rigaN(msgTesto, pg * 3 + 2));
     } else {
       if (haOled) oled.invertDisplay(false);
-      uint32_t prossimo = attesa - min<uint32_t>(millis() - ultimo, attesa);
-      scrivi(nomeVisto().substring(0, 15) + " " + battTesto(batteria()),
-             millis() < inviatoFino ? String(ultimoEsito == RADIOLIB_ERR_NONE ? "INVIATA" : "ERR LoRa") : ok ? "GPS OK" : "NO GPS",
-             ok ? String(gps.location.lat(), 5) + " " + String(gps.location.lng(), 5) : String("cerco i satelliti... cielo aperto"),
-             String(miaFaz == 1 ? "BLU" : miaFaz == 2 ? "ROSSI" : "fazione ?") + " · BT " + (bleConnesso ? "telefono ok" : "AC-LORA-" + idTesto(mioId)),
-             ok ? "#" + String(seq) + " " + loraTesto() + " prossima " + String(prossimo / 1000) + "s" : String("posizione: aspetto il GPS"));
+      schermataPat(ok);
     }
   }
   String r; if (leggiRiga(r)) comandoPat(r);
   righeBle(comandoPat);
   static uint32_t st10 = 0; if (millis() - st10 > 10000) { st10 = millis(); stato(); }
+  static uint32_t scanT = 0; if (millis() - scanT > 2000) { scanT = millis(); NimBLEScan *sc = NimBLEDevice::getScan(); if (sc->isScanning()) sc->stop(); sc->start(0, nullptr, false); }
   delay(10);
 }
 #endif
