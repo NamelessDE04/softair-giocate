@@ -3,7 +3,7 @@
 (function () {
   'use strict';
 
-  var VERSIONE = '0.84';
+  var VERSIONE = '0.85';
   var S = window.S40, F = window.S40F;
   var TOOL = !!window.AC_TOOL;   // dentro l'app Android «Officina»: niente account, solo dispositivi
   var COLORI = { blu: '#2f7fd6', rossa: '#d23a2c' };

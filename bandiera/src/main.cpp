@@ -31,7 +31,7 @@
 #error "Scegli l'ambiente bandiera, hq, tag, pattuglia o iniettore in PlatformIO"
 #endif
 
-#define VERSIONE "1.7.1"
+#define VERSIONE "1.7.2"
 
 // ---- pin del T-Beam
 #define LORA_SCK   5
@@ -498,10 +498,11 @@ void conta() {
 void passoConquista(float dt) {
   uint8_t b0 = blu, r0 = rossi; bool c0 = contesa;
   conta();
-  contesa = blu && rossi;
+  // conta la differenza: 2 rossi e 1 blu = i rossi avanzano come se fossero 1; pari = contesa, tutto fermo
+  contesa = blu && blu == rossi;
   if (b0 != blu || r0 != rossi || c0 != contesa) urgente = true;
   if (contesa) return;
-  uint8_t X = blu ? 1 : rossi ? 2 : 0, n = blu ? blu : rossi;
+  uint8_t X = blu > rossi ? 1 : rossi > blu ? 2 : 0, n = blu > rossi ? blu - rossi : rossi - blu;
   if (!X) { if (prog > 0) { prog -= dt / 2; if (prog <= 0) { prog = 0; progF = 0; } } return; }
   if (X == owner) { if (prog > 0) { prog -= dt; if (prog <= 0) { prog = 0; progF = 0; } } return; }
   if (progF != X) { progF = X; prog = 0; urgente = true; Serial.printf("Conquista iniziata: %s\n", nomeFaz(X)); }
@@ -619,6 +620,15 @@ void invia() {
 }
 
 // display: in alto grandi quanti blu e quanti rossi ci sono, sotto di chi è la bandiera, la barra della conquista e due righe di note
+// batteria: icona + percentuale (o USB). Ritorna dove finisce il testo
+int iconaBatt(int x, int y) {
+  uint8_t b = batteria();
+  oled.drawRect(x, y, 16, 8, SSD1306_WHITE); oled.fillRect(x + 16, y + 2, 2, 4, SSD1306_WHITE);
+  if (b != 255) oled.fillRect(x + 2, y + 2, (12 * min<int>(b, 100)) / 100, 4, SSD1306_WHITE); else oled.drawLine(x + 4, y + 4, x + 12, y + 4, SSD1306_WHITE);
+  String t = b == 255 ? String("USB") : String(b) + "%";
+  oled.setTextSize(1); oled.setCursor(x + 21, y); oled.print(t);
+  return x + 21 + t.length() * 6;
+}
 void centrato(const String &t, int y, int dim) { int w = t.length() * 6 * dim; oled.setTextSize(dim); oled.setCursor(max(0, (128 - w) / 2), y); oled.print(t); }
 String fa(uint32_t da) { uint32_t s = (millis() - da) / 1000; return s < 60 ? String(s) + "s fa" : String(s / 60) + "min fa"; }
 void aggiornaDisplay() {
@@ -640,21 +650,18 @@ void aggiornaDisplay() {
     // POSIZIONE: UTM grande (come la legge il Garmin), sotto i gradi o l'avviso di distanza
     bool fis = posFissa(), ok = fis || gps.location.isValid();
     double la = fis ? mLat : gps.location.lat(), lo = fis ? mLon : gps.location.lng();
-    oled.setTextSize(1); oled.setCursor(0, 0);
-    oled.print("POSIZIONE " + idTesto(mioId) + " s" + String(gps.satellites.value()));
-    if (!ok) { centrato("NO GPS", 20, 2); centrato("cielo aperto, attendi", 44, 1); centrato("pulsante: invio stato", 56, 1); oled.display(); return; }
+    centrato("BANDIERA", 0, 1);
+    iconaBatt(0, 56);
+    if (!ok) { centrato("NO GPS", 24, 2); oled.display(); return; }
     Utm u = aUtm(la, lo); char e[12], n[12]; snprintf(e, sizeof(e), "E%07ld", (long)lround(u.E)); snprintf(n, sizeof(n), "N%07ld", (long)lround(u.N));
-    oled.setCursor(0, 10); oled.print("UTM " + String(u.zona) + String(u.banda) + (fis ? "  media ok" : "  media " + String(nPos) + "/10"));
-    oled.setTextSize(2); oled.setCursor(0, 20); oled.print(e); oled.setCursor(0, 37); oled.print(n);
-    oled.setTextSize(1); oled.setCursor(0, 56);
-    if (dV >= 0 && (ora / 2500) % 2) oled.print(vicina ? "TROPPO VICINA " + String(dV) + "m!" : "Altra band. " + String(dV) + " m ok");
-    else oled.print(String(la, 5) + " " + String(lo, 5));
+    if (vicina && (ora / 2000) % 2) centrato("TROPPO VICINA " + String(dV) + "m!", 10, 1);
+    else centrato("UTM WGS84 " + String(u.zona) + String(u.banda), 10, 1);
+    centrato(e, 20, 2); centrato(n, 37, 2);
     oled.display(); return;
   }
   // persone dentro
   oled.setTextSize(2); oled.setCursor(0, 0); oled.print("B" + String(blu));
   String r = "R" + String(rossi); oled.setCursor(128 - r.length() * 12, 0); oled.print(r);
-  oled.setTextSize(1); centrato(String(seq), 4, 1);
   // di chi è
   if (owner) { oled.fillRect(0, 17, 128, 17, SSD1306_WHITE); oled.setTextColor(SSD1306_BLACK); centrato(owner == 1 ? "BLU" : "ROSSA", 18, 2); oled.setTextColor(SSD1306_WHITE); }
   else { oled.drawRect(0, 17, 128, 17, SSD1306_WHITE); centrato("NEUTRA", 18, 2); }
@@ -668,18 +675,24 @@ void aggiornaDisplay() {
   // note: prima il mortaio (per 3 minuti), poi cosa sta succedendo
   String n1;
   if (colpoDa && ora - colpoDa < 180000UL) n1 = colpoTipo == 1 ? "MORTAIO: colpita " + fa(colpoDa) : colpoTipo == 2 ? "Mortaio: " + String(colpoDist) + "m " + fa(colpoDa) : "Mortaio lontano " + String(colpoDist) + "m";
-  else if (contesa) n1 = "CONTESA: tutto fermo";
-  else if (progF && prog > 0) n1 = String(progF == 1 ? "Conquistano i BLU" : "Conquistano i ROSSI");
-  else if (owner) n1 = String("Tenuta dai ") + (owner == 1 ? "BLU" : "ROSSI");
-  else n1 = (blu || rossi) ? String("...") : String("Nessuno nell'area");
+  else if (contesa) n1 = "CONTESA";
+  else if (progF && prog > 0) n1 = owner ? "SOTTO ATTACCO" : "IN CONQUISTA";
+  else if (owner) n1 = "CONQUISTATA";
+  else n1 = "";
   // colpiti dal mortaio che sono qui: non contano
   String mq; portENTER_CRITICAL(&muxTag);
   for (int i = 0; i < nTag; i++) if (ora - tags[i].visto < validoMs && tags[i].rssi >= soglia && morto(tags[i].major, tags[i].minor)) mq += String(tags[i].major == 1 ? " B" : " R") + String(tags[i].minor);
   portEXIT_CRITICAL(&muxTag);
   if (mq.length() && (ora / 3000) % 2) n1 = "Colpiti:" + mq;
   if (vicina && (ora / 2000) % 2) n1 = "TROPPO VICINA " + String(dV) + "m!";
-  oled.setCursor(0, 48); oled.print(n1);
-  oled.setCursor(0, 57); oled.print(statoLoRa ? diagnosi : gpsTesto() + " " + loraTesto() + " " + battTesto(batteria()) + (muto ? " MUTO" : ""));
+  centrato(n1, 47, 1);
+  if (statoLoRa) { oled.setCursor(0, 56); oled.print(diagnosi); }
+  else {
+    int x = iconaBatt(0, 56);
+    String g = posFissa() || gps.location.isValid() ? "GPS OK" : "NO GPS";
+    oled.setCursor(x + 6, 56); oled.print(g);
+    if (muto) { oled.setCursor(128 - 4 * 6, 56); oled.print("MUTO"); }
+  }
   oled.display();
 }
 

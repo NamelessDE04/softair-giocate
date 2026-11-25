@@ -63,11 +63,14 @@
       campo.punti.forEach(function (p) {
         if (p.tipo === 'mob') return;
         var pres = presenti[p.id], qui = Object.keys(pres).filter(function (s) { return pres[s] > 0 && squadre.indexOf(s) >= 0; });
-        conteso[p.id] = qui.length > 1;
-        if (qui.length > 1) return;                       // conteso: tutto fermo
+        // conta la differenza: 2 rossi e 1 blu = i rossi avanzano come se fossero 1; pari = conteso, tutto fermo
+        qui.sort(function (a, b) { return pres[b] - pres[a]; });
+        var vantaggio = qui.length ? pres[qui[0]] - (qui.length > 1 ? pres[qui[1]] : 0) : 0;
+        conteso[p.id] = qui.length > 1 && vantaggio === 0;
+        if (conteso[p.id]) return;                       // conteso: tutto fermo
         var pr = prog[p.id];
-        if (qui.length === 1) {
-          var X = qui[0], n = pres[X];
+        if (qui.length >= 1) {
+          var X = qui[0], n = vantaggio;
           if (owner[p.id] === X) { if (pr && pr.team !== X) { pr.v -= PASSO; if (pr.v <= 0) delete prog[p.id]; } return; }
           if (!attaccabile(X, p.id) || n < R.minGiocatori) return;
           var rate = Math.min(2, 1 + 0.5 * (n - 1));
